@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kgweave"
+version = "0.1.0"
+description = "Knowledge graph subsystem: entity extraction, graph storage, community detection, query expansion."
+requires-python = ">=3.10"
+dependencies = [
+  "networkx",
+  "pydantic>=2.0",
+  "orjson",
+  "pyyaml",
+  "tree-sitter-python>=0.23.0",
+  "temporalio>=1.5",
+]
+
+[project.optional-dependencies]
+neo4j = ["neo4j>=5"]
+gliner = ["gliner"]
+community = ["leidenalg", "python-igraph"]
+dev = [
+  "pytest",
+  "pytest-asyncio>=0.23",
+  "pytest-mock",
+  "ruff",
+  "mypy",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

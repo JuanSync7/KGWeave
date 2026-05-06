@@ -1,0 +1,69 @@
+# syntax=docker/dockerfile:1
+# KGWeave Temporal worker — runs the Phase 2b knowledge-graph activities
+# dispatched by RagWeave on the kgweave-default task queue.
+#
+# Slim by design: no Weaviate client, no embedder, no torch. The worker
+# only needs networkx (graph), pydantic (contract), temporalio (transport),
+# and the optional GLiNER/leidenalg extras enabled by build args.
+#
+# --- Builder stage ---
+FROM python:3.11-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# uv: project standard (memory: prefer uv over pip)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy package metadata first so layer caches survive source edits
+COPY pyproject.toml /app/pyproject.toml
+COPY src /app/src
+
+# Optional extras toggled at build time. Default: community + neo4j off,
+# GLiNER off (regex extractor only). Enable with:
+#   --build-arg KGWEAVE_EXTRAS="gliner,community,neo4j"
+ARG KGWEAVE_EXTRAS=""
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if [ -n "${KGWEAVE_EXTRAS}" ]; then \
+        uv pip install --system --prefix=/install ".[${KGWEAVE_EXTRAS}]" ; \
+    else \
+        uv pip install --system --prefix=/install . ; \
+    fi \
+    && find /install -type d -name __pycache__ -prune -exec rm -rf {} + \
+    && find /install -type d -name tests -prune -exec rm -rf {} + \
+    && find /install -name "*.pyc" -delete \
+    && find /install -name "*.pyo" -delete
+
+# --- Runtime stage ---
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /install /usr/local
+COPY src /app/src
+
+# Non-root user
+RUN groupadd --system app && useradd --system --gid app --create-home app \
+    && mkdir -p /app/.runtime && chown -R app:app /app
+USER app
+
+# Worker reads:
+#   TEMPORAL_TARGET_HOST  (defaults to localhost:7233)
+#   KG_WORKER_SLOTS       (defaults to 4)
+#   KG_USE_GLINER         (0/1; default 0 — regex extractor)
+CMD ["python", "-m", "kgweave.worker.main"]
