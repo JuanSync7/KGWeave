@@ -82,12 +82,21 @@ class GLiNEREntityExtractor:
                 "GLiNER is required for GLiNEREntityExtractor. "
                 "Install it with: pip install ragweave[gliner]"
             ) from None
-        from config.settings import GLINER_MODEL_PATH, GLINER_ENTITY_LABELS
+        import os  # noqa: PLC0415
+        default_model_path = (
+            os.environ.get("KG_GLINER_MODEL_PATH")
+            or os.environ.get("RAG_GLINER_MODEL")
+            or os.path.expanduser("~/models/gliner/gliner_medium-v2.1")
+        )
+        default_labels = [
+            "technology", "algorithm", "framework", "concept",
+            "programming language", "data structure",
+        ]
 
-        model_path = model_path or GLINER_MODEL_PATH
+        model_path = model_path or default_model_path
         self.model = GLiNER.from_pretrained(model_path, local_files_only=True)
         self._regex_extractor = None  # lazy init (avoids circular ref at class def time)
-        self._labels = GLINER_ENTITY_LABELS
+        self._labels = default_labels
 
     def _get_regex_extractor(self):
         if self._regex_extractor is None:

@@ -42,12 +42,39 @@ def test_extract_and_commit_empty_text_is_noop(service: BuilderKGService) -> Non
     assert result.triples_added == 0
 
 
-def test_health_reports_builder_counts(service: BuilderKGService) -> None:
+def test_health_reports_backend_counts(service: BuilderKGService) -> None:
     info = service.health()
     assert info["ok"] is True
-    assert "builder_nodes" in info
-    assert "builder_edges" in info
+    # Backend-native service surfaces backend stats; legacy builder_* keys
+    # only appear when an explicit KnowledgeGraphBuilder is supplied.
+    assert "nodes" in info
+    assert "edges" in info
+    assert "backend_stats" in info
 
 
-def test_delete_by_source_no_backend_returns_empty(service: BuilderKGService) -> None:
-    assert service.delete_by_source("doc1.md") == {}
+def test_delete_by_source_returns_zero_stats_for_empty_backend(
+    service: BuilderKGService,
+) -> None:
+    """build_default_service now always supplies a backend (in-memory fallback
+    when the configured one is unavailable), so delete_by_source returns the
+    backend's RemovalStats — zero counts for an empty graph, not ``{}``."""
+    stats = service.delete_by_source("doc1.md")
+    assert stats == {
+        "entities_pruned": 0,
+        "entities_removed": 0,
+        "triples_removed": 0,
+    }
+
+
+def test_delete_by_source_returns_empty_when_backend_explicitly_none() -> None:
+    """The legacy contract — ``{}`` when no backend — is preserved when a
+    caller constructs the service directly without one."""
+    from kgweave.knowledge_graph.ingest_client import BackendIngestClient
+    from kgweave.knowledge_graph.backends import NetworkXBackend
+
+    backend = NetworkXBackend()
+    svc = BuilderKGService(
+        ingest_client=BackendIngestClient(backend),
+        backend=None,
+    )
+    assert svc.delete_by_source("doc1.md") == {}

@@ -298,9 +298,9 @@ class LLMEntityExtractor:
         Raises:
             Exception: Re-raises non-rate-limit errors after logging.
         """
-        from config.settings import RAG_KG_LLM_RATE_LIMIT_RETRIES, RAG_KG_LLM_RATE_LIMIT_BACKOFF_S
-        max_rate_limit_retries = RAG_KG_LLM_RATE_LIMIT_RETRIES
-        backoff_seconds = RAG_KG_LLM_RATE_LIMIT_BACKOFF_S
+        import os  # noqa: PLC0415
+        max_rate_limit_retries = int(os.environ.get("RAG_KG_LLM_RATE_LIMIT_RETRIES", "3"))
+        backoff_seconds = float(os.environ.get("RAG_KG_LLM_RATE_LIMIT_BACKOFF_S", "1.0"))
 
         for attempt in range(max_rate_limit_retries + 1):
             try:

@@ -55,25 +55,6 @@ _graph_backend: Optional[GraphStorageBackend] = None
 _kg_config: Optional[KGConfig] = None
 
 
-def _register_default_llm_factory() -> None:
-    """Bind RagWeave's LLMProvider as the default LLM client for KG.
-
-    Runs once on facade import. After the KGWeave extraction the host
-    application registers its own factory; this in-tree registration
-    preserves current behavior without forcing every KG node to import
-    ``src.platform.llm`` directly.
-    """
-    try:
-        from src.platform.llm import get_llm_provider  # noqa: PLC0415
-    except Exception as exc:  # pragma: no cover — defensive
-        logger.debug("kg_default_llm_factory_unavailable error=%s", exc)
-        return
-    set_default_llm_factory(get_llm_provider)
-
-
-_register_default_llm_factory()
-
-
 def _build_kg_config() -> KGConfig:
     """Return the cached KG config, building from env on first call.
 

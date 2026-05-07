@@ -18,6 +18,21 @@ from kgweave.contracts.constants import (
     KG_PHASE2B_ACTIVITY,
     KG_TASK_QUEUE,
 )
+from kgweave.contracts.http import (
+    EntityResponse,
+    ErrorResponse,
+    ExpandRequest,
+    ExpandResponse,
+    HealthResponse,
+    KGQueryMatchRequest,
+    KGQueryMatchResponse,
+    PathHopModel,
+    PathRequest,
+    PathResponse,
+    PathResultModel,
+    TermMatchRequest,
+    TermMatchResponse,
+)
 from kgweave.contracts.schemas import (
     KGAdminRequest,
     KGAdminResult,
@@ -37,4 +52,18 @@ __all__ = [
     "KGAdminRequest",
     "KGAdminResult",
     "KGErrorClass",
+    # HTTP wire contract (Step C)
+    "ExpandRequest",
+    "ExpandResponse",
+    "TermMatchRequest",
+    "TermMatchResponse",
+    "KGQueryMatchRequest",
+    "KGQueryMatchResponse",
+    "EntityResponse",
+    "PathRequest",
+    "PathResponse",
+    "PathHopModel",
+    "PathResultModel",
+    "HealthResponse",
+    "ErrorResponse",
 ]

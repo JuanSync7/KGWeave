@@ -1,0 +1,64 @@
+# syntax=docker/dockerfile:1
+# KGWeave HTTP API — read-side query service (Step C).
+# Same Python base as the worker; CMD launches uvicorn against the
+# kgweave.api.main:app ASGI entry point. Read-only by design.
+#
+# --- Builder stage ---
+FROM python:3.11-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml /app/pyproject.toml
+COPY src /app/src
+
+# api extra is always required; additional extras (e.g. neo4j) opt-in.
+ARG KGWEAVE_API_EXTRAS="api"
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --prefix=/install ".[${KGWEAVE_API_EXTRAS}]" \
+    && find /install -type d -name __pycache__ -prune -exec rm -rf {} + \
+    && find /install -type d -name tests -prune -exec rm -rf {} + \
+    && find /install -name "*.pyc" -delete \
+    && find /install -name "*.pyo" -delete
+
+# --- Runtime stage ---
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /install /usr/local
+COPY src /app/src
+
+RUN groupadd --system app && useradd --system --gid app --create-home app \
+    && mkdir -p /app/.runtime && chown -R app:app /app
+USER app
+
+EXPOSE 8080
+
+# Reads:
+#   KG_GRAPH_PATH        — path to graph file (read-only mount)
+#   KGWEAVE_API_TOKEN    — bearer token (unset = open access)
+#   KGWEAVE_API_HOST     — bind host (default 0.0.0.0)
+#   KGWEAVE_API_PORT     — bind port (default 8080)
+#   KGWEAVE_API_WORKERS  — uvicorn workers (default 1)
+CMD ["sh", "-c", "exec uvicorn kgweave.api.main:app \
+    --host ${KGWEAVE_API_HOST:-0.0.0.0} \
+    --port ${KGWEAVE_API_PORT:-8080} \
+    --workers ${KGWEAVE_API_WORKERS:-1}"]

@@ -120,14 +120,15 @@ class GLiNEREntityExtractor:
             from gliner import GLiNER  # type: ignore[import]
 
             if model_path is None:
-                try:
-                    from config.settings import GLINER_MODEL_PATH  # type: ignore[import]
-                    model_path = GLINER_MODEL_PATH
-                except ImportError:
-                    logger.warning(
-                        "config.settings.GLINER_MODEL_PATH not found; "
-                        "GLiNER model path must be supplied explicitly."
-                    )
+                # Read from env directly so KGWeave can run standalone.
+                # KG_GLINER_MODEL_PATH is the canonical KGWeave name; the
+                # legacy RAG_GLINER_MODEL is honoured for back-compat.
+                import os  # noqa: PLC0415
+                model_path = (
+                    os.environ.get("KG_GLINER_MODEL_PATH")
+                    or os.environ.get("RAG_GLINER_MODEL")
+                    or os.path.expanduser("~/models/gliner/gliner_medium-v2.1")
+                )
 
             if model_path:
                 self._model = GLiNER.from_pretrained(model_path, local_files_only=True)
@@ -172,8 +173,9 @@ class GLiNEREntityExtractor:
         entities: List[str] = []
         seen: set[str] = set()
 
-        from config.settings import RAG_KG_GLINER_THRESHOLD
-        predictions = self._model.predict_entities(clean, self._labels, threshold=RAG_KG_GLINER_THRESHOLD)
+        import os  # noqa: PLC0415
+        threshold = float(os.environ.get("RAG_KG_GLINER_THRESHOLD", "0.5"))
+        predictions = self._model.predict_entities(clean, self._labels, threshold=threshold)
         for pred in predictions:
             entity_text = pred["text"].strip()
             if len(entity_text) <= 2:
