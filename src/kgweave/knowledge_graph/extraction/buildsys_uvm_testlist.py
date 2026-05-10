@@ -5,16 +5,15 @@
 # heuristic (e.g. aes_tb.sv → 'aes') gives a medium-confidence
 # test→module link. Recursion is depth-limited and cycle-safe.
 # Exports: UvmTestlistReader
-# Deps: pathlib, re, kgweave.knowledge_graph.common.sw_test_buildsys
+# Deps: pathlib, kgweave.knowledge_graph.common.sw_test_buildsys
 # @end-summary
-"""UVM testlist .f reader."""
+"""UVM testlist .f reader — structural parsing only, no regex."""
 
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
-from typing import Any, List, Optional, Set
+from typing import Any, List, Optional, Set, Tuple
 
 from kgweave.knowledge_graph.common.sw_test_buildsys import BuildSystemLink
 
@@ -22,16 +21,78 @@ __all__ = ["UvmTestlistReader"]
 
 _logger = logging.getLogger("rag.knowledge_graph.buildsys_uvm_testlist")
 
-_UVM_TEST_RE = re.compile(r"\+UVM_TESTNAME=([A-Za-z_][\w]*)")
-_F_INCLUDE_RE = re.compile(r"^\s*-f\s+(\S+)")
-_DEFAULT_TB_SV_PATTERN = r"([A-Za-z_][\w]*)_tb\.sv"
-_TB_SV_RE = re.compile(_DEFAULT_TB_SV_PATTERN + r"\b")
-# Line-comment styles seen across simulators / wrappers:
-#   - ``#`` (Make-style, also some sim wrappers)
-#   - ``//`` (C/SV-style)
-#   - ``--`` (Ada/VHDL-style — used by some lint front-ends)
-_COMMENT_RE = re.compile(r"^\s*(#|//|--)")
+# Comment prefixes recognised across simulator / wrapper flavours:
+#   - ``#``   (Make-style, also some sim wrappers)
+#   - ``//``  (C/SV-style)
+#   - ``--``  (Ada/VHDL-style — used by some lint front-ends)
+_COMMENT_PREFIXES: Tuple[str, ...] = ("#", "//", "--")
+
+# Token prefix that identifies a UVM test-name plusarg.
+_UVM_TESTNAME_PREFIX = "+UVM_TESTNAME="
+
+# Default testbench filename suffix: <module>_tb.sv
+_DEFAULT_TB_SUFFIX = "_tb.sv"
+
 _MAX_DEPTH = 4
+
+
+def _is_comment(line: str) -> bool:
+    """Return True if *line* (already stripped) starts with a comment marker."""
+    return line.startswith(_COMMENT_PREFIXES)
+
+
+def _extract_uvm_testnames(line: str) -> List[str]:
+    """Extract every ``+UVM_TESTNAME=<name>`` value from *line*.
+
+    Tokens are split on whitespace so that a line like::
+
+        +UVM_VERBOSITY=HIGH +UVM_TESTNAME=foo +UVM_NO_RELNOTES=1
+
+    yields only ``["foo"]``.
+    """
+    names = []
+    for token in line.split():
+        if token.startswith(_UVM_TESTNAME_PREFIX):
+            name = token[len(_UVM_TESTNAME_PREFIX):]
+            if name:
+                names.append(name)
+    return names
+
+
+def _extract_f_include(line: str) -> Optional[str]:
+    """Return the filename following a ``-f`` token, or None.
+
+    Handles::
+
+        -f sub.f
+        -f  sub/dir/file.f   (extra whitespace)
+    """
+    tokens = line.split()
+    if len(tokens) >= 2 and tokens[0] == "-f":
+        return tokens[1]
+    return None
+
+
+def _extract_tb_module(line: str, tb_suffix: str) -> Optional[str]:
+    """Return the module name encoded in a ``<module><tb_suffix>`` filename on
+    *line*, or None.
+
+    Each whitespace-separated token is checked: if the *basename* of the
+    token (the part after the last ``/``) ends with *tb_suffix*, the part
+    before the suffix is returned as the module name.
+
+    Examples with suffix ``_tb.sv``::
+
+        ``${PROJ}/hw/ip/aes/dv/aes_tb.sv``  → ``"aes"``
+        ``aes_tb.sv``                         → ``"aes"``
+    """
+    for token in line.split():
+        basename = token.rsplit("/", 1)[-1]
+        if basename.endswith(tb_suffix):
+            module = basename[: -len(tb_suffix)]
+            if module:
+                return module
+    return None
 
 
 class UvmTestlistReader:
@@ -52,23 +113,16 @@ class UvmTestlistReader:
     def __init__(
         self,
         glob: str = "**/*.f",
-        testbench_filename_regex: Optional[str] = None,
+        testbench_filename_suffix: Optional[str] = None,
         project_conventions: Optional[Any] = None,
     ) -> None:
         self._glob = glob
-        if testbench_filename_regex is None and project_conventions is not None:
-            pc = getattr(project_conventions, "uvm_testbench_filename_regex", None)
-            if pc:
-                testbench_filename_regex = pc
-        pattern = testbench_filename_regex or _DEFAULT_TB_SV_PATTERN
-        try:
-            self._tb_sv_re = re.compile(pattern + r"\b" if not pattern.endswith(r"\b") else pattern)
-        except re.error as exc:
-            _logger.warning(
-                "UvmTestlistReader: invalid testbench_filename_regex %r (%s); "
-                "falling back to default", pattern, exc,
-            )
-            self._tb_sv_re = _TB_SV_RE
+        suffix = testbench_filename_suffix
+        if suffix is None and project_conventions is not None:
+            pc_suffix = getattr(project_conventions, "uvm_testbench_filename_suffix", None)
+            if pc_suffix:
+                suffix = pc_suffix
+        self._tb_suffix: str = suffix or _DEFAULT_TB_SUFFIX
 
     def applies_to(self, project_root: Path) -> bool:
         try:
@@ -120,15 +174,19 @@ class UvmTestlistReader:
 
         for raw_line in text.splitlines():
             line = raw_line.strip()
-            if not line or _COMMENT_RE.match(line):
+            if not line or _is_comment(line):
                 continue
-            for m in _UVM_TEST_RE.finditer(line):
-                uvm_tests.add(m.group(1))
-            for m in self._tb_sv_re.finditer(line):
-                tb_modules.add(m.group(1))
-            inc = _F_INCLUDE_RE.match(line)
-            if inc:
-                sub = (f_path.parent / inc.group(1))
+
+            for name in _extract_uvm_testnames(line):
+                uvm_tests.add(name)
+
+            module = _extract_tb_module(line, self._tb_suffix)
+            if module:
+                tb_modules.add(module)
+
+            inc_path = _extract_f_include(line)
+            if inc_path:
+                sub = f_path.parent / inc_path
                 if not sub.exists():
                     continue
                 sub_tests, sub_mods = self._read_one(sub, visited, depth + 1)

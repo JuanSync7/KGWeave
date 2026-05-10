@@ -246,8 +246,8 @@ class ProjectConventions:
     )
     """Suffixes stripped from FuseSoC ``.core`` names to derive module."""
 
-    uvm_testbench_filename_regex: str = r"([A-Za-z_]\w*)_tb\.sv"
-    """Regex extracting module name from a UVM testbench filename."""
+    uvm_testbench_filename_suffix: str = "_tb.sv"
+    """Suffix identifying a UVM testbench file; the module name is the part before this suffix."""
 
     # --- DV file→testplan fusion ---
     dv_test_file_strip_suffixes: List[str] = field(

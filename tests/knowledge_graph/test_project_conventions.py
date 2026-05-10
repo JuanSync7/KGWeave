@@ -41,7 +41,7 @@ def test_project_conventions_default_instantiation_all_generic():
     assert pc.makefile_module_strip_suffixes == ["_top", "_dut", "_core", "_wrapper"]
     assert pc.fusesoc_tb_target_hints == ["sim", "tb", "test"]
     assert pc.fusesoc_module_strip_suffixes == ["_sim", "_tb", "_test", "_dv"]
-    assert pc.uvm_testbench_filename_regex == r"([A-Za-z_]\w*)_tb\.sv"
+    assert pc.uvm_testbench_filename_suffix == "_tb.sv"
     assert pc.dv_test_file_strip_suffixes == ["_vseq.sv", "_test.sv", ".sv"]
 
 

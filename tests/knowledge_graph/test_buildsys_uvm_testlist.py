@@ -8,6 +8,8 @@ The reader extracts:
 """
 from __future__ import annotations
 
+import importlib
+import inspect
 from pathlib import Path
 
 import pytest
@@ -278,8 +280,46 @@ def test_uvm_testlist_custom_testbench_filename_regex(tmp_path):
         "frob_testbench.sv\n"
     )
     pc = ProjectConventions(
-        uvm_testbench_filename_regex=r"([A-Za-z_]\w*)_testbench\.sv"
+        uvm_testbench_filename_suffix="_testbench.sv"
     )
     links = UvmTestlistReader(project_conventions=pc).read(tmp_path)
     mods = {l.module_name for l in links}
     assert "frob" in mods
+
+
+# ---------------------------------------------------------------------------
+# iter-004: structural-only parser — no import re
+# ---------------------------------------------------------------------------
+
+
+def test_uvm_testlist_no_regex_import():
+    """The buildsys_uvm_testlist module must not import the re module at all.
+
+    This test was added alongside the iter-004 structural rewrite.
+    It would fail on the pre-004 code that used re.compile for all four
+    patterns.
+    """
+    import kgweave.knowledge_graph.extraction.buildsys_uvm_testlist as mod
+
+    source = inspect.getsource(mod)
+    assert "import re" not in source, (
+        "buildsys_uvm_testlist still imports 're'; replace with structural parsing"
+    )
+
+
+def test_uvm_testlist_tab_separated_uvm_testname(tmp_path):
+    """A tab-separated line ``+UVM_TESTNAME=<name>`` (instead of space) must
+    still be parsed correctly by the structural token splitter.
+
+    The old regex would have matched this trivially; the structural rewrite
+    must handle it too (split on whitespace covers tabs).
+    """
+    from kgweave.knowledge_graph.extraction.buildsys_uvm_testlist import (
+        UvmTestlistReader,
+    )
+
+    _w(tmp_path / "tabbed.f", "+UVM_TESTNAME=tabbed_test\taes_tb.sv\n")
+    links = UvmTestlistReader().read(tmp_path)
+    test_names = {Path(l.test_path).name for l in links}
+    assert "tabbed_test" in test_names
+    assert {l.module_name for l in links} == {"aes"}
