@@ -1,0 +1,401 @@
+# @summary
+# Golden Q&A set for the KGWeave eval harness, targeting the lowRISC Ibex
+# RV32 core (https://github.com/lowRISC/ibex). 50 questions across five
+# categories: structure (15), hierarchy (10), connectivity (10),
+# parameters (10), architecture (5).
+#
+# *** DRAFT — needs human review against the Ibex source tree before
+# this set can be considered authoritative. Entity names follow the
+# KGWeave convention <module>.<port|signal|param>. ***
+# @end-summary
+
+questions:
+
+  # ---------------------------------------------------------------------------
+  # STRUCTURE (15) — what ports / signals / parameters does a module expose
+  # ---------------------------------------------------------------------------
+
+  - id: ibex-001
+    question: What clock and reset ports does the ibex_core module expose?
+    gold_entities: [ibex_core.clk_i, ibex_core.rst_ni]
+    category: structure
+    tags: [ports, clk_rst]
+
+  - id: ibex-002
+    question: Which ports form the instruction-fetch memory interface of ibex_core?
+    gold_entities:
+      - ibex_core.instr_req_o
+      - ibex_core.instr_gnt_i
+      - ibex_core.instr_rvalid_i
+      - ibex_core.instr_addr_o
+      - ibex_core.instr_rdata_i
+    category: structure
+    tags: [memory_interface, instruction_fetch]
+
+  - id: ibex-003
+    question: Which ports form the data (LSU) memory interface of ibex_core?
+    gold_entities:
+      - ibex_core.data_req_o
+      - ibex_core.data_gnt_i
+      - ibex_core.data_rvalid_i
+      - ibex_core.data_we_o
+      - ibex_core.data_be_o
+      - ibex_core.data_addr_o
+      - ibex_core.data_wdata_o
+      - ibex_core.data_rdata_i
+    category: structure
+    tags: [memory_interface, lsu]
+
+  - id: ibex-004
+    question: What interrupt input ports does ibex_core have?
+    gold_entities:
+      - ibex_core.irq_software_i
+      - ibex_core.irq_timer_i
+      - ibex_core.irq_external_i
+      - ibex_core.irq_fast_i
+      - ibex_core.irq_nm_i
+    category: structure
+    tags: [interrupts]
+
+  - id: ibex-005
+    question: Which port indicates that ibex_core is currently busy?
+    gold_entities: [ibex_core.core_busy_o]
+    category: structure
+    tags: [status]
+
+  - id: ibex-006
+    question: How is the boot address supplied to ibex_core?
+    gold_entities: [ibex_core.boot_addr_i]
+    category: structure
+    tags: [reset, boot]
+
+  - id: ibex-007
+    question: How is the hart ID supplied to ibex_core?
+    gold_entities: [ibex_core.hart_id_i]
+    category: structure
+    tags: [hart]
+
+  - id: ibex-008
+    question: What debug request port does ibex_core have?
+    gold_entities: [ibex_core.debug_req_i]
+    category: structure
+    tags: [debug]
+
+  - id: ibex-009
+    question: What ports does the ibex_alu module expose for operands and result?
+    gold_entities:
+      - ibex_alu.operand_a_i
+      - ibex_alu.operand_b_i
+      - ibex_alu.result_o
+      - ibex_alu.operator_i
+    category: structure
+    tags: [alu, datapath]
+
+  - id: ibex-010
+    question: What clock and reset ports does ibex_if_stage have?
+    gold_entities: [ibex_if_stage.clk_i, ibex_if_stage.rst_ni]
+    category: structure
+    tags: [ports, if_stage]
+
+  - id: ibex-011
+    question: What read/write ports does ibex_register_file_ff expose for general-purpose registers?
+    gold_entities:
+      - ibex_register_file_ff.raddr_a_i
+      - ibex_register_file_ff.rdata_a_o
+      - ibex_register_file_ff.raddr_b_i
+      - ibex_register_file_ff.rdata_b_o
+      - ibex_register_file_ff.waddr_a_i
+      - ibex_register_file_ff.wdata_a_i
+      - ibex_register_file_ff.we_a_i
+    category: structure
+    tags: [regfile]
+
+  - id: ibex-012
+    question: Which ports does ibex_load_store_unit expose to the data memory bus?
+    gold_entities:
+      - ibex_load_store_unit.data_req_o
+      - ibex_load_store_unit.data_gnt_i
+      - ibex_load_store_unit.data_rvalid_i
+      - ibex_load_store_unit.data_addr_o
+      - ibex_load_store_unit.data_we_o
+      - ibex_load_store_unit.data_be_o
+      - ibex_load_store_unit.data_wdata_o
+      - ibex_load_store_unit.data_rdata_i
+    category: structure
+    tags: [lsu, memory_interface]
+
+  - id: ibex-013
+    question: What ports does ibex_compressed_decoder expose?
+    gold_entities:
+      - ibex_compressed_decoder.instr_i
+      - ibex_compressed_decoder.instr_o
+      - ibex_compressed_decoder.is_compressed_o
+      - ibex_compressed_decoder.illegal_instr_o
+    category: structure
+    tags: [decoder, compressed]
+
+  - id: ibex-014
+    question: What ports does ibex_controller use to signal pipeline-flush conditions?
+    gold_entities:
+      - ibex_controller.flush_id_o
+      - ibex_controller.ctrl_busy_o
+    category: structure
+    tags: [controller, flush]
+
+  - id: ibex-015
+    question: What signals does ibex_cs_registers use to drive CSR read data?
+    gold_entities:
+      - ibex_cs_registers.csr_rdata_o
+      - ibex_cs_registers.csr_addr_i
+      - ibex_cs_registers.csr_op_i
+      - ibex_cs_registers.csr_wdata_i
+    category: structure
+    tags: [csr]
+
+  # ---------------------------------------------------------------------------
+  # HIERARCHY (10) — what instantiates / contains / part_of
+  # ---------------------------------------------------------------------------
+
+  - id: ibex-016
+    question: Which pipeline stages does ibex_core instantiate?
+    gold_entities: [ibex_if_stage, ibex_id_stage, ibex_ex_block, ibex_wb_stage]
+    category: hierarchy
+    tags: [instantiates, pipeline]
+
+  - id: ibex-017
+    question: Which module instantiates the ALU inside Ibex?
+    gold_entities: [ibex_ex_block, ibex_alu]
+    category: hierarchy
+    tags: [instantiates, alu]
+
+  - id: ibex-018
+    question: Which module instantiates the load-store unit?
+    gold_entities: [ibex_core, ibex_load_store_unit]
+    category: hierarchy
+    tags: [instantiates, lsu]
+
+  - id: ibex-019
+    question: Which module instantiates ibex_compressed_decoder?
+    gold_entities: [ibex_id_stage, ibex_compressed_decoder]
+    category: hierarchy
+    tags: [instantiates, decoder]
+
+  - id: ibex-020
+    question: Which module contains the controller / hazard logic?
+    gold_entities: [ibex_id_stage, ibex_controller]
+    category: hierarchy
+    tags: [contains, controller]
+
+  - id: ibex-021
+    question: Which module instantiates the CSR file (ibex_cs_registers)?
+    gold_entities: [ibex_core, ibex_cs_registers]
+    category: hierarchy
+    tags: [instantiates, csr]
+
+  - id: ibex-022
+    question: What does ibex_if_stage instantiate to fetch instructions?
+    gold_entities: [ibex_if_stage, ibex_prefetch_buffer, ibex_fetch_fifo]
+    category: hierarchy
+    tags: [instantiates, prefetch]
+
+  - id: ibex-023
+    question: Which multiply/divide units may ibex_ex_block instantiate?
+    gold_entities: [ibex_ex_block, ibex_multdiv_fast, ibex_multdiv_slow]
+    category: hierarchy
+    tags: [instantiates, multdiv]
+
+  - id: ibex-024
+    question: Which top-level wrapper instantiates ibex_core?
+    gold_entities: [ibex_top, ibex_core]
+    category: hierarchy
+    tags: [instantiates, top]
+
+  - id: ibex-025
+    question: What modules does ibex_top instantiate to support PMP and tracing?
+    gold_entities: [ibex_top, ibex_pmp, ibex_tracer]
+    category: hierarchy
+    tags: [instantiates, pmp]
+
+  # ---------------------------------------------------------------------------
+  # CONNECTIVITY (10) — connects_to, signal flow
+  # ---------------------------------------------------------------------------
+
+  - id: ibex-026
+    question: What drives the clk_i input of ibex_id_stage when it is instantiated by ibex_core?
+    gold_entities: [ibex_core.clk_i, ibex_core.id_stage_i.clk_i]
+    category: connectivity
+    tags: [connects_to, clock]
+
+  - id: ibex-027
+    question: How does the ibex_core data_req_o port reach the LSU?
+    gold_entities: [ibex_load_store_unit.data_req_o, ibex_core.data_req_o]
+    category: connectivity
+    tags: [connects_to, lsu]
+
+  - id: ibex-028
+    question: Which net carries the decoded instruction from ibex_compressed_decoder to the main decoder?
+    gold_entities:
+      - ibex_compressed_decoder.instr_o
+      - ibex_decoder.instr_rdata_i
+    category: connectivity
+    tags: [connects_to, decoder]
+
+  - id: ibex-029
+    question: What signal carries the ALU result back to the writeback stage?
+    gold_entities:
+      - ibex_alu.result_o
+      - ibex_ex_block.alu_adder_result_ex_o
+      - ibex_wb_stage.rf_wdata_wb_i
+    category: connectivity
+    tags: [connects_to, alu, wb]
+
+  - id: ibex-030
+    question: How does the register file connect to the decode stage's read ports?
+    gold_entities:
+      - ibex_register_file_ff.rdata_a_o
+      - ibex_register_file_ff.rdata_b_o
+      - ibex_id_stage.rf_rdata_a_i
+      - ibex_id_stage.rf_rdata_b_i
+    category: connectivity
+    tags: [connects_to, regfile]
+
+  - id: ibex-031
+    question: Which signal connects the controller's flush request to the IF stage?
+    gold_entities: [ibex_controller.flush_id_o, ibex_id_stage.flush_id_o]
+    category: connectivity
+    tags: [connects_to, flush]
+
+  - id: ibex-032
+    question: Which CSR fields drive the privilege-level output of ibex_cs_registers?
+    gold_entities:
+      - ibex_cs_registers.priv_mode_id_o
+      - ibex_cs_registers.priv_mode_lsu_o
+    category: connectivity
+    tags: [connects_to, privilege]
+
+  - id: ibex-033
+    question: What signals connect the LSU to the writeback stage for load data?
+    gold_entities:
+      - ibex_load_store_unit.lsu_rdata_o
+      - ibex_wb_stage.rf_wdata_lsu_i
+    category: connectivity
+    tags: [connects_to, lsu, wb]
+
+  - id: ibex-034
+    question: Which signal forwards the next-PC from IF to the controller?
+    gold_entities:
+      - ibex_if_stage.pc_if_o
+      - ibex_controller.pc_id_i
+    category: connectivity
+    tags: [connects_to, pc]
+
+  - id: ibex-035
+    question: Which signal carries interrupt-pending information into the controller?
+    gold_entities:
+      - ibex_cs_registers.irqs_o
+      - ibex_controller.irq_pending_i
+    category: connectivity
+    tags: [connects_to, interrupts]
+
+  # ---------------------------------------------------------------------------
+  # PARAMETERS (10) — what does each parameter control
+  # ---------------------------------------------------------------------------
+
+  - id: ibex-036
+    question: Which parameter selects the multiply/divide implementation in ibex_core?
+    gold_entities: [ibex_core.RV32M]
+    category: parameters
+    tags: [param, multdiv]
+
+  - id: ibex-037
+    question: Which parameter enables the embedded (RV32E) register file?
+    gold_entities: [ibex_core.RV32E]
+    category: parameters
+    tags: [param, rv32e]
+
+  - id: ibex-038
+    question: Which parameter enables the optional writeback pipeline stage?
+    gold_entities: [ibex_core.WritebackStage]
+    category: parameters
+    tags: [param, pipeline]
+
+  - id: ibex-039
+    question: Which parameter selects the register-file implementation style?
+    gold_entities: [ibex_core.RegFile]
+    category: parameters
+    tags: [param, regfile]
+
+  - id: ibex-040
+    question: Which parameter enables the instruction cache in ibex_top?
+    gold_entities: [ibex_top.ICache]
+    category: parameters
+    tags: [param, icache]
+
+  - id: ibex-041
+    question: Which parameter enables ECC protection on the I-cache?
+    gold_entities: [ibex_top.ICacheECC]
+    category: parameters
+    tags: [param, icache, ecc]
+
+  - id: ibex-042
+    question: Which parameter enables the branch predictor option?
+    gold_entities: [ibex_core.BranchPredictor]
+    category: parameters
+    tags: [param, branch]
+
+  - id: ibex-043
+    question: Which parameters configure PMP (physical memory protection)?
+    gold_entities:
+      - ibex_core.PMPEnable
+      - ibex_core.PMPGranularity
+      - ibex_core.PMPNumRegions
+    category: parameters
+    tags: [param, pmp]
+
+  - id: ibex-044
+    question: Which parameters configure the hardware-performance-monitor counters?
+    gold_entities:
+      - ibex_core.MHPMCounterNum
+      - ibex_core.MHPMCounterWidth
+    category: parameters
+    tags: [param, mhpm]
+
+  - id: ibex-045
+    question: Which parameter enables the secure-Ibex hardening features?
+    gold_entities: [ibex_core.SecureIbex]
+    category: parameters
+    tags: [param, security]
+
+  # ---------------------------------------------------------------------------
+  # ARCHITECTURE (5) — high-level pipeline / ISA questions
+  # ---------------------------------------------------------------------------
+
+  - id: ibex-046
+    question: Which pipeline stages exist in Ibex by default (no writeback enabled)?
+    gold_entities: [ibex_if_stage, ibex_id_stage]
+    category: architecture
+    tags: [pipeline, stages]
+
+  - id: ibex-047
+    question: Which pipeline stages exist in Ibex when WritebackStage is enabled?
+    gold_entities: [ibex_if_stage, ibex_id_stage, ibex_wb_stage]
+    category: architecture
+    tags: [pipeline, stages, writeback]
+
+  - id: ibex-048
+    question: Which module decodes RISC-V compressed (RVC) instructions?
+    gold_entities: [ibex_compressed_decoder]
+    category: architecture
+    tags: [isa, compressed]
+
+  - id: ibex-049
+    question: Which module implements the CSR (control and status register) file?
+    gold_entities: [ibex_cs_registers]
+    category: architecture
+    tags: [csr]
+
+  - id: ibex-050
+    question: Which module is responsible for branch prediction in Ibex?
+    gold_entities: [ibex_branch_predict]
+    category: architecture
+    tags: [branch_predictor]

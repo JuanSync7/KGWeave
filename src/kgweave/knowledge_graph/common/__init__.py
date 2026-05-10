@@ -5,6 +5,7 @@ from kgweave.knowledge_graph.common.schemas import (
     Entity,
     EntityDescription,
     ExtractionResult,
+    LayerDiff,
     Triple,
 )
 from kgweave.knowledge_graph.common.protocols import (
@@ -15,6 +16,7 @@ from kgweave.knowledge_graph.common.protocols import (
 )
 from kgweave.knowledge_graph.common.types import (
     KGConfig,
+    ProjectConventions,
     SchemaDefinition,
     load_schema,
 )

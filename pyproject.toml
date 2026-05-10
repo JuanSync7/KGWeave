@@ -8,18 +8,21 @@ version = "0.1.0"
 description = "Knowledge graph subsystem: entity extraction, graph storage, community detection, query expansion."
 requires-python = ">=3.10"
 dependencies = [
+  "hjson>=3.1",
   "networkx",
   "pydantic>=2.0",
   "orjson",
   "pyyaml",
   "tree-sitter-python>=0.23.0",
   "temporalio>=1.5",
+  "pyslang>=10.0.0",
+  "leidenalg>=0.10",
+  "python-igraph>=0.11",
 ]
 
 [project.optional-dependencies]
 neo4j = ["neo4j>=5"]
 gliner = ["gliner"]
-community = ["leidenalg", "python-igraph"]
 api = [
   "fastapi>=0.110",
   "uvicorn[standard]>=0.27",

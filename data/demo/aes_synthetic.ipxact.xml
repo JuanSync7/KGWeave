@@ -1,0 +1,310 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Hand-authored IP-XACT 1685-2014 fixture for the OpenTitan AES demo.
+
+  OpenTitan does not ship IP-XACT (it uses HJSON + reggen for register
+  descriptions), so this fixture is synthesised from the actual AES top
+  module (`hw/ip/aes/rtl/aes.sv`) port list and the published CSR map
+  (`hw/ip/aes/data/aes.hjson`). Port and register names are anchored to
+  real symbols so the IPXACT_* entities fuse to the canonical Port /
+  CSR_Register / CSR_Field entities emitted by the SystemVerilog and
+  HJSON-CSR extractors.
+
+  This fixture exists only so the layer-diff / cross-source completeness
+  audit demo has a meaningful ipxact layer to compare against. It is not
+  a substitute for a real IP-XACT vendor deliverable.
+-->
+<ipxact:component
+    xmlns:ipxact="http://www.accellera.org/XMLSchema/IPXACT/1685-2014">
+  <ipxact:vendor>lowrisc.org</ipxact:vendor>
+  <ipxact:library>opentitan</ipxact:library>
+  <ipxact:name>aes</ipxact:name>
+  <ipxact:version>0.1</ipxact:version>
+
+  <ipxact:busInterfaces>
+    <ipxact:busInterface>
+      <ipxact:name>tlul</ipxact:name>
+      <ipxact:busType vendor="lowrisc.org" library="ip" name="tlul" version="1.0"/>
+      <ipxact:abstractionTypes>
+        <ipxact:abstractionType>
+          <ipxact:portMaps>
+            <ipxact:portMap>
+              <ipxact:logicalPort><ipxact:name>a_valid</ipxact:name></ipxact:logicalPort>
+              <ipxact:physicalPort><ipxact:name>tl_i_a_valid</ipxact:name></ipxact:physicalPort>
+            </ipxact:portMap>
+            <ipxact:portMap>
+              <ipxact:logicalPort><ipxact:name>a_ready</ipxact:name></ipxact:logicalPort>
+              <ipxact:physicalPort><ipxact:name>tl_o_a_ready</ipxact:name></ipxact:physicalPort>
+            </ipxact:portMap>
+            <ipxact:portMap>
+              <ipxact:logicalPort><ipxact:name>d_valid</ipxact:name></ipxact:logicalPort>
+              <ipxact:physicalPort><ipxact:name>tl_o_d_valid</ipxact:name></ipxact:physicalPort>
+            </ipxact:portMap>
+            <ipxact:portMap>
+              <ipxact:logicalPort><ipxact:name>d_ready</ipxact:name></ipxact:logicalPort>
+              <ipxact:physicalPort><ipxact:name>tl_i_d_ready</ipxact:name></ipxact:physicalPort>
+            </ipxact:portMap>
+          </ipxact:portMaps>
+        </ipxact:abstractionType>
+      </ipxact:abstractionTypes>
+      <ipxact:slave>
+        <ipxact:memoryMapRef memoryMapRef="aes_regs"/>
+      </ipxact:slave>
+    </ipxact:busInterface>
+    <ipxact:busInterface>
+      <ipxact:name>edn</ipxact:name>
+      <ipxact:busType vendor="lowrisc.org" library="ip" name="edn" version="1.0"/>
+      <ipxact:master>
+        <ipxact:addressSpaceRef addressSpaceRef="edn_addr_space"/>
+      </ipxact:master>
+    </ipxact:busInterface>
+  </ipxact:busInterfaces>
+
+  <ipxact:addressSpaces>
+    <ipxact:addressSpace>
+      <ipxact:name>edn_addr_space</ipxact:name>
+      <ipxact:range>0x1000</ipxact:range>
+      <ipxact:width>32</ipxact:width>
+    </ipxact:addressSpace>
+  </ipxact:addressSpaces>
+
+  <ipxact:memoryMaps>
+    <ipxact:memoryMap>
+      <ipxact:name>aes_regs</ipxact:name>
+      <ipxact:addressBlock>
+        <ipxact:name>regs</ipxact:name>
+        <ipxact:baseAddress>0x0</ipxact:baseAddress>
+        <ipxact:range>0x100</ipxact:range>
+        <ipxact:width>32</ipxact:width>
+
+        <ipxact:register>
+          <ipxact:name>CTRL_SHADOWED</ipxact:name>
+          <ipxact:addressOffset>0x74</ipxact:addressOffset>
+          <ipxact:size>32</ipxact:size>
+          <ipxact:reset>
+            <ipxact:value>0x1</ipxact:value>
+            <ipxact:mask>0xFFFFFFFF</ipxact:mask>
+          </ipxact:reset>
+          <ipxact:field>
+            <ipxact:name>OPERATION</ipxact:name>
+            <ipxact:bitOffset>0</ipxact:bitOffset>
+            <ipxact:bitWidth>2</ipxact:bitWidth>
+            <ipxact:access>read-write</ipxact:access>
+            <ipxact:enumeratedValues>
+              <ipxact:enumeratedValue>
+                <ipxact:name>AES_ENC</ipxact:name>
+                <ipxact:value>1</ipxact:value>
+                <ipxact:usage>read-write</ipxact:usage>
+              </ipxact:enumeratedValue>
+              <ipxact:enumeratedValue>
+                <ipxact:name>AES_DEC</ipxact:name>
+                <ipxact:value>2</ipxact:value>
+                <ipxact:usage>read-write</ipxact:usage>
+              </ipxact:enumeratedValue>
+              <ipxact:enumeratedValue>
+                <ipxact:name>AES_NONE</ipxact:name>
+                <ipxact:value>3</ipxact:value>
+                <ipxact:usage>read-write</ipxact:usage>
+              </ipxact:enumeratedValue>
+            </ipxact:enumeratedValues>
+          </ipxact:field>
+          <ipxact:field>
+            <ipxact:name>MODE</ipxact:name>
+            <ipxact:bitOffset>2</ipxact:bitOffset>
+            <ipxact:bitWidth>6</ipxact:bitWidth>
+            <ipxact:access>read-write</ipxact:access>
+          </ipxact:field>
+          <ipxact:field>
+            <ipxact:name>KEY_LEN</ipxact:name>
+            <ipxact:bitOffset>8</ipxact:bitOffset>
+            <ipxact:bitWidth>3</ipxact:bitWidth>
+            <ipxact:access>read-write</ipxact:access>
+          </ipxact:field>
+        </ipxact:register>
+
+        <ipxact:register>
+          <ipxact:name>TRIGGER</ipxact:name>
+          <ipxact:addressOffset>0x80</ipxact:addressOffset>
+          <ipxact:size>32</ipxact:size>
+          <ipxact:reset>
+            <ipxact:value>0x0</ipxact:value>
+            <ipxact:mask>0x0000001F</ipxact:mask>
+          </ipxact:reset>
+          <ipxact:field>
+            <ipxact:name>START</ipxact:name>
+            <ipxact:bitOffset>0</ipxact:bitOffset>
+            <ipxact:bitWidth>1</ipxact:bitWidth>
+            <ipxact:access>write-only</ipxact:access>
+          </ipxact:field>
+          <ipxact:field>
+            <ipxact:name>KEY_IV_DATA_IN_CLEAR</ipxact:name>
+            <ipxact:bitOffset>1</ipxact:bitOffset>
+            <ipxact:bitWidth>1</ipxact:bitWidth>
+            <ipxact:access>write-only</ipxact:access>
+          </ipxact:field>
+        </ipxact:register>
+
+        <ipxact:register>
+          <ipxact:name>STATUS</ipxact:name>
+          <ipxact:addressOffset>0x84</ipxact:addressOffset>
+          <ipxact:size>32</ipxact:size>
+          <ipxact:field>
+            <ipxact:name>IDLE</ipxact:name>
+            <ipxact:bitOffset>0</ipxact:bitOffset>
+            <ipxact:bitWidth>1</ipxact:bitWidth>
+            <ipxact:access>read-only</ipxact:access>
+          </ipxact:field>
+          <ipxact:field>
+            <ipxact:name>STALL</ipxact:name>
+            <ipxact:bitOffset>1</ipxact:bitOffset>
+            <ipxact:bitWidth>1</ipxact:bitWidth>
+            <ipxact:access>read-only</ipxact:access>
+          </ipxact:field>
+          <ipxact:field>
+            <ipxact:name>OUTPUT_LOST</ipxact:name>
+            <ipxact:bitOffset>2</ipxact:bitOffset>
+            <ipxact:bitWidth>1</ipxact:bitWidth>
+            <ipxact:access>read-only</ipxact:access>
+          </ipxact:field>
+        </ipxact:register>
+      </ipxact:addressBlock>
+    </ipxact:memoryMap>
+  </ipxact:memoryMaps>
+
+  <ipxact:model>
+    <ipxact:ports>
+      <ipxact:port>
+        <ipxact:name>clk_i</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>in</ipxact:direction>
+          <ipxact:qualifier>
+            <ipxact:isClock>true</ipxact:isClock>
+          </ipxact:qualifier>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>rst_ni</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>in</ipxact:direction>
+          <ipxact:qualifier>
+            <ipxact:isReset>true</ipxact:isReset>
+          </ipxact:qualifier>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>rst_shadowed_ni</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>in</ipxact:direction>
+          <ipxact:qualifier>
+            <ipxact:isReset>true</ipxact:isReset>
+          </ipxact:qualifier>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>clk_edn_i</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>in</ipxact:direction>
+          <ipxact:qualifier>
+            <ipxact:isClock>true</ipxact:isClock>
+          </ipxact:qualifier>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>rst_edn_ni</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>in</ipxact:direction>
+          <ipxact:qualifier>
+            <ipxact:isReset>true</ipxact:isReset>
+          </ipxact:qualifier>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>idle_o</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>out</ipxact:direction>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>lc_escalate_en_i</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>in</ipxact:direction>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>edn_o</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>out</ipxact:direction>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>edn_i</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>in</ipxact:direction>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>keymgr_key_i</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>in</ipxact:direction>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>tl_i</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>in</ipxact:direction>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>tl_o</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>out</ipxact:direction>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>alert_rx_i</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>in</ipxact:direction>
+          <ipxact:vector>
+            <ipxact:left>NumAlerts-1</ipxact:left>
+            <ipxact:right>0</ipxact:right>
+          </ipxact:vector>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>alert_tx_o</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>out</ipxact:direction>
+          <ipxact:vector>
+            <ipxact:left>NumAlerts-1</ipxact:left>
+            <ipxact:right>0</ipxact:right>
+          </ipxact:vector>
+        </ipxact:wire>
+      </ipxact:port>
+    </ipxact:ports>
+  </ipxact:model>
+
+  <ipxact:parameters>
+    <ipxact:parameter parameterId="NumRegsKey" dataType="int">
+      <ipxact:name>NumRegsKey</ipxact:name>
+      <ipxact:value>8</ipxact:value>
+    </ipxact:parameter>
+    <ipxact:parameter parameterId="EN_MASKING" dataType="bit">
+      <ipxact:name>EN_MASKING</ipxact:name>
+      <ipxact:value>1</ipxact:value>
+    </ipxact:parameter>
+  </ipxact:parameters>
+
+  <ipxact:fileSets>
+    <ipxact:fileSet>
+      <ipxact:name>aes_rtl</ipxact:name>
+      <ipxact:file>
+        <ipxact:name>rtl/aes.sv</ipxact:name>
+        <ipxact:fileType>systemVerilogSource</ipxact:fileType>
+      </ipxact:file>
+      <ipxact:file>
+        <ipxact:name>rtl/aes_core.sv</ipxact:name>
+        <ipxact:fileType>systemVerilogSource</ipxact:fileType>
+      </ipxact:file>
+    </ipxact:fileSet>
+  </ipxact:fileSets>
+</ipxact:component>

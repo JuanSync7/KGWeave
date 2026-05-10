@@ -298,11 +298,25 @@ class Neo4jBackend(GraphStorageBackend):
         relation: str,
         source: str,
         weight: float = 1.0,
+        confidence: float = 1.0,
+        evidence_span: str = "",
+        chunk_id: str = "",
+        extracted_at=None,
     ) -> None:
-        """Upsert a directed edge, accumulating weight on duplicates."""
+        """Upsert a directed edge, accumulating weight and combining confidence.
+
+        On duplicate edges:
+            * ``weight`` accumulates (mention frequency).
+            * ``confidence`` combines via noisy-OR: ``1 - (1-c1)*(1-c2)``.
+            * ``evidence_span`` / ``chunk_id`` / ``extracted_at`` are kept
+              from the first upsert (original observation).
+        """
         # Silently drop self-edges (case-insensitive)
         if subject.lower() == object.lower():
             return
+
+        # Neo4j cannot store None for properties; coerce extracted_at.
+        ts_iso = extracted_at.isoformat() if extracted_at is not None else ""
 
         query = """
         MATCH (s:Entity {name_lower: toLower($subject)})
@@ -310,9 +324,14 @@ class Neo4jBackend(GraphStorageBackend):
         MERGE (s)-[r:RELATES_TO {relation: $relation}]->(o)
         ON CREATE SET
             r.weight = $weight,
+            r.confidence = $confidence,
+            r.evidence_span = $evidence_span,
+            r.chunk_id = $chunk_id,
+            r.extracted_at = $extracted_at,
             r.sources = CASE WHEN $source <> '' THEN [$source] ELSE [] END
         ON MATCH SET
             r.weight = r.weight + $weight,
+            r.confidence = 1.0 - (1.0 - r.confidence) * (1.0 - $confidence),
             r.sources = CASE
                 WHEN $source <> '' AND NOT $source IN r.sources
                 THEN r.sources + $source
@@ -326,6 +345,10 @@ class Neo4jBackend(GraphStorageBackend):
             relation=relation,
             source=source,
             weight=weight,
+            confidence=confidence,
+            evidence_span=evidence_span,
+            chunk_id=chunk_id,
+            extracted_at=ts_iso,
         )
 
     def upsert_entities(self, entities: List[Entity]) -> None:
@@ -377,15 +400,29 @@ class Neo4jBackend(GraphStorageBackend):
         self._run_write(merge_query, batch=batch)
 
     def upsert_triples(self, triples: List[Triple]) -> None:
-        """Batch upsert triples using UNWIND."""
+        """Batch upsert triples using UNWIND.
+
+        Confidence resolution: when ``extractor_source`` is non-empty, the
+        per-extractor prior overrides ``Triple.confidence``. Mirrors
+        ``NetworkXBackend.upsert_triples``.
+        """
         if not triples:
             return
+
+        from kgweave.knowledge_graph.common.extractor_priors import (
+            confidence_for,
+        )
 
         # Filter self-edges
         batch = []
         for t in triples:
             if t.subject.lower() == t.object.lower():
                 continue
+            confidence = (
+                confidence_for(t.extractor_source)
+                if t.extractor_source
+                else t.confidence
+            )
             batch.append(
                 {
                     "subject": t.subject,
@@ -393,6 +430,13 @@ class Neo4jBackend(GraphStorageBackend):
                     "relation": t.predicate,
                     "source": t.source,
                     "weight": t.weight,
+                    "confidence": confidence,
+                    "evidence_span": t.evidence_span,
+                    "chunk_id": t.chunk_id,
+                    "extracted_at": (
+                        t.extracted_at.isoformat()
+                        if t.extracted_at is not None else ""
+                    ),
                 }
             )
 
@@ -406,9 +450,14 @@ class Neo4jBackend(GraphStorageBackend):
         MERGE (s)-[r:RELATES_TO {relation: item.relation}]->(o)
         ON CREATE SET
             r.weight = item.weight,
+            r.confidence = item.confidence,
+            r.evidence_span = item.evidence_span,
+            r.chunk_id = item.chunk_id,
+            r.extracted_at = item.extracted_at,
             r.sources = CASE WHEN item.source <> '' THEN [item.source] ELSE [] END
         ON MATCH SET
             r.weight = r.weight + item.weight,
+            r.confidence = 1.0 - (1.0 - r.confidence) * (1.0 - item.confidence),
             r.sources = CASE
                 WHEN item.source <> '' AND NOT item.source IN r.sources
                 THEN r.sources + item.source

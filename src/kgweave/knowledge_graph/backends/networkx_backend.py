@@ -2,21 +2,26 @@
 # NetworkX-based concrete implementation of GraphStorageBackend.
 # Exports: NetworkXBackend
 # Deps: networkx, orjson, src.knowledge_graph.backend, src.knowledge_graph.common.schemas
-# Notable: query_neighbors_typed added (REQ-KG-760) — BFS filtered by edge predicate whitelist.
+# Notable: MultiDiGraph keyed by predicate; per-instance evidence accumulation.
 # @end-summary
 """NetworkX-based graph storage backend.
 
-Implements :class:`GraphStorageBackend` using an in-memory ``nx.DiGraph``.
-Provides entity resolution (alias + case-insensitive dedup), edge upserting
-with weight accumulation, and ``orjson``/``node_link_data`` persistence that
-is backward-compatible with the legacy ``KnowledgeGraphBuilder`` format.
+Implements :class:`GraphStorageBackend` using an in-memory
+``nx.MultiDiGraph``. Edges are keyed by predicate so that parallel
+predicates between the same pair of nodes (e.g. ``is_a`` and
+``subset_of`` between A and B) are preserved as distinct edges.
+
+Per-edge evidence accumulates into an ``evidences`` list (each entry a
+dict with ``evidence_span``, ``chunk_id``, ``extracted_at``, ``source``)
+so that repeated upserts of the same triple from different sources
+preserve every observation rather than overwriting the first.
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import networkx as nx
 import orjson
@@ -25,6 +30,7 @@ from kgweave.knowledge_graph.backend import GraphStorageBackend, MergeReport, Re
 from kgweave.knowledge_graph.common import (
     Entity,
     EntityDescription,
+    LayerDiff,
     Triple,
 )
 
@@ -52,7 +58,7 @@ class NetworkXBackend(GraphStorageBackend):
         self,
         description_token_budget: int = _DEFAULT_DESCRIPTION_TOKEN_BUDGET,
     ) -> None:
-        self.graph: nx.DiGraph = nx.DiGraph()
+        self.graph: nx.MultiDiGraph = nx.MultiDiGraph()
         self._aliases: Dict[str, str] = {}
         self._case_index: Dict[str, str] = {}
         self._description_token_budget = description_token_budget
@@ -87,13 +93,53 @@ class NetworkXBackend(GraphStorageBackend):
         type: str,
         source: str,
         aliases: Optional[List[str]] = None,
+        layer: Optional[str] = None,
+        is_test: Optional[bool] = None,
+        port_direction: Optional[str] = None,
+        attributes: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Upsert a single entity node with alias/case dedup."""
+        """Upsert a single entity node with alias/case dedup.
+
+        ``layer`` is the source-of-origin tag (e.g. ``"slang"``, ``"sdc"``).
+        Sticky on first set: subsequent upserts of the same node do not
+        overwrite the introducing layer.
+        """
         canonical = self._resolve(name)
 
         if self.graph.has_node(canonical):
             data = self.graph.nodes[canonical]
-            data["mention_count"] += 1
+            # A node may have been auto-created by add_edge before we ever
+            # saw it as an entity, in which case it lacks the entity attrs.
+            # An explicit Entity upsert always wins over the placeholder
+            # ``"concept"`` type left by ``add_edge``, but does not clobber
+            # a real type set by an earlier extractor (last-write semantics
+            # apply only to the placeholder case).
+            existing_type = data.get("type")
+            if existing_type is None or existing_type == "concept":
+                data["type"] = type
+            data.setdefault("sources", [])
+            data.setdefault("aliases", [])
+            data["mention_count"] = data.get("mention_count", 0) + 1
+            # Layer is sticky to the introducing extractor — only set if
+            # not already present (preserves "originally introduced by"
+            # semantics even when later layers reference the same node).
+            if layer is not None and not data.get("layer"):
+                data["layer"] = layer
+            # ``is_test`` is non-sticky: an explicit upsert always overrides
+            # because it carries the producer's freshest classification.
+            # ``None`` means "not provided, leave as is".
+            if is_test is not None:
+                data["is_test"] = is_test
+            elif "is_test" not in data:
+                data["is_test"] = None
+            # ``port_direction`` is sticky-by-explicit-set: an explicit value
+            # always wins; ``None`` means "not provided by this caller", do
+            # not erase a prior value. Default to ``None`` only when the
+            # attribute has never been set.
+            if port_direction is not None:
+                data["port_direction"] = port_direction
+            elif "port_direction" not in data:
+                data["port_direction"] = None
             if source and source not in data["sources"]:
                 data["sources"].append(source)
             if aliases:
@@ -103,6 +149,10 @@ class NetworkXBackend(GraphStorageBackend):
                     # Register alias in the alias index
                     self._aliases[a] = canonical
                     self._case_index[a.lower()] = canonical
+            # Merge free-form attributes (later writes win for the same key).
+            # Explicit dict update — NOT routed through the alias index.
+            if attributes:
+                data.setdefault("attributes", {}).update(attributes)
         else:
             self.graph.add_node(
                 canonical,
@@ -110,6 +160,10 @@ class NetworkXBackend(GraphStorageBackend):
                 sources=[source] if source else [],
                 mention_count=1,
                 aliases=list(aliases) if aliases else [],
+                layer=layer,
+                is_test=is_test,
+                port_direction=port_direction,
+                attributes=dict(attributes) if attributes else {},
             )
             # Register aliases
             if aliases:
@@ -124,8 +178,37 @@ class NetworkXBackend(GraphStorageBackend):
         relation: str,
         source: str,
         weight: float = 1.0,
+        confidence: float = 1.0,
+        evidence_span: str = "",
+        chunk_id: str = "",
+        extracted_at=None,
+        lhs_slice=None,
+        rhs_slice=None,
+        layer: Optional[str] = None,
+        extractor_source: str = "",
+        confidence_tier: str = "high",
+        resolved: bool = True,
+        attributes: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Upsert a directed edge, accumulating weight on duplicates."""
+        """Upsert a directed edge keyed by predicate.
+
+        The backend uses a ``MultiDiGraph`` keyed by predicate (relation),
+        so parallel edges with different predicates between the same pair
+        of nodes coexist without collapsing.
+
+        On duplicate edges (same subject/object/predicate):
+            * ``weight`` accumulates (mention frequency).
+            * ``confidence`` combines via noisy-OR (agreement bump).
+            * ``evidence_span`` / ``chunk_id`` / ``extracted_at`` are
+              appended to ``evidences`` (a list of per-observation dicts)
+              so every observation is preserved for later citation.
+            * ``source`` is appended to the ``sources`` list.
+        """
+        # Local import to avoid circular dependency at module load time.
+        from kgweave.knowledge_graph.common.extractor_priors import (
+            combine_confidence,
+        )
+
         subj_c = self._resolve(subject)
         obj_c = self._resolve(object)
 
@@ -133,28 +216,157 @@ class NetworkXBackend(GraphStorageBackend):
         if subj_c == obj_c:
             return
 
-        if self.graph.has_edge(subj_c, obj_c):
-            edge_data = self.graph[subj_c][obj_c]
-            edge_data["weight"] += weight
+        # Ensure both endpoint nodes exist with proper entity attrs before
+        # we add the edge. NetworkX's add_edge would otherwise auto-create
+        # bare nodes lacking the ``sources``/``mention_count``/``aliases``
+        # attrs that downstream consumers (legend, tooltip, retrieval)
+        # rely on. Propagate the triple's source to each endpoint so nodes
+        # introduced solely via edges still surface their origin.
+        for endpoint in (subj_c, obj_c):
+            if self.graph.has_node(endpoint):
+                node_data = self.graph.nodes[endpoint]
+                node_data.setdefault("type", "concept")
+                node_data.setdefault("sources", [])
+                node_data.setdefault("aliases", [])
+                node_data.setdefault("mention_count", 1)
+                if source and source not in node_data["sources"]:
+                    node_data["sources"].append(source)
+            else:
+                self.graph.add_node(
+                    endpoint,
+                    type="concept",
+                    sources=[source] if source else [],
+                    mention_count=1,
+                    aliases=[],
+                )
+
+        # Layer fallback: if not explicitly passed, fall back to
+        # ``extractor_source`` for backwards compat with extractors that
+        # populate only the legacy field.
+        effective_layer = layer if layer is not None else (extractor_source or None)
+
+        # MultiDiGraph: key edges by predicate so that (A, is_a, B) and
+        # (A, subset_of, B) can coexist without one shadowing the other.
+        # Slice attrs are only meaningful for ``reads`` edges (intra-module
+        # signal-level dataflow with bit-range refinement). Other predicates
+        # ignore them so edge-data shape stays unchanged.
+        slice_relevant = relation == "reads"
+        new_evidence = {
+            "evidence_span": evidence_span,
+            "chunk_id": chunk_id,
+            "extracted_at": extracted_at,
+            "source": source,
+        }
+        if slice_relevant:
+            new_evidence["lhs_slice"] = lhs_slice
+            new_evidence["rhs_slice"] = rhs_slice
+
+        if self.graph.has_edge(subj_c, obj_c, key=relation):
+            edge_data = self.graph[subj_c][obj_c][relation]
+            edge_data["weight"] = edge_data.get("weight", 0.0) + weight
+            # Layer is sticky to the first observation — preserve original
+            # source-of-origin even when other layers re-assert the edge.
+            if effective_layer is not None and not edge_data.get("layer"):
+                edge_data["layer"] = effective_layer
+            existing_conf = edge_data.get("confidence", 1.0)
+            edge_data["confidence"] = combine_confidence(existing_conf, confidence)
+            # Confidence tier: keep the strongest tier observed across
+            # duplicates. Resolved is sticky-True — any resolved observation
+            # clears prior unresolved status (we now have a real referent).
+            _tier_rank = {"high": 3, "medium": 2, "low": 1}
+            existing_tier = edge_data.get("confidence_tier", "high")
+            if _tier_rank.get(confidence_tier, 0) > _tier_rank.get(existing_tier, 0):
+                edge_data["confidence_tier"] = confidence_tier
+            if resolved:
+                edge_data["resolved"] = True
+            else:
+                edge_data.setdefault("resolved", False)
             if source and source not in edge_data.get("sources", []):
                 edge_data.setdefault("sources", []).append(source)
+            # Accumulate evidence — append for ``reads`` edges whenever any
+            # slice/evidence detail is present (so per-observation slices
+            # are preserved even if evidence_span repeats), and otherwise
+            # only when at least one of the legacy evidence fields differs
+            # from the empty default.
+            should_append = any(v for v in (evidence_span, chunk_id, extracted_at))
+            if slice_relevant and (lhs_slice is not None or rhs_slice is not None):
+                should_append = True
+            if should_append:
+                edge_data.setdefault("evidences", []).append(new_evidence)
+                # Surface the latest observation on the scalar fields so
+                # legacy callers that read edge["evidence_span"] still
+                # work — they simply now see the most recent observation.
+                if evidence_span:
+                    edge_data["evidence_span"] = evidence_span
+                if chunk_id:
+                    edge_data["chunk_id"] = chunk_id
+                if extracted_at is not None:
+                    edge_data["extracted_at"] = extracted_at
+            # Merge free-form edge attributes (later writes win per-key).
+            if attributes:
+                edge_data.setdefault("attributes", {}).update(attributes)
+            if slice_relevant:
+                # Top-level slice = consensus across all observations; if
+                # any observation disagrees, surface ``None`` ("mixed").
+                pairs = {
+                    (ev.get("lhs_slice"), ev.get("rhs_slice"))
+                    for ev in edge_data.get("evidences", [])
+                }
+                if len(pairs) == 1:
+                    only = next(iter(pairs))
+                    edge_data["lhs_slice"] = only[0]
+                    edge_data["rhs_slice"] = only[1]
+                else:
+                    edge_data["lhs_slice"] = None
+                    edge_data["rhs_slice"] = None
         else:
+            evidences = []
+            should_append = any(v for v in (evidence_span, chunk_id, extracted_at))
+            if slice_relevant and (lhs_slice is not None or rhs_slice is not None):
+                should_append = True
+            if should_append:
+                evidences.append(new_evidence)
+            extra: dict = {}
+            if slice_relevant:
+                extra["lhs_slice"] = lhs_slice
+                extra["rhs_slice"] = rhs_slice
             self.graph.add_edge(
                 subj_c,
                 obj_c,
+                key=relation,
                 relation=relation,
                 weight=weight,
+                confidence=confidence,
+                evidence_span=evidence_span,
+                chunk_id=chunk_id,
+                extracted_at=extracted_at,
                 sources=[source] if source else [],
+                evidences=evidences,
+                layer=effective_layer,
+                confidence_tier=confidence_tier,
+                resolved=resolved,
+                attributes=dict(attributes) if attributes else {},
+                **extra,
             )
 
     def upsert_entities(self, entities: List[Entity]) -> None:
         """Batch upsert entities via ``add_node``."""
         for ent in entities:
+            # Fall back to first ``extractor_source`` when ``layer`` is unset
+            # — preserves source-of-origin for legacy extractors that only
+            # populate ``extractor_source`` on Entity.
+            ent_layer = ent.layer
+            if ent_layer is None and ent.extractor_source:
+                ent_layer = ent.extractor_source[0]
             self.add_node(
                 name=ent.name,
                 type=ent.type,
                 source=ent.sources[0] if ent.sources else "",
                 aliases=ent.aliases or None,
+                layer=ent_layer,
+                is_test=getattr(ent, "is_test", None),
+                port_direction=getattr(ent, "port_direction", None),
+                attributes=getattr(ent, "attributes", None) or None,
             )
             # Merge remaining sources beyond the first
             canonical = self._resolve(ent.name)
@@ -165,14 +377,47 @@ class NetworkXBackend(GraphStorageBackend):
                         node_data["sources"].append(src)
 
     def upsert_triples(self, triples: List[Triple]) -> None:
-        """Batch upsert triples via ``add_edge``."""
+        """Batch upsert triples via ``add_edge``.
+
+        Confidence resolution rule: when ``extractor_source`` is non-empty,
+        the per-extractor prior (see ``extractor_priors``) overrides the
+        ``Triple.confidence`` field. This keeps extractor implementations
+        free of confidence bookkeeping — they only declare which extractor
+        they are, and the backend assigns the trust score.
+
+        Layer fallback: when ``Triple.layer`` is ``None`` but
+        ``Triple.extractor_source`` is set, the backend uses the
+        ``extractor_source`` value as the edge's layer. This preserves
+        source-of-origin tracking for legacy extractors that have not yet
+        opted in to populating the explicit ``layer`` field.
+        """
+        from kgweave.knowledge_graph.common.extractor_priors import (
+            confidence_for,
+        )
+
         for t in triples:
+            confidence = (
+                confidence_for(t.extractor_source)
+                if t.extractor_source
+                else t.confidence
+            )
             self.add_edge(
                 subject=t.subject,
                 object=t.object,
                 relation=t.predicate,
                 source=t.source,
                 weight=t.weight,
+                confidence=confidence,
+                evidence_span=t.evidence_span,
+                chunk_id=t.chunk_id,
+                extracted_at=t.extracted_at,
+                lhs_slice=getattr(t, "lhs_slice", None),
+                rhs_slice=getattr(t, "rhs_slice", None),
+                layer=getattr(t, "layer", None),
+                extractor_source=t.extractor_source,
+                confidence_tier=getattr(t, "confidence_tier", "high"),
+                resolved=getattr(t, "resolved", True),
+                attributes=getattr(t, "attributes", None) or None,
             )
 
     def upsert_descriptions(
@@ -262,12 +507,12 @@ class NetworkXBackend(GraphStorageBackend):
 
         # --- Pass 2: remove edges that belong to source_key ---
         edges_to_remove = [
-            (u, v)
-            for u, v, data in self.graph.edges(data=True)
+            (u, v, k)
+            for u, v, k, data in self.graph.edges(keys=True, data=True)
             if source_key in data.get("sources", [])
         ]
-        for u, v in edges_to_remove:
-            self.graph.remove_edge(u, v)
+        for u, v, k in edges_to_remove:
+            self.graph.remove_edge(u, v, key=k)
             stats.triples_removed += 1
 
         # --- Pass 3: delete marked nodes and clean up indices ---
@@ -318,37 +563,51 @@ class NetworkXBackend(GraphStorageBackend):
         dup_data = self.graph.nodes[duplicate]
 
         # --- Transfer outgoing edges: duplicate → X  becomes  canonical → X ---
-        for _, target, edge_data in list(self.graph.out_edges(duplicate, data=True)):
+        for _, target, key, edge_data in list(
+            self.graph.out_edges(duplicate, keys=True, data=True)
+        ):
             if target == canonical:
                 # Would create a self-loop — skip
                 continue
-            if self.graph.has_edge(canonical, target):
-                self.graph[canonical][target]["weight"] += edge_data.get("weight", 1.0)
+            relation = edge_data.get("relation", key)
+            if self.graph.has_edge(canonical, target, key=relation):
+                self.graph[canonical][target][relation]["weight"] = (
+                    self.graph[canonical][target][relation].get("weight", 1.0)
+                    + edge_data.get("weight", 1.0)
+                )
             else:
                 self.graph.add_edge(
                     canonical,
                     target,
-                    relation=edge_data.get("relation", ""),
+                    key=relation,
+                    relation=relation,
                     weight=edge_data.get("weight", 1.0),
                     sources=list(edge_data.get("sources", [])),
+                    evidences=list(edge_data.get("evidences", [])),
                 )
 
         # --- Transfer incoming edges: X → duplicate  becomes  X → canonical ---
-        for source_node, _, edge_data in list(self.graph.in_edges(duplicate, data=True)):
+        for source_node, _, key, edge_data in list(
+            self.graph.in_edges(duplicate, keys=True, data=True)
+        ):
             if source_node == canonical:
                 # Would create a self-loop — skip
                 continue
-            if self.graph.has_edge(source_node, canonical):
-                self.graph[source_node][canonical]["weight"] += edge_data.get(
-                    "weight", 1.0
+            relation = edge_data.get("relation", key)
+            if self.graph.has_edge(source_node, canonical, key=relation):
+                self.graph[source_node][canonical][relation]["weight"] = (
+                    self.graph[source_node][canonical][relation].get("weight", 1.0)
+                    + edge_data.get("weight", 1.0)
                 )
             else:
                 self.graph.add_edge(
                     source_node,
                     canonical,
-                    relation=edge_data.get("relation", ""),
+                    key=relation,
+                    relation=relation,
                     weight=edge_data.get("weight", 1.0),
                     sources=list(edge_data.get("sources", [])),
+                    evidences=list(edge_data.get("evidences", [])),
                 )
 
         # --- Merge aliases: duplicate's name + its aliases → canonical ---
@@ -419,6 +678,7 @@ class NetworkXBackend(GraphStorageBackend):
             aliases=list(data.get("aliases", [])),
             raw_mentions=raw_mentions,
             current_summary=data.get("current_summary", ""),
+            layer=data.get("layer"),
         )
 
     def query_neighbors(self, entity: str, depth: int = 1) -> List[Entity]:
@@ -537,40 +797,60 @@ class NetworkXBackend(GraphStorageBackend):
     # ------------------------------------------------------------------
 
     def get_outgoing_edges(self, node_id: str) -> List[Triple]:
-        """Return outgoing ``Triple`` edges for *node_id*."""
+        """Return outgoing ``Triple`` edges for *node_id*.
+
+        One Triple per (subject, predicate, object) edge-key. Parallel
+        edges with different predicates produce separate Triples.
+        """
         canonical = self._resolve(node_id)
         if not self.graph.has_node(canonical):
             return []
         triples: List[Triple] = []
-        for _, target, data in self.graph.out_edges(canonical, data=True):
-            triples.append(
-                Triple(
-                    subject=canonical,
-                    predicate=data.get("relation", ""),
-                    object=target,
-                    source=data.get("sources", [""])[0] if data.get("sources") else "",
-                    weight=data.get("weight", 1.0),
-                )
-            )
+        for _, target, key, data in self.graph.out_edges(
+            canonical, keys=True, data=True
+        ):
+            triples.append(self._triple_from_edge(canonical, target, key, data))
         return triples
 
     def get_incoming_edges(self, node_id: str) -> List[Triple]:
-        """Return incoming ``Triple`` edges for *node_id*."""
+        """Return incoming ``Triple`` edges for *node_id*.
+
+        One Triple per (subject, predicate, object) edge-key.
+        """
         canonical = self._resolve(node_id)
         if not self.graph.has_node(canonical):
             return []
         triples: List[Triple] = []
-        for source_node, _, data in self.graph.in_edges(canonical, data=True):
-            triples.append(
-                Triple(
-                    subject=source_node,
-                    predicate=data.get("relation", ""),
-                    object=canonical,
-                    source=data.get("sources", [""])[0] if data.get("sources") else "",
-                    weight=data.get("weight", 1.0),
-                )
-            )
+        for source_node, _, key, data in self.graph.in_edges(
+            canonical, keys=True, data=True
+        ):
+            triples.append(self._triple_from_edge(source_node, canonical, key, data))
         return triples
+
+    @staticmethod
+    def _triple_from_edge(subject: str, obj: str, key: str, data: dict) -> Triple:
+        """Construct a Triple from a MultiDiGraph edge record.
+
+        The Triple's scalar ``evidence_span``/``chunk_id`` are populated
+        from the latest observation (back-compat with single-evidence
+        consumers); callers that need every observation should read
+        ``backend.graph[subj][obj][predicate]["evidences"]`` directly.
+        """
+        sources = data.get("sources") or []
+        return Triple(
+            subject=subject,
+            predicate=data.get("relation", key),
+            object=obj,
+            source=sources[0] if sources else "",
+            weight=data.get("weight", 1.0),
+            confidence=data.get("confidence", 1.0),
+            evidence_span=data.get("evidence_span", "") or "",
+            chunk_id=data.get("chunk_id", "") or "",
+            extracted_at=data.get("extracted_at"),
+            lhs_slice=data.get("lhs_slice"),
+            rhs_slice=data.get("rhs_slice"),
+            layer=data.get("layer"),
+        )
 
     def get_all_entities(self) -> List[Entity]:
         """Return all nodes as Entity objects."""
@@ -613,7 +893,9 @@ class NetworkXBackend(GraphStorageBackend):
         """Deserialize from JSON and rebuild alias/case indices."""
         try:
             raw = orjson.loads(path.read_bytes())
-            self.graph = nx.node_link_graph(raw, directed=True, edges="edges")
+            self.graph = nx.node_link_graph(
+                raw, directed=True, multigraph=True, edges="edges"
+            )
         except OSError as exc:
             logger.error("load: I/O error reading graph from %s: %s", path, exc)
             raise
@@ -634,8 +916,181 @@ class NetworkXBackend(GraphStorageBackend):
                 self._case_index[alias.lower()] = node
 
     # ------------------------------------------------------------------
+    # Layer-scoped queries (source-of-origin slicing)
+    # ------------------------------------------------------------------
+
+    def subgraph_by_layer(self, layer: str) -> nx.MultiDiGraph:
+        """Return a copy of the graph containing only edges for ``layer``.
+
+        Nodes are kept iff (a) they have at least one matching edge, OR
+        (b) their own ``layer`` attribute matches. Useful for inspecting
+        a single source-of-origin's slice of the unified graph.
+        """
+        sub: nx.MultiDiGraph = nx.MultiDiGraph()
+        kept_nodes: set[str] = set()
+
+        # Nodes whose own layer attr matches.
+        for node, data in self.graph.nodes(data=True):
+            if data.get("layer") == layer:
+                sub.add_node(node, **data)
+                kept_nodes.add(node)
+
+        # Edges whose layer matches — pull endpoints in too.
+        for u, v, k, data in self.graph.edges(keys=True, data=True):
+            if data.get("layer") != layer:
+                continue
+            if u not in kept_nodes:
+                sub.add_node(u, **self.graph.nodes[u])
+                kept_nodes.add(u)
+            if v not in kept_nodes:
+                sub.add_node(v, **self.graph.nodes[v])
+                kept_nodes.add(v)
+            sub.add_edge(u, v, key=k, **data)
+
+        return sub
+
+    def entities_by_layer(self, layer: str) -> List[Entity]:
+        """Return entities whose ``layer`` attribute matches ``layer``."""
+        out: List[Entity] = []
+        for node, data in self.graph.nodes(data=True):
+            if data.get("layer") == layer:
+                ent = self.get_entity(node)
+                if ent is not None:
+                    out.append(ent)
+        return out
+
+    def triples_by_layer(self, layer: str) -> List[Triple]:
+        """Return triples whose edge ``layer`` matches ``layer``."""
+        out: List[Triple] = []
+        for u, v, k, data in self.graph.edges(keys=True, data=True):
+            if data.get("layer") == layer:
+                out.append(self._triple_from_edge(u, v, k, data))
+        return out
+
+    def diff_layers(
+        self,
+        layer_a: str,
+        layer_b: str,
+        *,
+        node_type: Optional[str] = None,
+    ) -> LayerDiff:
+        """Compare two layers' entity sets.
+
+        Identity is by canonical entity name. Returns a :class:`LayerDiff`
+        with ``only_in_a``, ``only_in_b``, ``in_both``, and a list of
+        ``conflicting_attrs`` tuples ``(name, attr, value_in_a, value_in_b)``
+        for ``in_both`` entities whose ``type`` (or other layer-tagged
+        attrs visible on the node) disagree across the two layers.
+
+        Note: because the backend stores each node only once with a sticky
+        introducing-layer tag, "asserted by layer X" is interpreted as
+        either (a) the node's own ``layer`` attr equals X, OR (b) the node
+        participates in at least one edge whose ``layer`` equals X. This
+        captures both first-introduction and subsequent reference cases.
+
+        Args:
+            layer_a: First layer name.
+            layer_b: Second layer name.
+            node_type: If provided, restrict comparison to entities with
+                this ``type``.
+
+        Returns:
+            :class:`LayerDiff` describing set differences and per-attribute
+            conflicts.
+        """
+
+        def _names_for(layer: str) -> Dict[str, dict]:
+            """Map canonical name -> per-layer view dict for that layer."""
+            views: Dict[str, dict] = {}
+            # Nodes whose own layer matches.
+            for node, data in self.graph.nodes(data=True):
+                if data.get("layer") == layer:
+                    if node_type is not None and data.get("type") != node_type:
+                        continue
+                    views[node] = {"type": data.get("type"), "name": node}
+            # Nodes touched by an edge of this layer (subsequent references).
+            for u, v, _k, edata in self.graph.edges(keys=True, data=True):
+                if edata.get("layer") != layer:
+                    continue
+                for endpoint in (u, v):
+                    if endpoint in views:
+                        continue
+                    nd = self.graph.nodes.get(endpoint, {})
+                    if node_type is not None and nd.get("type") != node_type:
+                        continue
+                    # For "referenced by edge" rows, take the endpoint
+                    # node's stored type — it's the only ground truth we
+                    # have for the conflict-detection step.
+                    views[endpoint] = {"type": nd.get("type"), "name": endpoint}
+            return views
+
+        view_a = _names_for(layer_a)
+        view_b = _names_for(layer_b)
+
+        names_a = set(view_a)
+        names_b = set(view_b)
+
+        only_in_a = sorted(names_a - names_b)
+        only_in_b = sorted(names_b - names_a)
+        in_both = sorted(names_a & names_b)
+
+        conflicts: List = []
+        # The only attr captured per layer-view today is ``type``. Adding
+        # more attrs here is a forward-compatible extension.
+        for name in in_both:
+            a_type = view_a[name].get("type")
+            b_type = view_b[name].get("type")
+            if a_type != b_type:
+                conflicts.append((name, "type", a_type, b_type))
+
+        return LayerDiff(
+            layer_a=layer_a,
+            layer_b=layer_b,
+            only_in_a=only_in_a,
+            only_in_b=only_in_b,
+            in_both=in_both,
+            conflicting_attrs=conflicts,
+        )
+
+    # ------------------------------------------------------------------
     # Diagnostics
     # ------------------------------------------------------------------
+
+    def compute_rtl_reachability(self, top_module: str) -> set[str]:
+        """Return the set of RTL_Module names reachable from ``top_module``.
+
+        BFS traverses outgoing ``instantiates`` edges (parent -> child) and
+        inbound ``bound_into`` edges (binder -> bind-target, so the binder
+        is reached when its target is reached). The result is the set of
+        nodes that are wired into the elaborated design tree rooted at
+        ``top_module``; everything else among the parser-emitted
+        RTL_Modules is "in the filelist but not in this build".
+
+        Returns an empty set when ``top_module`` is not in the graph (a
+        non-fatal condition the caller may wish to log).
+        """
+        if not self.graph.has_node(top_module):
+            return set()
+        seen: set[str] = {top_module}
+        from collections import deque
+        queue: deque[str] = deque([top_module])
+        while queue:
+            cur = queue.popleft()
+            # Forward instantiates: parent reaches its instances.
+            for _u, target, key, data in self.graph.out_edges(
+                cur, keys=True, data=True
+            ):
+                if data.get("relation", key) == "instantiates" and target not in seen:
+                    seen.add(target)
+                    queue.append(target)
+            # Inbound bound_into: bind sources are reached via the bind target.
+            for source, _v, key, data in self.graph.in_edges(
+                cur, keys=True, data=True
+            ):
+                if data.get("relation", key) == "bound_into" and source not in seen:
+                    seen.add(source)
+                    queue.append(source)
+        return seen
 
     def stats(self) -> Dict[str, object]:
         """Return node count, edge count, and top-10 most-mentioned entities."""

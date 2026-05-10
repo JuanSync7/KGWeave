@@ -339,6 +339,14 @@ from kgweave.knowledge_graph.community import (
     CommunityDiff,
     CommunitySummary,
 )
+from kgweave.knowledge_graph.queries import (
+    audit_orphan_tests,
+    confidence_tier_rank,
+    coverage_gaps_by_target,
+    coverage_gaps_by_target_transitive,
+    ports_by_direction,
+    trace_signal,
+)
 
 __all__ = [
     # Dispatcher functions
@@ -361,6 +369,13 @@ __all__ = [
     "CommunitySummary",
     "CommunityDiff",
     "KGTermIndex",
+    # Audit / coverage query helpers
+    "audit_orphan_tests",
+    "confidence_tier_rank",
+    "coverage_gaps_by_target",
+    "coverage_gaps_by_target_transitive",
+    "ports_by_direction",
+    "trace_signal",
     # Utilities
     "export_obsidian",
     "export_html",

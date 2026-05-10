@@ -1,24 +1,33 @@
 # @summary
-# SystemVerilog parser-based structural entity extraction using tree-sitter.
-# Walks the concrete syntax tree to extract modules, ports, parameters,
-# instances, signals, interfaces, packages, generates, and tasks/functions.
-# Falls back gracefully if tree-sitter-verilog is not installed.
+# SystemVerilog parser-based structural entity extraction using pyslang's
+# syntax tree. Walks ModuleDeclaration / InterfaceDeclaration / PackageDeclaration
+# nodes to extract modules, ports, parameters, signals, instances, generates,
+# tasks/functions, and package imports.
 # Exports: SVParserExtractor, AST_TO_SCHEMA_MAP, VALID_EXTENSIONS, KNOWN_UNSUPPORTED
-# Deps: tree_sitter, tree_sitter_verilog, src.knowledge_graph.common.schemas,
-#        src.knowledge_graph.common.types
+# Deps: pyslang (hard), kgweave.knowledge_graph.common
 # @end-summary
-"""SystemVerilog parser-based structural entity extraction.
+"""SystemVerilog parser-based structural entity extraction (pyslang-backed).
 
-Uses tree-sitter-verilog for deterministic extraction of RTL structural
-entities (modules, ports, parameters, instances, signals, interfaces,
-packages, generates, tasks/functions) from SystemVerilog source files.
-All results are tagged with ``extractor_source="sv_parser"``.
+Uses ``pyslang.SyntaxTree.fromText`` for deterministic syntax-level extraction
+of RTL structural entities (modules, ports, parameters, instances, signals,
+interfaces, packages, generates, tasks/functions). Replaces the prior
+tree-sitter-verilog implementation, which emitted ERROR nodes on real-world
+OpenTitan SV (notably aes_control.sv, aes_core.sv, aes_sbox.sv, etc.) and
+silently produced no entities for those files. pyslang's parser handles the
+full LRM and degrades gracefully on individual malformed constructs without
+losing the rest of the file.
+
+All results are tagged with ``extractor_source="sv_parser"``. Entity names
+for sub-module items are namespaced as ``"<module>.<name>"`` to match the
+convention used by ``SlangHierarchyAnalyzer`` (see ``sv_connectivity.py``);
+this lets per-file structural entities and elaborated hierarchy edges line
+up on the same canonical IDs in the graph.
 """
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Iterator, List, Optional, Set, Tuple
 
 from kgweave.knowledge_graph.common import (
     Entity,
@@ -30,6 +39,9 @@ from kgweave.knowledge_graph.common import (
     SchemaDefinition,
 )
 
+# Hard dependency: import errors are fatal. pyslang is listed in pyproject.toml.
+import pyslang as _ps  # noqa: E402
+
 __all__ = [
     "SVParserExtractor",
     "AST_TO_SCHEMA_MAP",
@@ -37,7 +49,7 @@ __all__ = [
     "KNOWN_UNSUPPORTED",
 ]
 
-logger = logging.getLogger("rag.knowledge_graph.sv_parser")
+logger = logging.getLogger("kgweave.knowledge_graph.sv_parser")
 
 # ---------------------------------------------------------------------------
 # Module-level constants
@@ -45,21 +57,29 @@ logger = logging.getLogger("rag.knowledge_graph.sv_parser")
 
 VALID_EXTENSIONS: frozenset = frozenset({".sv", ".v", ".svh"})
 
-AST_TO_SCHEMA_MAP: Dict[str, str] = {
-    "module_declaration": "RTL_Module",
-    "port_declaration": "Port",
-    "ansi_port_declaration": "Port",
-    "parameter_declaration": "Parameter",
-    "local_parameter_declaration": "Parameter",
-    "module_instantiation": "Instance",
-    "net_declaration": "Signal",
-    "data_declaration": "Signal",
-    "interface_declaration": "Interface",
-    "package_declaration": "Package",
-    # SHOULD-level (REQ-KG-1b-207):
-    "generate_region": "Generate",
-    "task_declaration": "Task_Function",
-    "function_declaration": "Task_Function",
+# Mapping from pyslang SyntaxKind names (or substrings) to our YAML schema
+# entity types. Kept as a public dict for documentation / debugging — the
+# extraction code dispatches on SyntaxKind directly rather than looking up
+# in this dict, but external callers may want to know which kinds map to
+# which schema types.
+AST_TO_SCHEMA_MAP: dict[str, str] = {
+    "ModuleDeclaration": "RTL_Module",
+    "InterfaceDeclaration": "Interface",
+    "PackageDeclaration": "Package",
+    "ImplicitAnsiPort": "Port",
+    "ExplicitAnsiPort": "Port",
+    "NonAnsiPort": "Port",
+    "ParameterDeclaration": "Parameter",
+    "ParameterDeclarationStatement": "Parameter",
+    "TypeParameterDeclaration": "Parameter",
+    "NetDeclaration": "Signal",
+    "DataDeclaration": "Signal",
+    "HierarchyInstantiation": "Instance",
+    "GenerateRegion": "Generate",
+    "LoopGenerate": "Generate",
+    "IfGenerate": "Generate",
+    "TaskDeclaration": "Task_Function",
+    "FunctionDeclaration": "Task_Function",
 }
 
 KNOWN_UNSUPPORTED: List[str] = [
@@ -69,21 +89,75 @@ KNOWN_UNSUPPORTED: List[str] = [
     "clock_domain_crossing",  # REQ-KG-1b-208 — deferred stretch goal
 ]
 
+
 # ---------------------------------------------------------------------------
-# tree-sitter bootstrap (wrapped in try/except)
+# Helpers — pyslang syntax tree walking
 # ---------------------------------------------------------------------------
 
-_TS_AVAILABLE = False
-_VERILOG_LANGUAGE = None
 
-try:
-    import tree_sitter_verilog as tsverilog  # type: ignore[import-untyped]
-    from tree_sitter import Language, Parser  # type: ignore[import-untyped]
+def _kind_str(node: Any) -> str:
+    """Return the SyntaxKind / TokenKind of *node* as a string, or ''."""
+    k = getattr(node, "kind", None)
+    return str(k) if k is not None else ""
 
-    _VERILOG_LANGUAGE = Language(tsverilog.language())
-    _TS_AVAILABLE = True
-except Exception:  # pragma: no cover — optional dependency
-    pass
+
+def _iter_children(node: Any) -> Iterator[Any]:
+    """Iterate child nodes of a pyslang syntax node, swallowing TypeError.
+
+    pyslang syntax nodes implement ``__iter__`` but Tokens do not. Iterating
+    a Token raises TypeError; we catch it and yield nothing so callers can
+    descend uniformly.
+    """
+    try:
+        for c in node:
+            yield c
+    except TypeError:
+        return
+
+
+def _token_text(tok: Any) -> Optional[str]:
+    """Return ``tok.valueText`` for a pyslang Token, or None.
+
+    pyslang Tokens expose ``valueText`` (the lexed identifier text without
+    surrounding whitespace/trivia). Some node ``.name`` attributes are also
+    Tokens, so this works uniformly. Returns None if the token has no
+    usable value.
+    """
+    if tok is None:
+        return None
+    text = getattr(tok, "valueText", None)
+    if text is None:
+        # Fallback for raw strings (declarator names sometimes appear as str).
+        if isinstance(tok, str):
+            return tok.strip() or None
+        return None
+    text = text.strip()
+    return text or None
+
+
+def _find_kind(node: Any, target_substrs: Tuple[str, ...]) -> Iterator[Any]:
+    """Yield descendants whose kind-string contains any of *target_substrs*.
+
+    Does not descend into a matched node — same scoping behaviour as the
+    legacy tree-sitter ``_find_descendants`` helper, so we don't double-count
+    nested constructs (e.g. parameters inside a nested module's header).
+    """
+    k = _kind_str(node)
+    for t in target_substrs:
+        if t in k:
+            yield node
+            return
+    for c in _iter_children(node):
+        yield from _find_kind(c, target_substrs)
+
+
+def _find_declarators(node: Any) -> Iterator[Any]:
+    """Yield ``Declarator`` descendants. Does not descend into matched nodes."""
+    if "Declarator" in _kind_str(node):
+        yield node
+        return
+    for c in _iter_children(node):
+        yield from _find_declarators(c)
 
 
 # ---------------------------------------------------------------------------
@@ -92,10 +166,13 @@ except Exception:  # pragma: no cover — optional dependency
 
 
 class SVParserExtractor:
-    """Deterministic structural extractor for SystemVerilog using tree-sitter.
+    """Deterministic structural extractor for SystemVerilog using pyslang.
 
-    Extracts entities and structural relationships from the parsed CST.
-    All results are tagged with ``extractor_source="sv_parser"``.
+    Extracts entities and structural relationships from the parsed syntax
+    tree. All results are tagged with ``extractor_source="sv_parser"``.
+    Sub-module entity names are namespaced as ``"<module>.<name>"`` so that
+    they line up with the elaborated hierarchy edges produced by
+    ``SlangHierarchyAnalyzer``.
     """
 
     @property
@@ -108,28 +185,14 @@ class SVParserExtractor:
         schema: SchemaDefinition,
         config: KGConfig,
     ) -> None:
-        """Initialise with schema and config. Creates the tree-sitter parser.
+        """Initialise with schema and config.
 
         Args:
             schema: Parsed YAML schema for type validation.
             config: KG runtime configuration.
-
-        Raises:
-            ImportError: If tree-sitter or tree-sitter-verilog is not installed.
         """
         self._schema = schema
         self._config = config
-        self._parser: Any = None
-
-        if not _TS_AVAILABLE:
-            logger.warning(
-                "tree-sitter or tree-sitter-verilog not installed. "
-                "SVParserExtractor will return empty results. "
-                "Install with: pip install tree-sitter tree-sitter-verilog"
-            )
-            return
-
-        self._parser = Parser(_VERILOG_LANGUAGE)
 
     # -- Public API ----------------------------------------------------------
 
@@ -141,17 +204,30 @@ class SVParserExtractor:
             source: File path or URI for provenance.
 
         Returns:
-            ExtractionResult with entities and triples. Partial results
-            on parse errors (ERROR subtrees are skipped).
+            ExtractionResult with entities and triples. Returns an empty
+            result if pyslang fails to parse the text outright.
         """
-        if self._parser is None:
+        try:
+            tree = _ps.SyntaxTree.fromText(text)
+        except Exception:  # noqa: BLE001 — pyslang may raise various exceptions
+            logger.warning("pyslang parse failed for %s", source, exc_info=True)
             return ExtractionResult()
 
-        tree = self._parse_tree(text)
-        if tree is None:
-            return ExtractionResult()
+        entities: List[Entity] = []
+        triples: List[Triple] = []
 
-        entities, triples = self._walk_tree(tree.root_node, source)
+        for decl in self._find_top_level_declarations(tree.root):
+            kind = _kind_str(decl)
+            if "ModuleDeclaration" in kind:
+                e, t = self._extract_module(decl, source)
+            elif "InterfaceDeclaration" in kind:
+                e, t = self._extract_interface(decl, source)
+            elif "PackageDeclaration" in kind:
+                e, t = self._extract_package(decl, source)
+            else:
+                continue
+            entities.extend(e)
+            triples.extend(t)
 
         return ExtractionResult(entities=entities, triples=triples)
 
@@ -189,706 +265,567 @@ class SVParserExtractor:
         """Return relation triples from *text* (EntityExtractor protocol)."""
         return self.extract(text).triples
 
-    # -- Internal tree-walking methods ---------------------------------------
+    # -- Internal: top-level discovery ---------------------------------------
 
-    def _parse_tree(self, text: str) -> Any:
-        """Parse text into a tree-sitter CST.
+    @staticmethod
+    def _find_top_level_declarations(root: Any) -> List[Any]:
+        """Find all top-level Module/Interface/Package declarations.
 
-        Args:
-            text: Source code string (encoded to UTF-8 internally).
+        Walks the syntax tree but does not descend into a matched declaration
+        — nested module declarations (inside a generate, for example) are
+        scoped as part of the enclosing module rather than promoted to the
+        top level. This matches the legacy tree-sitter behaviour.
 
-        Returns:
-            tree-sitter Tree object, or None on failure.
+        ``tree.root`` may itself be a single ``ModuleDeclaration`` (single-
+        module file) or a ``CompilationUnit`` containing many declarations.
+        Both shapes are handled uniformly.
         """
-        if self._parser is None:
-            return None
-        try:
-            return self._parser.parse(bytes(text, "utf-8"))
-        except Exception:
-            logger.warning("tree-sitter parse failed", exc_info=True)
-            return None
+        found: List[Any] = []
+        targets = ("ModuleDeclaration", "InterfaceDeclaration", "PackageDeclaration")
 
-    def _walk_tree(
-        self, node: Any, source: str
+        def walk(node: Any) -> None:
+            k = _kind_str(node)
+            for t in targets:
+                if t in k:
+                    found.append(node)
+                    return
+            for c in _iter_children(node):
+                walk(c)
+
+        walk(root)
+        return found
+
+    @staticmethod
+    def _decl_name(decl: Any) -> Optional[str]:
+        """Return the canonical name of a Module/Interface/Package decl."""
+        for c in _iter_children(decl):
+            if "Header" in _kind_str(c):
+                return _token_text(getattr(c, "name", None))
+        return None
+
+    @staticmethod
+    def _decl_header(decl: Any) -> Optional[Any]:
+        """Return the header sub-node of a declaration, if any."""
+        for c in _iter_children(decl):
+            if "Header" in _kind_str(c):
+                return c
+        return None
+
+    @staticmethod
+    def _decl_body_members(decl: Any) -> Iterator[Any]:
+        """Yield direct member statements inside a declaration body.
+
+        The shape of a ``ModuleDeclaration`` is roughly::
+
+            [attribute-list, header, body-list, end-keyword]
+
+        where ``body-list`` is a ``SyntaxList`` of items. We yield items
+        from the list(s) that come *after* the header — which excludes
+        the parameter port list and the ANSI port list (those live inside
+        the header and are extracted separately).
+        """
+        seen_header = False
+        for c in _iter_children(decl):
+            if "Header" in _kind_str(c):
+                seen_header = True
+                continue
+            if not seen_header:
+                continue
+            if _kind_str(c) == "SyntaxKind.SyntaxList":
+                for m in _iter_children(c):
+                    yield m
+
+    # -- Internal: per-declaration extractors --------------------------------
+
+    def _extract_module(
+        self, decl: Any, source: str
     ) -> Tuple[List[Entity], List[Triple]]:
-        """Recursively walk the CST and extract entities and triples.
+        """Extract a module declaration and its children."""
+        entities: List[Entity] = []
+        triples: List[Triple] = []
 
-        Skips ERROR and MISSING nodes with a logged warning.
-        Dispatches to type-specific extraction methods based on
-        ``AST_TO_SCHEMA_MAP`` membership.
+        module_name = self._decl_name(decl)
+        if module_name is None:
+            logger.warning("Could not extract module name from declaration")
+            return entities, triples
 
-        Args:
-            node: tree-sitter Node to process.
-            source: File path for provenance.
+        entities.append(self._make_entity(module_name, "RTL_Module", source))
 
-        Returns:
-            Tuple of (entities, triples) collected from this subtree.
+        # Header-resident declarations: parameter port list, ANSI port list.
+        header = self._decl_header(decl)
+        if header is not None:
+            e, t = self._extract_header_parameters(header, module_name, source)
+            entities.extend(e)
+            triples.extend(t)
+            e, t = self._extract_header_ports(header, module_name, source)
+            entities.extend(e)
+            triples.extend(t)
+
+        # Body-resident: parameters, ports (non-ANSI), signals, instances,
+        # generates, tasks/functions, imports.
+        seen_param: Set[str] = set()
+        seen_port: Set[str] = set()
+        seen_signal: Set[str] = set()
+        seen_instance: Set[str] = set()
+        seen_pkg_import: Set[str] = set()
+        seen_genfn: Set[str] = set()
+
+        for member in self._decl_body_members(decl):
+            mk = _kind_str(member)
+
+            if "ParameterDeclarationStatement" in mk or "TypeParameterDeclaration" in mk:
+                e, t = self._extract_parameters_in(member, module_name, source, seen_param)
+                entities.extend(e)
+                triples.extend(t)
+            elif "PortDeclaration" in mk and "AnsiPort" not in mk:
+                # Non-ANSI port declarations inside the body.
+                e, t = self._extract_body_ports(member, module_name, source, seen_port)
+                entities.extend(e)
+                triples.extend(t)
+            elif "NetDeclaration" in mk or "DataDeclaration" in mk:
+                # data_declaration may be a package import in disguise; skip those.
+                if self._is_import_declaration(member):
+                    e, t = self._extract_imports(member, module_name, source, seen_pkg_import)
+                    triples.extend(t)
+                else:
+                    e, t = self._extract_signals_in(member, module_name, source, seen_signal)
+                    entities.extend(e)
+                    triples.extend(t)
+            elif "PackageImportDeclaration" in mk:
+                e, t = self._extract_imports(member, module_name, source, seen_pkg_import)
+                triples.extend(t)
+            elif "HierarchyInstantiation" in mk:
+                e, t = self._extract_instances_in(member, module_name, source, seen_instance)
+                entities.extend(e)
+                triples.extend(t)
+            elif "GenerateRegion" in mk or "LoopGenerate" in mk or "IfGenerate" in mk:
+                e, t = self._extract_generate(member, module_name, source, seen_genfn)
+                entities.extend(e)
+                triples.extend(t)
+            elif "TaskDeclaration" in mk or "FunctionDeclaration" in mk:
+                e, t = self._extract_task_function(member, module_name, source, seen_genfn)
+                entities.extend(e)
+                triples.extend(t)
+            # Other member kinds (always blocks, modport, typedef, assertions,
+            # specify blocks, etc.) are not represented as entities by this
+            # extractor — they belong to other extractors / future tiers.
+
+        return entities, triples
+
+    def _extract_interface(
+        self, decl: Any, source: str
+    ) -> Tuple[List[Entity], List[Triple]]:
+        """Extract an interface declaration.
+
+        Reuses module extraction since pyslang represents interfaces with
+        the same declaration shape; only the canonical entity type differs.
+        """
+        # Run the module extractor and then replace the top-level RTL_Module
+        # entity with an Interface entity. Cheap and avoids duplicating logic.
+        entities, triples = self._extract_module(decl, source)
+        if entities and entities[0].type == "RTL_Module":
+            top = entities[0]
+            entities[0] = Entity(
+                name=top.name,
+                type="Interface",
+                sources=top.sources,
+                extractor_source=top.extractor_source,
+            )
+        return entities, triples
+
+    def _extract_package(
+        self, decl: Any, source: str
+    ) -> Tuple[List[Entity], List[Triple]]:
+        """Extract a package declaration (parameters + typedef-bearing items).
+
+        Packages have no header port list / ANSI ports — only body items.
+        We surface the package as an entity and contains-link any parameter
+        declarations inside it so downstream queries can resolve
+        ``mypkg.MY_CONST`` references.
         """
         entities: List[Entity] = []
         triples: List[Triple] = []
 
-        if node.type in ("ERROR", "MISSING"):
-            logger.warning(
-                "Skipping %s node at byte %d in %s",
-                node.type,
-                node.start_byte,
-                source,
-            )
+        pkg_name = self._decl_name(decl)
+        if pkg_name is None:
+            logger.warning("Could not extract package name from declaration")
             return entities, triples
 
-        # Dispatch based on node type
-        if node.type == "module_declaration":
-            e, t = self._extract_module(node, source)
-            entities.extend(e)
-            triples.extend(t)
-        elif node.type == "interface_declaration":
-            e, t = self._extract_interface(node, source)
-            entities.extend(e)
-            triples.extend(t)
-        elif node.type == "package_declaration":
-            e, t = self._extract_package(node, source)
-            entities.extend(e)
-            triples.extend(t)
-        else:
-            # Recurse into children for top-level nodes we don't directly handle
-            for child in node.children:
-                e, t = self._walk_tree(child, source)
+        entities.append(self._make_entity(pkg_name, "Package", source))
+
+        seen_param: Set[str] = set()
+        for member in self._decl_body_members(decl):
+            mk = _kind_str(member)
+            if "ParameterDeclarationStatement" in mk or "TypeParameterDeclaration" in mk:
+                e, t = self._extract_parameters_in(member, pkg_name, source, seen_param)
                 entities.extend(e)
                 triples.extend(t)
 
         return entities, triples
 
-    def _extract_module(
-        self, node: Any, source: str
+    # -- Internal: header extractors -----------------------------------------
+
+    def _extract_header_parameters(
+        self, header: Any, module_name: str, source: str
     ) -> Tuple[List[Entity], List[Triple]]:
-        """Extract a module declaration and its children.
+        """Extract parameters from the parameter port list inside a header."""
+        entities: List[Entity] = []
+        triples: List[Triple] = []
+        seen: Set[str] = set()
+
+        for pd in _find_kind(
+            header, ("ParameterDeclaration", "TypeParameterDeclaration")
+        ):
+            for d in _find_declarators(pd):
+                pname = _token_text(getattr(d, "name", None))
+                if pname is None or pname in seen:
+                    continue
+                seen.add(pname)
+                qualified = f"{module_name}.{pname}"
+                entities.append(
+                    self._make_entity(qualified, "Parameter", source)
+                )
+                triples.append(
+                    self._make_triple(module_name, "contains", qualified, source)
+                )
+
+        return entities, triples
+
+    def _extract_header_ports(
+        self, header: Any, module_name: str, source: str
+    ) -> Tuple[List[Entity], List[Triple]]:
+        """Extract ports from an ANSI / non-ANSI port list inside a header."""
+        entities: List[Entity] = []
+        triples: List[Triple] = []
+        seen: Set[str] = set()
+
+        port_kinds = (
+            "ImplicitAnsiPort",
+            "ExplicitAnsiPort",
+            "InterfacePortHeader",  # safe — no Declarator inside, ignored
+            "NonAnsiPort",
+        )
+        for port in _find_kind(header, port_kinds):
+            # Direction lives on the port header's ``direction`` token
+            # (``InputKeyword`` / ``OutputKeyword`` / ``InOutKeyword``).
+            # ``valueText`` is the keyword text itself, which already
+            # matches our normalized values.
+            port_direction: Optional[str] = None
+            try:
+                p_header = getattr(port, "header", None)
+                if p_header is not None:
+                    dtok = getattr(p_header, "direction", None)
+                    dtext = _token_text(dtok)
+                    if dtext in ("input", "output", "inout"):
+                        port_direction = dtext
+            except Exception:
+                port_direction = None
+            for d in _find_declarators(port):
+                pname = _token_text(getattr(d, "name", None))
+                if pname is None or pname in seen:
+                    continue
+                seen.add(pname)
+                qualified = f"{module_name}.{pname}"
+                entities.append(
+                    self._make_entity(
+                        qualified, "Port", source, port_direction=port_direction,
+                    )
+                )
+                triples.append(
+                    self._make_triple(module_name, "contains", qualified, source)
+                )
+
+        return entities, triples
+
+    # -- Internal: body extractors -------------------------------------------
+
+    def _extract_parameters_in(
+        self, node: Any, module_name: str, source: str, seen: Set[str]
+    ) -> Tuple[List[Entity], List[Triple]]:
+        """Extract parameter declarators reachable from *node*."""
+        entities: List[Entity] = []
+        triples: List[Triple] = []
+
+        for d in _find_declarators(node):
+            pname = _token_text(getattr(d, "name", None))
+            if pname is None or pname in seen:
+                continue
+            seen.add(pname)
+            qualified = f"{module_name}.{pname}"
+            entities.append(self._make_entity(qualified, "Parameter", source))
+            triples.append(
+                self._make_triple(module_name, "contains", qualified, source)
+            )
+
+        return entities, triples
+
+    def _extract_body_ports(
+        self, node: Any, module_name: str, source: str, seen: Set[str]
+    ) -> Tuple[List[Entity], List[Triple]]:
+        """Extract non-ANSI port declarators from a body-level port_decl."""
+        entities: List[Entity] = []
+        triples: List[Triple] = []
+
+        # Non-ANSI ``PortDeclaration`` exposes its direction token directly
+        # at the top of the node (``direction`` attribute). Same normalized
+        # values as the ANSI path.
+        port_direction: Optional[str] = None
+        try:
+            dtok = getattr(node, "direction", None)
+            dtext = _token_text(dtok)
+            if dtext in ("input", "output", "inout"):
+                port_direction = dtext
+        except Exception:
+            port_direction = None
+
+        for d in _find_declarators(node):
+            pname = _token_text(getattr(d, "name", None))
+            if pname is None or pname in seen:
+                continue
+            seen.add(pname)
+            qualified = f"{module_name}.{pname}"
+            entities.append(
+                self._make_entity(
+                    qualified, "Port", source, port_direction=port_direction,
+                )
+            )
+            triples.append(
+                self._make_triple(module_name, "contains", qualified, source)
+            )
+
+        return entities, triples
+
+    def _extract_signals_in(
+        self, node: Any, module_name: str, source: str, seen: Set[str]
+    ) -> Tuple[List[Entity], List[Triple]]:
+        """Extract signal declarators from a NetDeclaration / DataDeclaration."""
+        entities: List[Entity] = []
+        triples: List[Triple] = []
+
+        for d in _find_declarators(node):
+            sname = _token_text(getattr(d, "name", None))
+            if sname is None or sname in seen:
+                continue
+            seen.add(sname)
+            qualified = f"{module_name}.{sname}"
+            entities.append(self._make_entity(qualified, "Signal", source))
+            triples.append(
+                self._make_triple(module_name, "contains", qualified, source)
+            )
+
+        return entities, triples
+
+    def _extract_instances_in(
+        self, node: Any, module_name: str, source: str, seen: Set[str]
+    ) -> Tuple[List[Entity], List[Triple]]:
+        """Extract instances from a HierarchyInstantiation node.
 
         Produces:
-        - RTL_Module entity for the module itself.
-        - Port, Parameter, Signal, Instance entities from children.
-        - ``contains`` triples from module to each child entity.
-        - ``instantiates`` triples from Instance entities to their module types.
-
-        Args:
-            node: module_declaration tree-sitter node.
-            source: File path for provenance.
-
-        Returns:
-            Tuple of (entities, triples).
+          * Instance entities (one per HierarchicalInstance, namespaced)
+          * ``contains``     module -> instance
+          * ``instantiates`` module -> module-type-being-instantiated
         """
         entities: List[Entity] = []
         triples: List[Triple] = []
 
-        module_name = self._extract_node_name(node)
-        if module_name is None:
-            logger.warning("Could not extract module name at byte %d", node.start_byte)
-            return entities, triples
+        # The instantiated module type is the first Identifier token directly
+        # underneath the HierarchyInstantiation (before the optional
+        # ParameterValueAssignment and the SeparatedList of HierarchicalInstance
+        # children).
+        module_type: Optional[str] = None
+        for c in _iter_children(node):
+            if _kind_str(c) == "TokenKind.Identifier":
+                module_type = _token_text(c)
+                break
 
-        module_entity = self._make_entity(module_name, "RTL_Module", source)
-        entities.append(module_entity)
-
-        # Extract child constructs
-        port_e, port_t = self._extract_ports(node, module_name, source)
-        entities.extend(port_e)
-        triples.extend(port_t)
-
-        param_e, param_t = self._extract_parameters(node, module_name, source)
-        entities.extend(param_e)
-        triples.extend(param_t)
-
-        inst_e, inst_t = self._extract_instances(node, module_name, source)
-        entities.extend(inst_e)
-        triples.extend(inst_t)
-
-        sig_e, sig_t = self._extract_signals(node, module_name, source)
-        entities.extend(sig_e)
-        triples.extend(sig_t)
-
-        # SHOULD-level: generates, tasks, functions inside the module
-        gen_e, gen_t = self._extract_generates(node, module_name, source)
-        entities.extend(gen_e)
-        triples.extend(gen_t)
-
-        tf_e, tf_t = self._extract_tasks_functions(node, module_name, source)
-        entities.extend(tf_e)
-        triples.extend(tf_t)
-
-        # Extract import statements for depends_on relationships
-        import_t = self._extract_imports(node, module_name, source)
-        triples.extend(import_t)
-
-        return entities, triples
-
-    def _extract_ports(
-        self, node: Any, module_name: str, source: str
-    ) -> Tuple[List[Entity], List[Triple]]:
-        """Extract port declarations from a module's port list.
-
-        Extracts direction (input/output/inout) and width from range nodes.
-        Looks specifically for ``port_identifier`` nodes to get the correct
-        port name (rather than identifiers in type/range expressions).
-
-        Args:
-            node: Module node whose children are scanned for ports.
-            module_name: Parent module name for ``contains`` triples.
-            source: File path for provenance.
-
-        Returns:
-            Tuple of (port entities, contains triples).
-        """
-        entities: List[Entity] = []
-        triples: List[Triple] = []
-        seen_ports: Set[str] = set()
-
-        for child in self._find_descendants(node, {"port_declaration", "ansi_port_declaration"}):
-            port_name = self._extract_port_name(child)
-            if port_name is None or port_name in seen_ports:
-                continue
-            seen_ports.add(port_name)
-
-            entity = self._make_entity(port_name, "Port", source)
-            entities.append(entity)
-            triples.append(
-                self._make_triple(module_name, "contains", port_name, source)
-            )
-
-        return entities, triples
-
-    def _extract_instances(
-        self, node: Any, module_name: str, source: str
-    ) -> Tuple[List[Entity], List[Triple]]:
-        """Extract module instantiations.
-
-        Produces Instance entities, ``contains`` triples (parent -> instance),
-        and ``instantiates`` triples (parent module -> instantiated module type).
-
-        Args:
-            node: Module body node to scan for instantiations.
-            module_name: Parent module name.
-            source: File path for provenance.
-
-        Returns:
-            Tuple of (entities, triples).
-        """
-        entities: List[Entity] = []
-        triples: List[Triple] = []
-
-        for inst_node in self._find_descendants(node, {"module_instantiation"}):
-            # module_instantiation typically has: module_type_name instance_name(...)
-            module_type = None
-            instance_name = None
-
-            # The first identifier child is the module type being instantiated
-            for child in inst_node.children:
-                if child.type in ("simple_identifier", "identifier"):
-                    if module_type is None:
-                        module_type = child.text.decode("utf-8") if isinstance(child.text, bytes) else child.text
-                    else:
-                        instance_name = child.text.decode("utf-8") if isinstance(child.text, bytes) else child.text
-                        break
-                elif child.type == "hierarchical_instance":
-                    # The instance name is inside hierarchical_instance
-                    inst_name_node = self._find_first_identifier(child)
-                    if inst_name_node is not None:
-                        instance_name = (
-                            inst_name_node.text.decode("utf-8")
-                            if isinstance(inst_name_node.text, bytes)
-                            else inst_name_node.text
-                        )
+        # Each HierarchicalInstance has an InstanceName sub-node carrying the
+        # actual instance identifier (e.g. ``u_bar``). One declaration may
+        # introduce several instances:  ``bar u_a (...), u_b (...);``
+        for hi in _find_kind(node, ("HierarchicalInstance",)):
+            inst_name: Optional[str] = None
+            for c in _iter_children(hi):
+                if "InstanceName" in _kind_str(c):
+                    inst_name = _token_text(getattr(c, "name", None))
                     break
 
-            if module_type is None:
-                # Try extracting from the first named child
-                module_type = self._extract_node_name(inst_node)
-
-            if instance_name is None and module_type is not None:
-                # Fallback: use module_type + _inst as instance name
-                instance_name = f"{module_type}_inst"
-
-            if instance_name is None:
+            if inst_name is None:
                 continue
+            if inst_name in seen:
+                continue
+            seen.add(inst_name)
 
-            entity = self._make_entity(instance_name, "Instance", source)
-            entities.append(entity)
-
+            qualified = f"{module_name}.{inst_name}"
+            entities.append(self._make_entity(qualified, "Instance", source))
             triples.append(
-                self._make_triple(module_name, "contains", instance_name, source)
+                self._make_triple(module_name, "contains", qualified, source)
             )
-            if module_type is not None:
+            if module_type:
                 triples.append(
                     self._make_triple(module_name, "instantiates", module_type, source)
                 )
+                # Also emit an RTL_Module entity for the instance's module
+                # type. Without this, prim_*/tlul_* sub-instances referenced
+                # by aes.sv stay typed 'concept' on the backend (auto-created
+                # by add_edge before any entity upsert), which breaks
+                # RTL_Module-typed reachability traversals. Closes the
+                # top-down hierarchy trace from `aes` through library cells.
+                entities.append(self._make_entity(
+                    module_type, "RTL_Module", source,
+                ))
 
         return entities, triples
 
-    def _extract_parameters(
-        self, node: Any, module_name: str, source: str
+    def _extract_generate(
+        self, node: Any, module_name: str, source: str, seen: Set[str]
     ) -> Tuple[List[Entity], List[Triple]]:
-        """Extract parameter and localparam declarations.
-
-        Looks for identifiers inside ``param_assignment`` or
-        ``parameter_identifier`` nodes to get the correct parameter name.
-
-        Args:
-            node: Module node to scan.
-            module_name: Parent module name for ``contains`` triples.
-            source: File path for provenance.
-
-        Returns:
-            Tuple of (parameter entities, contains triples).
-        """
-        entities: List[Entity] = []
-        triples: List[Triple] = []
-        seen: Set[str] = set()
-
-        for child in self._find_descendants(
-            node, {"parameter_declaration", "local_parameter_declaration"}
-        ):
-            names = self._extract_param_names(child)
-            for param_name in names:
-                if param_name in seen:
-                    continue
-                seen.add(param_name)
-
-                entity = self._make_entity(param_name, "Parameter", source)
-                entities.append(entity)
-                triples.append(
-                    self._make_triple(module_name, "contains", param_name, source)
-                )
-
-        return entities, triples
-
-    def _extract_signals(
-        self, node: Any, module_name: str, source: str
-    ) -> Tuple[List[Entity], List[Triple]]:
-        """Extract net/data declarations (wire, reg, logic).
-
-        Looks for identifier names inside ``variable_decl_assignment``,
-        ``net_decl_assignment``, or ``list_of_variable_decl_assignments``
-        to avoid picking up identifiers from range expressions.
-
-        Args:
-            node: Module body node to scan.
-            module_name: Parent module name for ``contains`` triples.
-            source: File path for provenance.
-
-        Returns:
-            Tuple of (signal entities, contains triples).
-        """
-        entities: List[Entity] = []
-        triples: List[Triple] = []
-        seen: Set[str] = set()
-
-        for child in self._find_descendants(node, {"net_declaration", "data_declaration"}):
-            names = self._extract_declaration_names(child)
-            for sig_name in names:
-                if sig_name in seen:
-                    continue
-                seen.add(sig_name)
-
-                entity = self._make_entity(sig_name, "Signal", source)
-                entities.append(entity)
-                triples.append(
-                    self._make_triple(module_name, "contains", sig_name, source)
-                )
-
-        return entities, triples
-
-    def _extract_interface(
-        self, node: Any, source: str
-    ) -> Tuple[List[Entity], List[Triple]]:
-        """Extract an interface declaration.
-
-        Args:
-            node: interface_declaration tree-sitter node.
-            source: File path for provenance.
-
-        Returns:
-            Tuple of (entities, triples).
-        """
+        """Emit a Generate entity for a generate region/loop/if (SHOULD)."""
         entities: List[Entity] = []
         triples: List[Triple] = []
 
-        iface_name = self._extract_node_name(node)
-        if iface_name is None:
-            logger.warning(
-                "Could not extract interface name at byte %d", node.start_byte
-            )
+        # Best-effort name: search for a Declarator-or-Identifier that could
+        # serve as a generate-block label. If none, synthesise one from the
+        # source position to keep the entity stable across runs.
+        gen_name = self._first_identifier_text(node)
+        if gen_name is None:
+            # Use a position-based stable id.
+            start = getattr(node, "sourceRange", None)
+            offset = getattr(getattr(start, "start", None), "offset", 0) if start else 0
+            gen_name = f"{module_name}__gen@{offset}"
+
+        if gen_name in seen:
             return entities, triples
+        seen.add(gen_name)
 
-        entity = self._make_entity(iface_name, "Interface", source)
-        entities.append(entity)
-
-        # Extract ports declared inside the interface
-        port_e, port_t = self._extract_ports(node, iface_name, source)
-        entities.extend(port_e)
-        triples.extend(port_t)
-
+        qualified = f"{module_name}.{gen_name}" if "." not in gen_name else gen_name
+        entities.append(self._make_entity(qualified, "Generate", source))
+        triples.append(
+            self._make_triple(module_name, "contains", qualified, source)
+        )
         return entities, triples
 
-    def _extract_package(
-        self, node: Any, source: str
+    def _extract_task_function(
+        self, node: Any, module_name: str, source: str, seen: Set[str]
     ) -> Tuple[List[Entity], List[Triple]]:
-        """Extract a package declaration.
-
-        Produces a Package entity and ``contains`` triples for items
-        declared inside the package.
-
-        Args:
-            node: package_declaration tree-sitter node.
-            source: File path for provenance.
-
-        Returns:
-            Tuple of (entities, triples).
-        """
+        """Emit a Task_Function entity for a task or function declaration."""
         entities: List[Entity] = []
         triples: List[Triple] = []
 
-        pkg_name = self._extract_node_name(node)
-        if pkg_name is None:
-            logger.warning(
-                "Could not extract package name at byte %d", node.start_byte
-            )
+        # pyslang puts the task/function name as an attribute on the prototype
+        # sub-node. Walk children for a name attribute.
+        tf_name = self._first_identifier_text(node)
+        if tf_name is None or tf_name in seen:
             return entities, triples
+        seen.add(tf_name)
 
-        entity = self._make_entity(pkg_name, "Package", source)
-        entities.append(entity)
-
-        # Extract parameters and type declarations inside the package
-        param_e, param_t = self._extract_parameters(node, pkg_name, source)
-        entities.extend(param_e)
-        triples.extend(param_t)
-
-        return entities, triples
-
-    def _extract_generates(
-        self, node: Any, module_name: str, source: str
-    ) -> Tuple[List[Entity], List[Triple]]:
-        """Extract generate regions (SHOULD-level REQ-KG-1b-207).
-
-        Args:
-            node: Module node to scan.
-            module_name: Parent module name for ``contains`` triples.
-            source: File path for provenance.
-
-        Returns:
-            Tuple of (generate entities, contains triples).
-        """
-        entities: List[Entity] = []
-        triples: List[Triple] = []
-
-        for idx, child in enumerate(
-            self._find_descendants(node, {"generate_region"})
-        ):
-            gen_name = self._extract_node_name(child)
-            if gen_name is None:
-                gen_name = f"{module_name}_gen_{idx}"
-
-            entity = self._make_entity(gen_name, "Generate", source)
-            entities.append(entity)
-            triples.append(
-                self._make_triple(module_name, "contains", gen_name, source)
-            )
-
-        return entities, triples
-
-    def _extract_tasks_functions(
-        self, node: Any, module_name: str, source: str
-    ) -> Tuple[List[Entity], List[Triple]]:
-        """Extract task and function declarations (SHOULD-level REQ-KG-1b-207).
-
-        Args:
-            node: Module node to scan.
-            module_name: Parent module name for ``contains`` triples.
-            source: File path for provenance.
-
-        Returns:
-            Tuple of (task/function entities, contains triples).
-        """
-        entities: List[Entity] = []
-        triples: List[Triple] = []
-
-        for child in self._find_descendants(
-            node, {"task_declaration", "function_declaration"}
-        ):
-            tf_name = self._extract_node_name(child)
-            if tf_name is None:
-                continue
-
-            entity = self._make_entity(tf_name, "Task_Function", source)
-            entities.append(entity)
-            triples.append(
-                self._make_triple(module_name, "contains", tf_name, source)
-            )
-
+        qualified = f"{module_name}.{tf_name}"
+        entities.append(self._make_entity(qualified, "Task_Function", source))
+        triples.append(
+            self._make_triple(module_name, "contains", qualified, source)
+        )
         return entities, triples
 
     def _extract_imports(
-        self, node: Any, module_name: str, source: str
-    ) -> List[Triple]:
-        """Extract package import statements for depends_on relationships.
-
-        Args:
-            node: Module node to scan.
-            module_name: Module that depends on imported packages.
-            source: File path for provenance.
-
-        Returns:
-            List of depends_on triples.
-        """
+        self, node: Any, module_name: str, source: str, seen: Set[str]
+    ) -> Tuple[List[Entity], List[Triple]]:
+        """Emit ``depends_on`` triples from a module to imported packages."""
         triples: List[Triple] = []
-        seen_packages: Set[str] = set()
 
-        for imp in self._find_descendants(
-            node, {"package_import_declaration", "package_import_item"}
-        ):
-            # Look for package_identifier inside the import node
-            for pkg_id in self._find_descendants(imp, {"package_identifier"}):
-                ident = self._find_first_identifier(pkg_id)
-                if ident is not None:
-                    text = ident.text
-                    pkg = text.decode("utf-8") if isinstance(text, bytes) else text
-                    if pkg and pkg not in seen_packages:
-                        seen_packages.add(pkg)
-                        triples.append(
-                            self._make_triple(
-                                module_name, "depends_on", pkg, source
-                            )
-                        )
-
-        return triples
-
-    # -- Utility helpers -----------------------------------------------------
-
-    def _extract_port_name(self, node: Any) -> Optional[str]:
-        """Extract port name from a port_declaration or ansi_port_declaration.
-
-        Looks specifically for ``port_identifier`` child nodes to avoid
-        picking up identifiers from type or range expressions.
-
-        Args:
-            node: A port_declaration or ansi_port_declaration node.
-
-        Returns:
-            Port name string, or None if not found.
-        """
-        # ansi_port_declaration has a port_identifier child
-        for desc in self._find_descendants(node, {"port_identifier"}):
-            ident = self._find_first_identifier(desc)
-            if ident is not None:
-                text = ident.text
-                return text.decode("utf-8") if isinstance(text, bytes) else text
-
-        # Fallback for port_declaration (non-ANSI): look for direct identifier
-        return self._extract_node_name(node)
-
-    def _extract_param_names(self, node: Any) -> List[str]:
-        """Extract parameter names from a parameter_declaration node.
-
-        Looks for ``param_assignment`` or ``parameter_identifier`` nodes
-        to find the actual parameter names, not identifiers in expressions.
-
-        Args:
-            node: A parameter_declaration or local_parameter_declaration node.
-
-        Returns:
-            List of parameter name strings.
-        """
-        names: List[str] = []
-
-        # Look for param_assignment nodes (parameter WIDTH = 8)
-        for pa in self._find_descendants(node, {"param_assignment"}):
-            for pi in self._find_descendants(pa, {"parameter_identifier"}):
-                ident = self._find_first_identifier(pi)
-                if ident is not None:
-                    text = ident.text
-                    name = text.decode("utf-8") if isinstance(text, bytes) else text
-                    names.append(name)
+        for item in _find_kind(node, ("PackageImportItem",)):
+            # PackageImportItem ::= package_identifier '::' (identifier | '*')
+            # The package name is the first Identifier token under the item.
+            pkg_name: Optional[str] = None
+            for c in _iter_children(item):
+                if _kind_str(c) == "TokenKind.Identifier":
+                    pkg_name = _token_text(c)
                     break
-            else:
-                # No parameter_identifier found; try first identifier in param_assignment
-                ident = self._find_first_identifier(pa)
-                if ident is not None:
-                    text = ident.text
-                    name = text.decode("utf-8") if isinstance(text, bytes) else text
-                    names.append(name)
+            if pkg_name and pkg_name not in seen:
+                seen.add(pkg_name)
+                triples.append(
+                    self._make_triple(module_name, "depends_on", pkg_name, source)
+                )
 
-        if not names:
-            # Fallback: use generic name extraction
-            name = self._extract_node_name(node)
-            if name is not None:
-                names.append(name)
+        return [], triples
 
-        return names
+    # -- Helpers -------------------------------------------------------------
 
-    def _is_import_declaration(self, node: Any) -> bool:
-        """Check if a data_declaration node is actually an import statement.
+    @staticmethod
+    def _is_import_declaration(node: Any) -> bool:
+        """Return True if a DataDeclaration is actually a package import.
 
-        Args:
-            node: A data_declaration or net_declaration node.
-
-        Returns:
-            True if the node contains a package_import_declaration.
+        SystemVerilog allows ``import pkg::*;`` to appear as a data
+        declaration in some grammar productions; we don't want those to
+        emit Signal entities.
         """
-        for child in node.children:
-            if child.type == "package_import_declaration":
+        for c in _iter_children(node):
+            if "PackageImport" in _kind_str(c):
                 return True
         return False
 
-    def _extract_declaration_names(self, node: Any) -> List[str]:
-        """Extract signal names from net_declaration or data_declaration.
+    @staticmethod
+    def _first_identifier_text(node: Any) -> Optional[str]:
+        """Return the first identifier-like name found in the subtree.
 
-        Looks for ``variable_decl_assignment``, ``net_decl_assignment``, or
-        similar assignment nodes where the actual signal name lives, avoiding
-        identifiers in range or type expressions. Skips import declarations.
-
-        Args:
-            node: A net_declaration or data_declaration node.
-
-        Returns:
-            List of signal name strings.
+        Searches for either:
+          * a child with a ``.name`` Token attribute (preferred — these are
+            Declarator / InstanceName / Header style nodes), or
+          * the first ``TokenKind.Identifier`` token,
+        whichever comes first in the walk. Returns the stripped value text.
         """
-        # Skip import statements disguised as data_declaration
-        if self._is_import_declaration(node):
-            return []
-
-        names: List[str] = []
-
-        # net_declaration uses net_decl_assignment for each declared name
-        # data_declaration uses variable_decl_assignment
-        target_types = {"variable_decl_assignment", "net_decl_assignment"}
-        for assign in self._find_descendants(node, target_types):
-            ident = self._find_first_identifier(assign)
-            if ident is not None:
-                text = ident.text
-                name = text.decode("utf-8") if isinstance(text, bytes) else text
-                names.append(name)
-
-        if not names:
-            # Fallback: use generic extraction
-            name = self._extract_node_name(node)
-            if name is not None:
-                names.append(name)
-
-        return names
-
-    def _extract_node_name(self, node: Any) -> Optional[str]:
-        """Extract the identifier name from a declaration node.
-
-        Uses a recursive search to find the first ``simple_identifier``
-        in the subtree, skipping keyword tokens and ERROR nodes.
-
-        Args:
-            node: Any declaration node.
-
-        Returns:
-            Name string, or None if no identifier found.
-        """
-        # Keywords that look like identifiers but aren't names
-        _KEYWORDS = frozenset({
-            "module", "endmodule", "interface", "endinterface",
-            "package", "endpackage", "parameter", "localparam",
-            "input", "output", "inout", "wire", "reg", "logic",
-            "task", "endtask", "function", "endfunction",
-            "generate", "endgenerate",
-        })
-
-        result = self._find_first_identifier(node)
-        if result is not None:
-            text = result.text
-            name = text.decode("utf-8") if isinstance(text, bytes) else text
-            if name not in _KEYWORDS:
-                return name
-
-        return None
-
-    def _find_descendants(
-        self, node: Any, target_types: Set[str]
-    ) -> List[Any]:
-        """Find all descendant nodes matching the given types.
-
-        Uses iterative BFS but does not recurse into nodes that are
-        themselves targets (to avoid double-counting nested constructs).
-
-        Args:
-            node: Root node to search from.
-            target_types: Set of tree-sitter node type strings.
-
-        Returns:
-            List of matching descendant nodes.
-        """
-        results: List[Any] = []
-        queue = list(node.children)
-
-        while queue:
-            current = queue.pop(0)
-            if current.type in ("ERROR", "MISSING"):
-                logger.debug(
-                    "Skipping %s node at byte %d during descendant search",
-                    current.type,
-                    current.start_byte,
-                )
-                continue
-            if current.type in target_types:
-                results.append(current)
-                # Don't recurse into matched nodes to avoid double-counting
-            else:
-                queue.extend(current.children)
-
-        return results
-
-    def _find_first_identifier(self, node: Any) -> Optional[Any]:
-        """Find the first identifier node in the subtree.
-
-        Args:
-            node: Root of subtree to search.
-
-        Returns:
-            The first simple_identifier or identifier node, or None.
-        """
-        if node.type in ("simple_identifier", "identifier"):
-            return node
-        for child in node.children:
-            result = self._find_first_identifier(child)
-            if result is not None:
-                return result
-        return None
+        # First pass: any node carrying a name Token.
+        named = getattr(node, "name", None)
+        if named is not None:
+            t = _token_text(named)
+            if t:
+                return t
+        # Second pass: walk for a Declarator / InstanceName carrying .name.
+        def walk(n: Any) -> Optional[str]:
+            kn = _kind_str(n)
+            if "Declarator" in kn or "InstanceName" in kn or "Header" in kn:
+                t = _token_text(getattr(n, "name", None))
+                if t:
+                    return t
+            for c in _iter_children(n):
+                r = walk(c)
+                if r:
+                    return r
+            return None
+        r = walk(node)
+        if r:
+            return r
+        # Final pass: first Identifier token.
+        def walk2(n: Any) -> Optional[str]:
+            if _kind_str(n) == "TokenKind.Identifier":
+                t = _token_text(n)
+                if t:
+                    return t
+            for c in _iter_children(n):
+                r = walk2(c)
+                if r:
+                    return r
+            return None
+        return walk2(node)
 
     def _make_entity(
-        self, name: str, entity_type: str, source: str
+        self,
+        name: str,
+        entity_type: str,
+        source: str,
+        port_direction: Optional[str] = None,
     ) -> Entity:
-        """Create an Entity with sv_parser attribution.
-
-        Args:
-            name: Entity canonical name.
-            entity_type: YAML schema type name.
-            source: File path for provenance.
-
-        Returns:
-            Entity with ``extractor_source=["sv_parser"]`` and ``sources=[source]``.
-        """
+        """Create an Entity with sv_parser attribution."""
         sources = [source] if source else []
         return Entity(
             name=name,
             type=entity_type,
             sources=sources,
             extractor_source=["sv_parser"],
+            port_direction=port_direction,
         )
 
     def _make_triple(
         self, subject: str, predicate: str, obj: str, source: str
     ) -> Triple:
-        """Create a Triple with sv_parser attribution.
-
-        Args:
-            subject: Source entity name.
-            predicate: Edge type label.
-            obj: Target entity name.
-            source: File path for provenance.
-
-        Returns:
-            Triple with ``extractor_source="sv_parser"``.
-        """
+        """Create a Triple with sv_parser attribution."""
         return Triple(
             subject=subject,
             predicate=predicate,

@@ -1,0 +1,89 @@
+# SW→RTL test resolution rules. Each pattern declares a regex with a named
+# (?P<module>...) group capturing the module name; matches are looked up
+# against the KG's known RTL module names (after applying `transform`).
+#
+# Patterns are tried in declaration order. Per (test, module) tuple at most
+# one tests_module edge is emitted; the first pattern that claims the
+# module owns the edge's tier; later patterns matching the same module
+# contribute additional evidence-span fragments.
+#
+# This file ships the OpenTitan-flavored defaults. To port to a different
+# codebase, copy this file and rewrite the regexes for your conventions.
+
+patterns:
+  - name: header_include
+    description: "C test #include of an RTL DIF header (dif_<module>.h)."
+    regex: '#\s*include\s*[<"][^">]*?\bdif_(?P<module>[a-z][a-z0-9_]*)\.h[">]'
+    confidence_tier: high
+    transform: none
+
+  - name: dif_api_call
+    description: "OpenTitan DIF API call dispatching to a module."
+    regex: '\bdif_(?P<module>[a-z][a-z0-9_]*?)_\w+\s*\('
+    confidence_tier: high
+    transform: none
+
+  - name: base_addr_constant
+    description: "Top-level base-address constant naming the module."
+    regex: '\b[A-Z][A-Z0-9_]*?_(?P<module>[A-Z][A-Z0-9]*)_BASE_ADDR\b'
+    confidence_tier: high
+    transform: lowercase
+
+# Filename markers that flag a C source file as a runnable test
+# (controls Entity.is_test=True). Matched as regexes against full file text.
+test_markers:
+  - '\bint\s+main\s*\('
+  - '\bvoid\s+test_main\s*\('
+  - '\bOTTF_DEFINE_TEST_CONFIG\b'
+
+# Tier C — when True, code inside `#if 0 ... #endif` is excluded from
+# pattern matching. Currently a stub; not yet implemented.
+preprocessor_strip_if_zero: false
+
+# Tier B — build-system ingestion. Per-format on/off and glob/file overrides.
+# Build-system links are AUTHORITATIVE: when a reader emits a
+# (test, module) link, any conflicting regex pattern match for the same
+# pair is suppressed. Patterns become a backstop for projects that don't
+# expose any of these formats.
+#
+# All readers ship default-disabled. The OpenTitan-flavored config below
+# enables `dvsim_hjson` and `bazel` to demonstrate real usage.
+build_systems:
+  dvsim_hjson:
+    enabled: true
+    glob: "**/*sim_cfg.hjson"
+  uvm_testlist:
+    enabled: false
+    glob: "**/*.f"
+  fusesoc:
+    enabled: false
+    glob: "**/*.core"
+  bazel:
+    enabled: true
+    files: ["BUILD", "BUILD.bazel"]
+    # Regex applied to each Bazel `deps = [...]` label to extract the
+    # owning RTL module name. MUST contain a `(?P<module>...)` named
+    # group. Defaults (when omitted) to the OpenTitan-flavored
+    # `^//hw/ip/(?P<module>[a-z][a-z0-9_]*)\b`.
+    # For non-OpenTitan projects with //rtl/<module> layout:
+    # dep_module_pattern: '^//rtl/(?P<module>[a-z][a-z0-9_]*)\b'
+    # For //src/cores/<module> layout:
+    # dep_module_pattern: '^//src/cores/(?P<module>[a-z][a-z0-9_]*)\b'
+    # V3 #3 — auto-discover macro names imported via `load(...)` and
+    # later called as top-level rules. Conservatively gated: only emits
+    # links when the call has name + (srcs OR deps) AND ≥1 dep matches
+    # `dep_module_pattern`. Defaults to ON (`true`); set to `false` to
+    # restrict the reader to the static allowlist only.
+    # auto_discover_loaded_macros: true
+    # Symbols to never auto-admit even when load()-imported. Useful for
+    # filtering tooling rules (e.g. py_binary, py_library, cc_library)
+    # that may legitimately depend on `//hw/ip/<module>:...` for code
+    # generation but are not themselves tests.
+    # loaded_macro_denylist:
+    #   - py_binary
+    #   - py_library
+    #   - cc_library
+    #   - filegroup
+  makefile:
+    enabled: false
+    files: ["Makefile", "makefile", "*.mk"]

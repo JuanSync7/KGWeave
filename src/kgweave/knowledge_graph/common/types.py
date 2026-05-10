@@ -17,23 +17,28 @@ from __future__ import annotations
 
 import logging
 import os
+import warnings
 
 import yaml
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from kgweave.knowledge_graph.common.sw_test_config import SwTestPattern
 
 __all__ = [
     "NodeTypeDefinition",
     "EdgeTypeDefinition",
     "SchemaDefinition",
+    "ProjectConventions",
     "KGConfig",
     "load_schema",
 ]
 
 _schema_logger = logging.getLogger("rag.knowledge_graph.schema")
 
-VALID_CATEGORIES = {"structural", "semantic"}
+VALID_CATEGORIES = {"structural", "semantic", "claim"}
 VALID_PHASES = {"phase_1", "phase_1b", "phase_2"}
 
 
@@ -122,6 +127,162 @@ class SchemaDefinition:
             return False
         from kgweave.knowledge_graph.common.utils import is_phase_active
         return is_phase_active(self._edge_index[type_name].phase, runtime_phase)
+
+
+@dataclass
+class ProjectConventions:
+    """Project-shaped conventions consumed by extractors and readers.
+
+    Phase 1 scaffolding only — this dataclass is constructed and round-tripped
+    through ``KGConfig`` but no consumer reads from it yet. Phase 2 wires
+    extractors and readers to consult these fields in lieu of their own
+    OT-flavored hardcoded defaults.
+
+    Treat this dataclass as effectively read-only after construction:
+    consumers must only *read* fields. Use ``ProjectConventions.opentitan()``
+    to obtain the OT-shaped back-compat profile; bare ``ProjectConventions()``
+    yields strict-generic defaults (most fields ``None``).
+    """
+
+    # --- Identity / opt-in profile selection ---
+    profile: Optional[str] = None
+    """``"opentitan"`` selects the OT profile via ``ProjectConventions.opentitan()``;
+    ``None`` means strict-generic mode (no OT-specific fallbacks)."""
+
+    # --- SV connectivity ---
+    reset_signal_pattern: Optional[str] = None
+    """Regex (case-insensitive) classifying always_ff sensitivity-list signals
+    as resets vs clocks. ``None`` means consumer falls back to its own default."""
+
+    clock_signal_pattern: Optional[str] = None
+    """Optional positive-match regex for clock identifier names. ``None`` means
+    treat the non-reset sensitivity-list entry as the clock."""
+
+    # --- Testplan / SVA ---
+    sva_prefixes: Optional[List[str]] = None
+    """Override prefixes for SVA assertion-name normalisation. ``None`` keeps
+    consumer defaults."""
+
+    sva_suffixes: Optional[List[str]] = None
+    """Override suffixes for SVA assertion-name normalisation."""
+
+    # --- SW test resolution ---
+    sw_test_patterns: Optional[List["SwTestPattern"]] = None
+    """List of ``SwTestPattern`` entries mapping SW source patterns to module
+    names. Phase 1 leaves this ``None``; Phase 2 wires patterns through."""
+
+    sw_test_markers: Optional[List[str]] = None
+    """Marker substrings indicating that a C/C++ source file is a test entry."""
+
+    csr_access_api_patterns: Optional[List[str]] = None
+    """Regexes matching MMIO/CSR access API call sites
+    (e.g. ``mmio_region_write32``, ``abs_mmio_*``)."""
+
+    csr_offset_suffixes: List[str] = field(
+        default_factory=lambda: ["_REG_OFFSET", "_OFFSET"]
+    )
+    """Suffixes identifying CSR offset macros referenced in SW tests."""
+
+    sw_test_extensions: List[str] = field(default_factory=lambda: [".c"])
+    """File extensions to scan when walking SW test directories."""
+
+    synthetic_csr_from_pattern: Optional[str] = None
+    """When set, emit a synthetic ``<mod>_dif_access`` CSR side-effect for
+    sources matching this pattern name. ``None`` disables synthesis."""
+
+    evidence_format_include_template: Optional[str] = None
+    """Optional ``str.format`` template (``{module}`` placeholder) used to
+    render evidence text for ``header_include`` pattern matches. ``None``
+    falls back to using the bare pattern name as evidence text."""
+
+    evidence_format_call_template: Optional[str] = None
+    """Optional ``str.format`` template (``{module}`` placeholder) used to
+    render evidence text for the synthetic-CSR call pattern. ``None`` falls
+    back to using the bare pattern name as evidence text."""
+
+    # --- Build-system readers ---
+    bazel_rule_allowlist: Optional[List[str]] = None
+    """Bazel rule kinds that count as test/binary entries."""
+
+    bazel_dep_module_pattern: Optional[str] = None
+    """Regex with named ``module`` group used to extract module names from
+    Bazel ``//hw/ip/<mod>:...``-style deps. ``None`` disables module
+    inference for Bazel readers."""
+
+    bazel_srcs_default_extensions: Optional[List[str]] = None
+    """Filename extensions used to synthesize a fallback ``srcs`` list when
+    a Bazel rule has ``name`` but no ``srcs`` attribute (e.g. ``[".c"]``).
+    ``None`` means do not synthesize — skip emission for rules without
+    explicit ``srcs``."""
+
+    makefile_module_vars: List[str] = field(
+        default_factory=lambda: ["MODULE", "IP_NAME", "IP_TOP", "DUT", "DUT_NAME"]
+    )
+    """Makefile variable names whose values are treated as the module name."""
+
+    makefile_test_target_prefixes: List[str] = field(
+        default_factory=lambda: ["test-", "test_"]
+    )
+    """Prefixes recognised on Makefile test targets (e.g. ``test-aes:``)."""
+
+    makefile_module_strip_suffixes: List[str] = field(
+        default_factory=lambda: ["_top", "_dut", "_core", "_wrapper"]
+    )
+    """Suffixes stripped from Makefile module values to canonicalise."""
+
+    fusesoc_tb_target_hints: List[str] = field(
+        default_factory=lambda: ["sim", "tb", "test"]
+    )
+    """Substrings identifying FuseSoC testbench targets."""
+
+    fusesoc_module_strip_suffixes: List[str] = field(
+        default_factory=lambda: ["_sim", "_tb", "_test", "_dv"]
+    )
+    """Suffixes stripped from FuseSoC ``.core`` names to derive module."""
+
+    uvm_testbench_filename_regex: str = r"([A-Za-z_]\w*)_tb\.sv"
+    """Regex extracting module name from a UVM testbench filename."""
+
+    # --- DV file→testplan fusion ---
+    dv_test_file_strip_suffixes: List[str] = field(
+        default_factory=lambda: ["_vseq.sv", "_test.sv", ".sv"]
+    )
+    """Suffixes stripped from DV test source filenames during testplan fusion."""
+
+    @classmethod
+    def opentitan(cls) -> "ProjectConventions":
+        """Return a ProjectConventions instance pre-populated with OpenTitan
+        defaults — back-compat entry point for the current OT-shaped pipeline.
+
+        Phase 1 sets the OT-flavoured fields on this profile but does NOT
+        populate ``sw_test_patterns`` (Phase 2 wires the actual patterns from
+        ``sw_test_config``).
+        """
+        return cls(
+            profile="opentitan",
+            reset_signal_pattern=r"(^|_)(rst|reset|por)(_|$)",
+            sva_prefixes=["a_", "prim_", "aes_"],
+            sw_test_patterns=None,  # Phase 2: wire from sw_test_config
+            bazel_rule_allowlist=[
+                "opentitan_functest",
+                "opentitan_test",
+                "opentitan_binary",
+                "cc_test",
+                "cc_binary",
+                "dv_lib",
+                "dv_fusesoc_test",
+            ],
+            bazel_dep_module_pattern=r"^//hw/ip/(?P<module>[a-z][a-z0-9_]*)\b",
+            bazel_srcs_default_extensions=[".c"],
+            synthetic_csr_from_pattern="dif_api_call",
+            evidence_format_include_template='#include "dif_{module}.h"',
+            evidence_format_call_template="dif_{module}_* call",
+            sw_test_markers=[
+                r"\bint\s+main\s*\(",
+                r"\bvoid\s+test_main\s*\(",
+                r"\bOTTF_DEFINE_TEST_CONFIG\b",
+            ],
+        )
 
 
 @dataclass
@@ -217,7 +378,18 @@ class KGConfig:
     sv_filelist: str = ""
     """Newline-separated list of .sv/.v file paths for dataflow analysis."""
     sv_top_module: str = ""
-    """Top-level module name passed to pyverilog DataflowAnalyzer."""
+    """Top-level module name passed to the pyslang elaborator."""
+
+    enable_ast_decomposition: bool = True
+    """Wave 2 / v2: gate v2 AST-layer emission (Operator/Literal/Index/
+    IfStatement/CaseStatement/Loop/Branch/Assignment/Condition + structural
+    edges, all tagged ``layer="ast"``).
+
+    Default ``True`` — the demo and audit pipelines benefit from the richer
+    decomposition, and the AST layer is hidden from default consumer views
+    via ``subgraph_by_layer`` / ``entities_by_layer`` filters. Cost-sensitive
+    consumers (sigma export at scale, lightweight indexers) can disable to
+    fall back to the v1 graph shape."""
 
     # Phase 3: Entity resolution
     enable_entity_resolution: bool = False
@@ -256,6 +428,32 @@ class KGConfig:
 
     max_hop_fanout: int = 50
     """REQ-KG-1324: Max entities explored per hop in path pattern evaluation."""
+
+    # V3 #7: portability — reset/clock disambiguation in always_ff sensitivity
+    # lists. ``SlangHierarchyAnalyzer`` falls back to a built-in OT-flavored
+    # default (``(^|_)(rst|reset|por)(_|$)``) when this is empty/None. Set to
+    # a custom Python regex (str) to match codebases using non-OT reset
+    # naming conventions (``aresetn``, ``nrst``, ``srst_n``, ...).
+    reset_signal_pattern: Optional[str] = None
+    """Regex (case-insensitive) classifying always_ff sensitivity-list signals
+    as resets vs. clocks. ``None`` keeps the OT-default heuristic."""
+
+    # V3 #7: portability — testplan SVA name normalization. Default OT-flavored
+    # prefix list (``a_``, ``prim_``, ``aes_``) is augmented but never reduced
+    # by user input so OT behaviour is preserved.
+    testplan_sva_prefixes: Optional[List[str]] = None
+    """Extra/override prefixes for SVA assertion-name normalisation in
+    ``TestplanExtractor``. ``None`` keeps the OT default
+    ``("a_", "prim_", "aes_")``."""
+
+    # Phase 1 hardcoded-values cleanup: consolidated project conventions.
+    # Each KGConfig instance gets a fresh ProjectConventions(); the legacy
+    # ``reset_signal_pattern`` and ``testplan_sva_prefixes`` fields above are
+    # deprecation shims that copy through into this dataclass when set without
+    # an explicit ``project_conventions`` overlay (see ``__post_init__``).
+    project_conventions: "ProjectConventions" = field(default_factory=lambda: ProjectConventions())
+    """Consolidated project-shaped conventions consumed by extractors and
+    readers. Phase 1 wires only the dataclass; Phase 2 wires consumers."""
 
     @classmethod
     def from_env(cls, env: Optional[Dict[str, str]] = None) -> "KGConfig":
@@ -387,6 +585,14 @@ class KGConfig:
                 "RAG_KG_GRAPH_CONTEXT_MARKER_STYLE", defaults.graph_context_marker_style
             ),
             max_hop_fanout=_int("RAG_KG_MAX_HOP_FANOUT", defaults.max_hop_fanout),
+            reset_signal_pattern=(
+                e.get("RAG_KG_RESET_SIGNAL_PATTERN", defaults.reset_signal_pattern)
+                or defaults.reset_signal_pattern
+            ),
+            testplan_sva_prefixes=(
+                _str_list("RAG_KG_TESTPLAN_SVA_PREFIXES")
+                or defaults.testplan_sva_prefixes
+            ),
         )
         return cfg
 
@@ -417,6 +623,31 @@ class KGConfig:
             )
         if self.max_hop_fanout < 1:
             raise ValueError(f"max_hop_fanout must be >= 1, got {self.max_hop_fanout}")
+
+        # --- Phase 1 deprecation shims: legacy KGConfig fields → ProjectConventions ---
+        if (
+            self.reset_signal_pattern is not None
+            and self.project_conventions.reset_signal_pattern is None
+        ):
+            warnings.warn(
+                "KGConfig.reset_signal_pattern is deprecated; "
+                "use KGConfig.project_conventions.reset_signal_pattern instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.project_conventions.reset_signal_pattern = self.reset_signal_pattern
+
+        if (
+            self.testplan_sva_prefixes is not None
+            and self.project_conventions.sva_prefixes is None
+        ):
+            warnings.warn(
+                "KGConfig.testplan_sva_prefixes is deprecated; "
+                "use KGConfig.project_conventions.sva_prefixes instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.project_conventions.sva_prefixes = list(self.testplan_sva_prefixes)
 
 
 # ---------------------------------------------------------------------------

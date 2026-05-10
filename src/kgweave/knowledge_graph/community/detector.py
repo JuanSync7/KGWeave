@@ -3,7 +3,7 @@
 # Converts backend graph to undirected igraph, runs Leiden partitioning,
 # applies min-size filtering, and persists results via sidecar JSON.
 # Exports: CommunityDetector
-# Deps: igraph, leidenalg (optional), json, tempfile, os, logging,
+# Deps: igraph, leidenalg, json, tempfile, os, logging,
 #       src.knowledge_graph.backend, src.knowledge_graph.common.types,
 #       src.knowledge_graph.community.schemas
 # @end-summary
@@ -31,24 +31,12 @@ __all__ = ["CommunityDetector"]
 
 logger = logging.getLogger(__name__)
 
-# Try-import for optional Leiden dependencies
-_LEIDEN_AVAILABLE = False
-try:
-    import igraph  # noqa: F401
-    import leidenalg  # noqa: F401
-
-    _LEIDEN_AVAILABLE = True
-except ImportError:
-    igraph = None  # type: ignore[assignment]
-    leidenalg = None  # type: ignore[assignment]
+import igraph
+import leidenalg
 
 
 class CommunityDetector:
-    """Detects communities in the knowledge graph using the Leiden algorithm.
-
-    When igraph/leidenalg are unavailable, operates in degraded mode:
-    ``detect()`` returns an empty dict and ``is_ready`` stays False.
-    """
+    """Detects communities in the knowledge graph using the Leiden algorithm."""
 
     def __init__(
         self,
@@ -91,12 +79,6 @@ class CommunityDetector:
             Mapping of community_id to list of entity names.
             Empty dict when Leiden dependencies are unavailable.
         """
-        if not _LEIDEN_AVAILABLE:
-            logger.warning(
-                "igraph/leidenalg not installed — community detection skipped"
-            )
-            return {}
-
         _t0 = time.monotonic()
         ig = self._to_igraph()
         if ig.vcount() == 0:
@@ -153,7 +135,7 @@ class CommunityDetector:
         for cid, members in level0.items():
             self._hierarchy[(0, cid)] = members
 
-        if max_levels <= 1 or not _LEIDEN_AVAILABLE:
+        if max_levels <= 1:
             return self._hierarchy
 
         # Recursive sub-partitioning for levels 1+
