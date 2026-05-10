@@ -276,3 +276,64 @@ def test_swtest_extensions_pickup_cc(tmp_path):
     res = ex.extract(source=str(tmp_path))
     sw_test_names = {e.name for e in res.entities if e.type == "SW_Test"}
     assert "gizmo_test" in sw_test_names
+
+
+# ---------------------------------------------------------------------------
+# test_sw_test_extractor_no_import_re  (TDD – fails before regex removal)
+# ---------------------------------------------------------------------------
+
+
+def test_sw_test_extractor_no_import_re():
+    """sw_test_extractor must not import the ``re`` module at module level.
+
+    The ``_MODULE_NAME_RE``, ``_MMIO_OFFSET_RE``, ``_BARE_OFFSET_RE``,
+    ``_build_mmio_regex``, and ``_build_bare_offset_regex`` should all use
+    structural token scanning instead of regex compilation.
+    """
+    import ast
+    import importlib.util
+    import pathlib
+
+    src_path = pathlib.Path(
+        importlib.util.find_spec(
+            "kgweave.knowledge_graph.extraction.sw_test_extractor"
+        ).origin
+    )
+    tree = ast.parse(src_path.read_text())
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    assert alias.name != "re", (
+                        "sw_test_extractor still does 'import re' — "
+                        "replace regex with structural token scanning"
+                    )
+            elif isinstance(node, ast.ImportFrom):
+                assert node.module != "re", (
+                    "sw_test_extractor still does 'from re import ...' — "
+                    "replace regex with structural token scanning"
+                )
+
+
+def test_sw_test_extractor_mmio_tab_whitespace(tmp_path):
+    """MMIO offset scan must work when the call uses tab indentation and
+    multi-line argument lists — a case where a strict line-oriented regex
+    would miss the offset constant but structural token scanning finds it."""
+    src = (
+        "void test_main(void) {\n"
+        "\tmmio_region_write32(\n"
+        "\t\tbase,\n"
+        "\t\tAES_CTRL_SHADOWED_REG_OFFSET,\n"
+        "\t\t0x01\n"
+        "\t);\n"
+        "}\n"
+    )
+    (tmp_path / "aes_tab_test.c").write_text(src)
+    ex = SWTestExtractor(
+        known_entity_names=["aes", "aes.ctrl_shadowed"],
+    )
+    res = ex.extract(source=str(tmp_path))
+    csr_edges = [t for t in res.triples if t.predicate == "accesses_csr"]
+    assert csr_edges, (
+        "accesses_csr edge expected for multi-line MMIO call with tab indentation"
+    )

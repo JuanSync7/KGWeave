@@ -7,7 +7,7 @@
 # *_<MODNAME>_BASE_ADDR address constants. Falls back to a low-tier
 # unresolved sentinel when no pattern matches on a real test file.
 # Exports: SWTestExtractor, SW_TEST_SOURCE
-# Deps: pathlib, re, typing, kgweave.knowledge_graph.common
+# Deps: pathlib, typing, kgweave.knowledge_graph.common
 # @end-summary
 """Bare-metal SW regression test extractor (config-driven).
 
@@ -35,10 +35,9 @@ byte-identical to the prior OpenTitan-hardcoded resolver.
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Set
 
 from kgweave.knowledge_graph.common import (
     Entity,
@@ -74,42 +73,174 @@ _DEFAULT_CSR_ACCESS_API_PATTERNS = (
 )
 _DEFAULT_CSR_OFFSET_SUFFIXES = ("_REG_OFFSET", "_OFFSET")
 
-_MMIO_OFFSET_RE = re.compile(
-    r"\b(?:mmio_region_write32|mmio_region_read32|abs_mmio_write32|abs_mmio_read32)"
-    r"\s*\([^;)]*\b(\w+_REG_OFFSET|\w+_OFFSET)\b"
-)
-_BARE_OFFSET_RE = re.compile(r"\b([A-Z][A-Z0-9_]+_REG_OFFSET)\b")
+def _is_module_name(name: str) -> bool:
+    """Return True if *name* looks like a valid RTL module identifier.
 
-
-def _build_mmio_regex(api_patterns: List[str], suffixes: List[str]) -> Optional[re.Pattern]:
-    """Compile the MMIO-API-with-offset regex from an api list and suffix list."""
-    if not api_patterns or not suffixes:
-        return None
-    api_alt = "|".join(re.escape(a) for a in api_patterns)
-    suf_alt = "|".join(rf"\w+{re.escape(s)}" for s in suffixes)
-    return re.compile(
-        rf"\b(?:{api_alt})\s*\([^;)]*\b({suf_alt})\b"
+    Structural equivalent of ``^[a-z][a-z0-9_]*$``:
+    - must be a non-empty Python identifier (guarantees alpha/digit/underscore)
+    - must be all-lowercase
+    - first character must be an ASCII letter (not a digit or underscore)
+    """
+    return (
+        bool(name)
+        and name.isidentifier()
+        and name == name.lower()
+        and name[0].isalpha()
     )
 
 
-def _build_bare_offset_regex(suffixes: List[str]) -> Optional[re.Pattern]:
-    """Compile a bare-offset regex matching ``[A-Z_]+<suffix>``.
+def _tokenize_c_words(text: str) -> Iterator[str]:
+    """Yield whitespace/punctuation-delimited identifier tokens from C source.
 
-    Only the most identifying suffix (``_REG_OFFSET`` if present) is used —
-    the bare-offset scan is intentionally conservative. Bare uppercase
-    identifiers ending in plain ``_OFFSET`` would over-match (e.g. struct
-    field offset macros), so we restrict to the long-form suffix when
-    available; otherwise fall through to the full suffix list.
+    Splits on any character that cannot appear inside a C identifier
+    (``[A-Za-z0-9_]``), discarding empty fragments.  This is intentionally
+    conservative — it never misidentifies a multi-character operator as part
+    of an identifier.
     """
+    token: List[str] = []
+    for ch in text:
+        if ch.isalnum() or ch == "_":
+            token.append(ch)
+        else:
+            if token:
+                yield "".join(token)
+                token = []
+    if token:
+        yield "".join(token)
+
+
+class _MmioScanner:
+    """Structural scanner that finds offset constants inside MMIO API calls.
+
+    Replaces ``_build_mmio_regex``.  For each occurrence of a configured
+    API function name in *text*, it locates the matching parenthesised
+    argument list (up to the statement-terminating ``;``), tokenises the
+    argument text, and yields any token ending with one of the configured
+    suffixes.
+
+    Design notes
+    ------------
+    - No regex: uses ``str.find`` to locate the opening ``(`` and then
+      scans forward tracking nesting depth to find the closing ``)``.
+    - Conservative: only looks inside the call's own argument span, so
+      a bare ``AES_CTRL_REG_OFFSET`` in a comment after the call is NOT
+      yielded (unlike a naïve substring search).
+    """
+
+    __slots__ = ("_api_names", "_suffixes")
+
+    def __init__(self, api_names: List[str], suffixes: List[str]) -> None:
+        self._api_names: List[str] = list(api_names)
+        # Sort longer suffixes first so _REG_OFFSET is preferred over _OFFSET.
+        self._suffixes: List[str] = sorted(suffixes, key=len, reverse=True)
+
+    def __bool__(self) -> bool:
+        return bool(self._api_names) and bool(self._suffixes)
+
+    def scan(self, text: str) -> Iterator[str]:
+        """Yield offset-constant tokens found inside MMIO API calls."""
+        for api in self._api_names:
+            start = 0
+            while True:
+                pos = text.find(api, start)
+                if pos == -1:
+                    break
+                # Require that the char before api (if any) is not an
+                # identifier character — we want a word boundary.
+                if pos > 0 and (text[pos - 1].isalnum() or text[pos - 1] == "_"):
+                    start = pos + 1
+                    continue
+                # Find the opening parenthesis (skip any whitespace).
+                paren_pos = pos + len(api)
+                while paren_pos < len(text) and text[paren_pos] in " \t\r\n":
+                    paren_pos += 1
+                if paren_pos >= len(text) or text[paren_pos] != "(":
+                    start = pos + 1
+                    continue
+                # Scan to the closing ')' tracking depth, stopping at ';'.
+                depth = 0
+                arg_start = paren_pos + 1
+                end = paren_pos
+                for i in range(paren_pos, len(text)):
+                    c = text[i]
+                    if c == "(":
+                        depth += 1
+                    elif c == ")":
+                        depth -= 1
+                        if depth == 0:
+                            end = i
+                            break
+                    elif c == ";" and depth == 0:
+                        end = i
+                        break
+                arg_text = text[arg_start:end]
+                for tok in _tokenize_c_words(arg_text):
+                    for suf in self._suffixes:
+                        if tok.endswith(suf):
+                            yield tok
+                            break
+                start = end + 1
+
+
+class _BareOffsetScanner:
+    """Structural scanner for bare uppercase offset constants in C source.
+
+    Replaces ``_build_bare_offset_regex``.  Yields every identifier token
+    in *text* that is all-uppercase (plus digits/underscores), starts with
+    an uppercase letter, and ends with one of the configured suffixes.
+
+    Design notes
+    ------------
+    - Conservative suffix selection mirrors the original regex logic: when
+      ``_REG_OFFSET`` is in the suffix list, only that long-form suffix is
+      considered (plain ``_OFFSET`` matches would over-match struct-field
+      offset macros).
+    - No regex: uses ``_tokenize_c_words`` + ``str.endswith`` + character
+      class checks.
+    """
+
+    __slots__ = ("_suffixes",)
+
+    def __init__(self, suffixes: List[str]) -> None:
+        if not suffixes:
+            self._suffixes: List[str] = []
+        elif "_REG_OFFSET" in suffixes:
+            # Conservative: only the long-form suffix.
+            self._suffixes = ["_REG_OFFSET"]
+        else:
+            self._suffixes = sorted(suffixes, key=len, reverse=True)
+
+    def __bool__(self) -> bool:
+        return bool(self._suffixes)
+
+    def scan(self, text: str) -> Iterator[str]:
+        """Yield bare offset-constant tokens in C source text."""
+        for tok in _tokenize_c_words(text):
+            if not tok[0].isupper():
+                continue
+            if not all(c.isupper() or c.isdigit() or c == "_" for c in tok):
+                continue
+            for suf in self._suffixes:
+                if tok.endswith(suf):
+                    yield tok
+                    break
+
+
+def _build_mmio_scanner(
+    api_patterns: List[str], suffixes: List[str]
+) -> Optional[_MmioScanner]:
+    """Build a :class:`_MmioScanner` from an API list and suffix list, or ``None``."""
+    if not api_patterns or not suffixes:
+        return None
+    return _MmioScanner(api_patterns, suffixes)
+
+
+def _build_bare_offset_scanner(suffixes: List[str]) -> Optional[_BareOffsetScanner]:
+    """Build a :class:`_BareOffsetScanner` from a suffix list, or ``None``."""
     if not suffixes:
         return None
-    if "_REG_OFFSET" in suffixes:
-        suf_alt = re.escape("_REG_OFFSET")
-    else:
-        suf_alt = "|".join(re.escape(s) for s in suffixes)
-    return re.compile(rf"\b([A-Z][A-Z0-9_]+(?:{suf_alt}))\b")
-
-_MODULE_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+    scanner = _BareOffsetScanner(suffixes)
+    return scanner if scanner else None
 
 # Pattern name that triggers synthetic CSR access edges (preserves the
 # legacy "DIF call seen → module's CSRs are accessed" Tier-2 heuristic).
@@ -133,7 +264,7 @@ class _ModuleClaimIndex:
     def build(cls, names: Iterable[str]) -> "_ModuleClaimIndex":
         idx = cls()
         for n in names or ():
-            if not n or not _MODULE_NAME_RE.match(n):
+            if not _is_module_name(n):
                 continue
             idx._modules.add(n)
             idx._by_lower[n.lower()] = n
@@ -241,10 +372,10 @@ class SWTestExtractor:
                 csr_offset_suffixes = list(_DEFAULT_CSR_OFFSET_SUFFIXES)
 
         self._csr_offset_suffixes: List[str] = list(csr_offset_suffixes)
-        self._mmio_re = _build_mmio_regex(
+        self._mmio_scanner = _build_mmio_scanner(
             list(csr_access_api_patterns), self._csr_offset_suffixes
         )
-        self._bare_offset_re = _build_bare_offset_regex(self._csr_offset_suffixes)
+        self._bare_offset_scanner = _build_bare_offset_scanner(self._csr_offset_suffixes)
         if not csr_access_api_patterns:
             _logger.debug(
                 "SWTestExtractor: csr_access_api_patterns is empty; "
@@ -564,15 +695,15 @@ class SWTestExtractor:
         # accesses_csr emission (orthogonal to tests_module work).
         csr_names: Set[str] = set()
 
-        if self._mmio_re is not None:
-            for m in self._mmio_re.finditer(text):
-                csr = self._offset_to_csr(m.group(1))
+        if self._mmio_scanner:
+            for offset_tok in self._mmio_scanner.scan(text):
+                csr = self._offset_to_csr(offset_tok)
                 if csr:
                     csr_names.add(csr)
 
-        if self._bare_offset_re is not None:
-            for m in self._bare_offset_re.finditer(text):
-                csr = self._offset_to_csr(m.group(1))
+        if self._bare_offset_scanner:
+            for offset_tok in self._bare_offset_scanner.scan(text):
+                csr = self._offset_to_csr(offset_tok)
                 if csr:
                     csr_names.add(csr)
 
@@ -599,7 +730,7 @@ class SWTestExtractor:
                 layer=SW_TEST_SOURCE,
             ))
 
-    def _format_evidence(self, pattern_name: str, m: re.Match) -> str:
+    def _format_evidence(self, pattern_name: str, m: Any) -> str:
         """Render a short evidence string for a pattern match.
 
         Mirrors the pre-refactor evidence vocabulary so existing audits
