@@ -43,9 +43,11 @@ import re as _re
 # Codebases using ARM-style ``aresetn`` / ``nrst`` should override via the
 # ``reset_signal_pattern`` constructor argument or
 # ``KGConfig.reset_signal_pattern``.
+# noqa: regex-ok — reset/clock signal classification is name-heuristic only;
+# pyslang's elaborated AST does not encode "reset-ness" vs "clock-ness"
+# structurally, so a configurable regex is the authoritative mechanism here.
 _DEFAULT_RESET_PATTERN = r"(^|_)(rst|reset|por)(_|$)"
-_RESET_NAME_RE = _re.compile(_DEFAULT_RESET_PATTERN, _re.IGNORECASE)
-_IDENT_RE = _re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
+_RESET_NAME_RE = _re.compile(_DEFAULT_RESET_PATTERN, _re.IGNORECASE)  # noqa: regex-ok — reset name heuristic, no AST alternative
 
 __all__ = [
     "SlangHierarchyAnalyzer",
@@ -93,7 +95,7 @@ class SlangHierarchyAnalyzer:
         # custom regex string for codebases using e.g. ARM AXI ``aresetn``.
         if reset_signal_pattern:
             try:
-                self._reset_re = _re.compile(reset_signal_pattern, _re.IGNORECASE)
+                self._reset_re = _re.compile(reset_signal_pattern, _re.IGNORECASE)  # noqa: regex-ok — user-supplied reset name pattern; no AST alternative
             except _re.error as exc:
                 logger.warning(
                     "invalid reset_signal_pattern %r (%s); falling back to default",
@@ -110,7 +112,7 @@ class SlangHierarchyAnalyzer:
         self._clock_re: Optional[_re.Pattern] = None
         if clock_signal_pattern:
             try:
-                self._clock_re = _re.compile(clock_signal_pattern, _re.IGNORECASE)
+                self._clock_re = _re.compile(clock_signal_pattern, _re.IGNORECASE)  # noqa: regex-ok — user-supplied clock name pattern; no AST alternative
             except _re.error as exc:
                 logger.warning(
                     "invalid clock_signal_pattern %r (%s); ignoring",
@@ -190,13 +192,13 @@ class SlangHierarchyAnalyzer:
             with open(filelist_path, "r", encoding="utf-8") as fh:
                 for raw_line in fh:
                     line = raw_line.strip()
-                    if not line or line.startswith("//"):
+                    if not line or line.startswith("//"):  # noqa: regex-ok — .f filelist format token, not SV source
                         continue
-                    if line.startswith("+incdir+"):
+                    if line.startswith("+incdir+"):  # noqa: regex-ok — .f filelist format token, not SV source
                         include_dirs.append(
                             str((base_dir / line[len("+incdir+"):]).resolve())
                         )
-                    elif line.startswith("-f "):
+                    elif line.startswith("-f "):  # noqa: regex-ok — .f filelist format token, not SV source
                         sub_path = str((base_dir / line[3:].strip()).resolve())
                         sub_files, sub_incs = SlangHierarchyAnalyzer.parse_filelist(
                             sub_path, _visited
@@ -1035,19 +1037,23 @@ class SlangHierarchyAnalyzer:
             # ConcurrentAssertion's propertySpec (or the ImmediateAssertion's
             # ``cond`` expression) for the evidence span.
             expr_text = ""
+            # Keep spec/syn accessible after the try block so the structural
+            # signal-reference walk below can use them without re-fetching.
+            _prop_spec = None
+            _prop_syn = None
             try:
                 if is_concurrent:
-                    spec = getattr(stmt, "propertySpec", None)
-                    if spec is not None:
-                        syn = getattr(spec, "syntax", None)
-                        if syn is not None:
-                            expr_text = str(syn).strip()
+                    _prop_spec = getattr(stmt, "propertySpec", None)
+                    if _prop_spec is not None:
+                        _prop_syn = getattr(_prop_spec, "syntax", None)
+                        if _prop_syn is not None:
+                            expr_text = str(_prop_syn).strip()
                 else:
                     cond = getattr(stmt, "cond", None)
                     if cond is not None:
-                        syn = getattr(cond, "syntax", None)
-                        if syn is not None:
-                            expr_text = str(syn).strip()
+                        _prop_syn = getattr(cond, "syntax", None)
+                        if _prop_syn is not None:
+                            expr_text = str(_prop_syn).strip()
             except Exception:
                 expr_text = ""
 
@@ -1067,30 +1073,66 @@ class SlangHierarchyAnalyzer:
 
             emit(def_name, "has_assertion", ent_name, evidence_span=f"kind={akind}")
 
-            # Resolve referenced signals by identifier-intersection on the
-            # property's syntax text. Dedupe per-(assertion, target) so the
-            # NetworkX-DiGraph parallel-edge collapse never silently drops
-            # a real predicate.
-            if expr_text:
-                # First pull clock identifiers out of any ``@(posedge X)``
-                # or ``@(negedge X)`` timing events — those resolve to
-                # ClockDomain entities (no module prefix), matching the
-                # ``clocked_by`` edge convention.
-                clk_idents = set(_re.findall(
-                    r"@\s*\(\s*(?:posedge|negedge|edge)\s+([A-Za-z_][A-Za-z0-9_]*)",
-                    expr_text,
-                ))
+            # Resolve referenced signals via pyslang structural AST walk.
+            # For concurrent assertions, use:
+            #   spec.clocking  — a TimingControl/SignalEvent that directly
+            #                    exposes the clock name without text-scanning.
+            #   syn.visit()    — syntax-tree visitor that collects all
+            #                    IdentifierName tokens in the property body.
+            # For immediate assertions we still walk the cond syntax tree the
+            # same way. Both paths avoid regex on property-spec text.
+            # Dedupe per-(assertion, target) to avoid parallel-edge collapse.
+            if _prop_syn is not None or _prop_spec is not None:
+                # --- Step 1: clock idents via spec.clocking (concurrent only) ---
+                clk_idents: Set[str] = set()
+                if is_concurrent and _prop_spec is not None:
+                    try:
+                        clk_tc = getattr(_prop_spec, "clocking", None)
+                        if clk_tc is not None:
+                            clk_expr = getattr(clk_tc, "expr", None)
+                            if clk_expr is not None:
+                                clk_sym = getattr(clk_expr, "symbol", None)
+                                if clk_sym is not None:
+                                    ck = getattr(clk_sym, "name", "") or ""
+                                    if ck:
+                                        clk_idents.add(ck)
+                    except Exception:
+                        pass
                 for ck in clk_idents:
                     # Surface the clock as a ClockDomain entity, lazily.
                     clock_domains.setdefault(ck, set())
 
-                idents = set(_IDENT_RE.findall(expr_text))
+                # --- Step 2: all identifier tokens via syntax.visit() ---
+                # Walk *every* token in the property syntax tree and collect
+                # those whose kind is ``TokenKind.Identifier``. This catches
+                # bare names, array-indexed names (``sig[i]`` → base token),
+                # and hierarchical member access bases (``sig.field``).
+                # Using the token kind (not the syntax-node kind) is necessary
+                # because ``alert_tx_o`` in ``alert_tx_o[1].alert_p`` sits
+                # inside an ``IdentifierSelectName`` node, not a bare
+                # ``IdentifierName`` — the latter misses it.
+                idents: Set[str] = set()
+                if _prop_syn is not None:
+                    try:
+                        def _collect_idents(node) -> None:
+                            k = str(getattr(node, "kind", ""))
+                            if k == "TokenKind.Identifier":
+                                val = (
+                                    getattr(node, "valueText", "")
+                                    or getattr(node, "rawText", "")
+                                )
+                                if val:
+                                    idents.add(val)
+                        _prop_syn.visit(_collect_idents)
+                    except Exception:
+                        pass
+
                 seen_refs: Set[str] = set()
                 for ident in idents:
                     target: Optional[str] = None
                     if ident in clk_idents:
                         # Prefer ClockDomain mapping for any signal that
-                        # appears in a timing event of *this* assertion.
+                        # appears in the assertion's timing event.
                         target = ident
                     elif ident in sig_entity:
                         target = sig_entity[ident]

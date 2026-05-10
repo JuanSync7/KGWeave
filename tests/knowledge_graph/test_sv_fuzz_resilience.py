@@ -40,6 +40,20 @@ FUZZ_CORPUS: list[tuple[str, str]] = [
     ("hjson_lookalike", '{"name": "foo", "modules": [1,2,3]}'),
     ("malformed_directives", "`include\n`define\n`ifdef\n`endif"),
     ("mixed_lineendings", "module foo;\r\nendmodule\r\n"),
+    # iter-013: adversarial for sv_connectivity assertion-ident extraction.
+    # module keyword with tab separator + parameterized port + multiline
+    # concurrent assertion — exposes regex-on-text fragility in old code.
+    (
+        "tab_sep_module_with_multiline_assertion",
+        "module\ttab_mod #(parameter int W=8) (\n"
+        "  input logic clk_i, input logic rst_ni,\n"
+        "  input logic [W-1:0] req, output logic [W-1:0] ack\n"
+        ");\n"
+        "  chk: assert property (\n"
+        "    @(posedge clk_i) disable iff (!rst_ni) req |-> ##1 ack\n"
+        "  );\n"
+        "endmodule\n",
+    ),
 ]
 
 
