@@ -281,3 +281,62 @@ def test_makefile_custom_module_strip_suffixes(tmp_path):
     pc = ProjectConventions(makefile_module_strip_suffixes=["_unit"])
     links = MakefileReader(project_conventions=pc).read(tmp_path)
     assert {l.module_name for l in links} == {"splork"}
+
+
+# ---------------------------------------------------------------------------
+# (iter-006) Structural parser: no regex import, tab-separated targets, etc.
+# ---------------------------------------------------------------------------
+
+
+def test_makefile_no_import_re():
+    """After iter-006, buildsys_makefile must not import the re module."""
+    import ast, importlib, sys
+
+    # Force fresh import to avoid cached module state.
+    mod_name = "kgweave.knowledge_graph.extraction.buildsys_makefile"
+    if mod_name in sys.modules:
+        del sys.modules[mod_name]
+
+    spec = importlib.util.find_spec(mod_name)
+    assert spec is not None, f"Cannot find module {mod_name}"
+    src = Path(spec.origin).read_text()
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            names = [alias.name for alias in node.names]
+            assert "re" not in names, (
+                "buildsys_makefile still imports the 're' module — "
+                "iter-006 structural replacement is incomplete"
+            )
+
+
+def test_makefile_tab_indented_target(tmp_path):
+    """Target rule with a tab-separated recipe line must still be parsed."""
+    from kgweave.knowledge_graph.extraction.buildsys_makefile import MakefileReader
+
+    _w(tmp_path / "Makefile", "test-uart: uart_test.c\n\tgcc uart_test.c\n\nMODULE := uart\n")
+    links = MakefileReader().read(tmp_path)
+    mods = {l.module_name for l in links}
+    assert "uart" in mods
+
+
+def test_makefile_srcs_uppercase_extensions(tmp_path):
+    """SRCS with .c, .cc, .cpp, .sv — all recognised by structural endswith check."""
+    from kgweave.knowledge_graph.extraction.buildsys_makefile import MakefileReader
+
+    _w(tmp_path / "Makefile", "MODULE := sha2\nSRCS := sha2.c sha2_ref.cpp sha2.sv\n")
+    links = MakefileReader().read(tmp_path)
+    srcs = {l.raw_match["src"] for l in links}
+    assert "sha2.c" in srcs
+    assert "sha2_ref.cpp" in srcs
+    assert "sha2.sv" in srcs
+
+
+def test_makefile_make_var_ref_detection(tmp_path):
+    """Values containing $( or ${ are skipped without a regex."""
+    from kgweave.knowledge_graph.extraction.buildsys_makefile import MakefileReader
+
+    _w(tmp_path / "Makefile", "MODULE := $(COMPUTED_NAME)\nSRCS := good.c\n")
+    # No module because the value is a variable reference.
+    links = MakefileReader().read(tmp_path)
+    assert links == []

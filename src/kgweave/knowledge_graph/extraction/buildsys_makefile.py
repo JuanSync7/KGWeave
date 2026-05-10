@@ -1,20 +1,19 @@
 # @summary
 # GNU Makefile reader (Tier B Phase 6). Heuristic-only — variable
 # expansion is NOT performed and macros aren't traced. Recognized
-# signals: MODULE/IP_NAME/IP_TOP variable assignments, test-<module>:
+# signals: MODULE/IP_NAME/IP_TOP variable assignment, test-<module>:
 # / test_<module>: target rule names, and SRCS=<file>.c hints. Confidence
 # tier: medium (easy to fool). `include sub.mk` directives are followed
 # with depth-limited recursion.
 # Exports: MakefileReader
-# Deps: re, pathlib, kgweave.knowledge_graph.common.sw_test_buildsys
+# Deps: pathlib, kgweave.knowledge_graph.common.sw_test_buildsys
 # @end-summary
-"""GNU Makefile reader."""
+"""GNU Makefile reader — structural (no regex)."""
 
 from __future__ import annotations
 
 import fnmatch
 import logging
-import re
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Set, Tuple
 
@@ -28,14 +27,90 @@ _DEFAULT_MODULE_VARS = ["MODULE", "IP_NAME", "IP_TOP", "DUT", "DUT_NAME"]
 _DEFAULT_TEST_TARGET_PREFIXES = ["test-", "test_"]
 _DEFAULT_MODULE_STRIP_SUFFIXES = ["_top", "_dut", "_core", "_wrapper"]
 
-_SRCS_RE = re.compile(r"^\s*SRCS\s*[:?+]?=\s*(?P<val>.+?)\s*$")
-_INCLUDE_RE = re.compile(r"^\s*-?include\s+(\S+)")
-_MAKE_VAR_REF_RE = re.compile(r"\$[\(\{]")
+# GNU Make assignment operators (in priority order for split detection).
+_ASSIGN_OPS = [":=", "?=", "+=", "="]
+
 _MAX_DEPTH = 4
+
+# Extension set for SRCS recognition.
+_SRC_EXTENSIONS = (".c", ".cc", ".cpp", ".sv")
+
+
+def _is_identifier(s: str) -> bool:
+    """Return True iff *s* matches ``[a-z][a-z0-9_]*`` (no regex)."""
+    if not s:
+        return False
+    first = s[0]
+    if first < "a" or first > "z":
+        return False
+    for ch in s[1:]:
+        if not (("a" <= ch <= "z") or ("0" <= ch <= "9") or ch == "_"):
+            return False
+    return True
+
+
+def _has_make_var_ref(val: str) -> bool:
+    """Return True iff *val* contains an unexpanded make-variable reference."""
+    return "$(" in val or "${" in val
+
+
+def _parse_assignment(line: str) -> Optional[Tuple[str, str]]:
+    """Parse a GNU make assignment line into (variable_name, value).
+
+    Supports all four operators: ``:=``, ``?=``, ``+=``, ``=``.
+    Returns None if the line is not an assignment.
+    """
+    stripped = line.lstrip()
+    # Try two-character operators first (avoids false-positive on bare ``=``).
+    for op in (":=", "?=", "+="):
+        if op in stripped:
+            lhs, _, rhs = stripped.partition(op)
+            lhs = lhs.strip()
+            # Make sure the LHS is a simple identifier (A-Z, 0-9, _).
+            if lhs and all(
+                c.isalnum() or c == "_" for c in lhs
+            ):
+                return lhs, rhs.strip()
+    # Bare ``=`` — only match if LHS is a clean identifier token.
+    if "=" in stripped:
+        lhs, _, rhs = stripped.partition("=")
+        lhs = lhs.strip()
+        if lhs and all(c.isalnum() or c == "_" for c in lhs) and " " not in lhs:
+            return lhs, rhs.strip()
+    return None
+
+
+def _parse_include(line: str) -> Optional[str]:
+    """Return the included path if *line* is an ``include`` or ``-include`` directive."""
+    stripped = line.lstrip()
+    if stripped.startswith("include ") or stripped.startswith("-include "):
+        parts = stripped.split(None, 1)
+        if len(parts) == 2:
+            path = parts[1].strip()
+            # Skip paths that are unexpanded make variable references.
+            if _has_make_var_ref(path):
+                return None
+            return path
+    return None
+
+
+def _parse_target(line: str) -> Optional[str]:
+    """Return the target name if *line* looks like ``TARGET:`` (a rule head).
+
+    Ignores pattern rules (contain ``%``) and recipe lines (start with tab).
+    """
+    if line.startswith("\t"):
+        return None
+    if ":" in line:
+        target = line.split(":")[0].strip()
+        # Skip empty targets, pattern rules, and phony-variable markers.
+        if target and "%" not in target and "$" not in target:
+            return target
+    return None
 
 
 class MakefileReader:
-    """Heuristic Makefile reader (variable + target-name scrape)."""
+    """Heuristic Makefile reader (variable + target-name scrape) — no regex."""
 
     name = "makefile"
 
@@ -54,10 +129,8 @@ class MakefileReader:
             pc_vars = getattr(project_conventions, "makefile_module_vars", None)
             if pc_vars:
                 module_var_names = pc_vars
-        var_list = list(module_var_names) if module_var_names else list(_DEFAULT_MODULE_VARS)
-        var_alt = "|".join(re.escape(v) for v in var_list)
-        self._var_re = re.compile(
-            rf"^\s*(?P<var>{var_alt})\s*[:?+]?=\s*(?P<val>.+?)\s*$"
+        self._module_var_set: Set[str] = set(
+            module_var_names if module_var_names else _DEFAULT_MODULE_VARS
         )
 
         # Resolve test_target_prefixes.
@@ -65,16 +138,11 @@ class MakefileReader:
             pc_pfx = getattr(project_conventions, "makefile_test_target_prefixes", None)
             if pc_pfx:
                 test_target_prefixes = pc_pfx
-        pfx_list = list(test_target_prefixes) if test_target_prefixes else list(
-            _DEFAULT_TEST_TARGET_PREFIXES
-        )
-        pfx_alt = "|".join(re.escape(p) for p in pfx_list)
-        # Each prefix is followed by an identifier name (the module).
-        self._test_target_re = re.compile(
-            rf"^(?P<target>(?:{pfx_alt})(?P<module>[a-z][a-z0-9_]*))\s*:"
+        self._test_target_prefixes: List[str] = list(
+            test_target_prefixes if test_target_prefixes else _DEFAULT_TEST_TARGET_PREFIXES
         )
 
-        # Resolve module strip suffixes.
+        # Resolve module strip suffixes — store as frozenset of canonical forms.
         if module_strip_suffixes is None and project_conventions is not None:
             pc_sfx = getattr(project_conventions, "makefile_module_strip_suffixes", None)
             if pc_sfx:
@@ -82,12 +150,26 @@ class MakefileReader:
         sfx_list = list(module_strip_suffixes) if module_strip_suffixes else list(
             _DEFAULT_MODULE_STRIP_SUFFIXES
         )
-        if sfx_list:
-            # Suffixes may include leading underscore or not; preserve as-is.
-            sfx_alt = "|".join(re.escape(s.lstrip("_")) for s in sfx_list)
-            self._module_strip_re = re.compile(rf"_(?:{sfx_alt})$")
-        else:
-            self._module_strip_re = None
+        # Normalise: ensure each suffix starts with ``_``.
+        self._strip_suffixes: List[str] = [
+            s if s.startswith("_") else f"_{s}" for s in sfx_list
+        ]
+
+    def _strip_module_suffix(self, val: str) -> str:
+        """Remove a trailing module suffix if present."""
+        for sfx in self._strip_suffixes:
+            if val.endswith(sfx):
+                return val[: -len(sfx)]
+        return val
+
+    def _extract_module_from_target(self, target: str) -> Optional[str]:
+        """If *target* starts with a test prefix, return the module part."""
+        for pfx in self._test_target_prefixes:
+            if target.startswith(pfx):
+                module = target[len(pfx):]
+                if _is_identifier(module):
+                    return module
+        return None
 
     def _candidate_files(self, project_root: Path) -> List[Path]:
         out: List[Path] = []
@@ -151,43 +233,48 @@ class MakefileReader:
         modules: Set[str] = set()
         srcs: Set[str] = set()
         for raw in text.splitlines():
+            # Strip inline comments.
             line = raw.split("#", 1)[0]
             if not line.strip():
                 continue
-            mv = self._var_re.match(line)
-            if mv:
-                val = mv.group("val").strip()
-                # Skip values that contain make var references (unexpanded).
-                if _MAKE_VAR_REF_RE.search(val):
+
+            # --- (1) Assignment line (MODULE := aes, SRCS = ..., etc.) ---
+            parsed = _parse_assignment(line)
+            if parsed is not None:
+                var_name, val = parsed
+                if var_name in self._module_var_set:
+                    if _has_make_var_ref(val):
+                        continue
+                    cleaned = self._strip_module_suffix(val.strip())
+                    if _is_identifier(cleaned):
+                        modules.add(cleaned)
                     continue
-                # Strip well-known suffixes (aes_top → aes, aes_dut → aes).
-                if self._module_strip_re is not None:
-                    cleaned = self._module_strip_re.sub("", val)
-                else:
-                    cleaned = val
-                if re.match(r"^[a-z][a-z0-9_]*$", cleaned):
-                    modules.add(cleaned)
-                continue
-            ms = _SRCS_RE.match(line)
-            if ms:
-                val = ms.group("val").strip()
-                if _MAKE_VAR_REF_RE.search(val):
+                if var_name == "SRCS":
+                    if _has_make_var_ref(val):
+                        continue
+                    for tok in val.split():
+                        if tok.endswith(_SRC_EXTENSIONS):
+                            srcs.add(tok)
                     continue
-                for tok in val.split():
-                    if tok.endswith((".c", ".cc", ".cpp", ".sv")):
-                        srcs.add(tok)
-                continue
-            mt = self._test_target_re.match(line)
-            if mt:
-                modules.add(mt.group("module"))
-                continue
-            mi = _INCLUDE_RE.match(line)
-            if mi:
-                inc_path = mf_path.parent / mi.group(1)
+
+            # --- (2) Include directive ---
+            inc_path_str = _parse_include(line)
+            if inc_path_str is not None:
+                inc_path = mf_path.parent / inc_path_str
                 if inc_path.exists():
                     sub_mods, sub_srcs = self._collect(
                         inc_path, visited, depth + 1
                     )
                     modules |= sub_mods
                     srcs |= sub_srcs
+                continue
+
+            # --- (3) Target rule (test-aes:, test_aes:) ---
+            target = _parse_target(line)
+            if target is not None:
+                mod = self._extract_module_from_target(target)
+                if mod is not None:
+                    modules.add(mod)
+                continue
+
         return modules, srcs
