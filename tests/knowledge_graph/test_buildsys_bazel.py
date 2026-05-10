@@ -801,3 +801,61 @@ def test_bazel_generic_allowlist_excludes_ot_rules(tmp_path):
     # cc_test seen, opentitan_functest skipped.
     assert "widget" in mods
     assert "frobnicator" not in mods
+
+
+# ---------------------------------------------------------------------------
+# iter-002 regression guards: OPENTITAN_ renames — constants stay in permitted
+# zones and OT defaults do NOT leak into the strict-generic path.
+# ---------------------------------------------------------------------------
+
+
+def test_bazel_strict_generic_no_hw_ip_links_non_ot_build(tmp_path):
+    """BazelBuildReader with project_conventions=ProjectConventions() (strict-generic)
+    and a BUILD file that uses ``//rtl/<mod>:`` deps must produce ZERO module
+    links — the OT ``//hw/ip/`` dep_module_pattern must NOT be applied."""
+    from kgweave.knowledge_graph.common.types import ProjectConventions
+    from kgweave.knowledge_graph.extraction.buildsys_bazel import BazelBuildReader
+
+    _w(tmp_path / "BUILD.bazel", '''
+        cc_test(
+            name = "gizmo_unit",
+            srcs = ["gizmo_unit.cc"],
+            deps = [
+                "//rtl/gizmo:rtl",
+                "//third_party/gtest:main",
+            ],
+        )
+        ''')
+    # Strict-generic: ProjectConventions supplied but no bazel_dep_module_pattern.
+    pc = ProjectConventions()
+    reader = BazelBuildReader(project_conventions=pc)
+    links = reader.read(tmp_path)
+    # Must produce zero links — no OT //hw/ip/ pattern should fire.
+    assert links == [], (
+        "Strict-generic BazelBuildReader must not produce module links "
+        "when no bazel_dep_module_pattern is configured."
+    )
+    # Also verify no module named after the dep leaked through.
+    module_names = {l.module_name for l in links}
+    assert "gizmo" not in module_names
+
+
+def test_sw_test_extractor_strict_generic_no_dif_api_call_pattern(tmp_path):
+    """SWTestExtractor(project_conventions=ProjectConventions()) must NOT set
+    ``_synthetic_csr_pattern`` to ``'dif_api_call'``.
+
+    After renaming ``_DIF_PATTERN_NAME -> OPENTITAN_DIF_PATTERN_NAME``, the
+    strict-generic construction path (``explicit_pc=True``) reads
+    ``synthetic_csr_from_pattern`` from the convention object (None for a bare
+    ProjectConventions()) and must NOT fall back to the OT-specific string.
+    """
+    from kgweave.knowledge_graph.common.types import ProjectConventions
+    from kgweave.knowledge_graph.extraction.sw_test_extractor import SWTestExtractor
+
+    pc = ProjectConventions()  # strict-generic, no OT profile
+    ex = SWTestExtractor(project_conventions=pc)
+    # The internal _synthetic_csr_pattern must be None — not "dif_api_call".
+    assert ex._synthetic_csr_pattern is None, (
+        "Strict-generic SWTestExtractor must not set _synthetic_csr_pattern "
+        "to 'dif_api_call' (an OT-specific pattern name)."
+    )

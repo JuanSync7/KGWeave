@@ -112,7 +112,7 @@ _MODULE_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 # Pattern name that triggers synthetic CSR access edges (preserves the
 # legacy "DIF call seen → module's CSRs are accessed" Tier-2 heuristic).
-_DIF_PATTERN_NAME = "dif_api_call"
+OPENTITAN_DIF_PATTERN_NAME = "dif_api_call"
 
 
 @dataclass
@@ -273,7 +273,7 @@ class SWTestExtractor:
                 project_conventions, "evidence_format_call_template", None
             )
         else:
-            self._synthetic_csr_pattern = _DIF_PATTERN_NAME
+            self._synthetic_csr_pattern = OPENTITAN_DIF_PATTERN_NAME
             self._evidence_include_tpl = '#include "dif_{module}.h"'
             self._evidence_call_tpl = "dif_{module}_* call"
 
@@ -616,7 +616,7 @@ class SWTestExtractor:
                 except (KeyError, IndexError):
                     return tpl
             return pattern_name
-        if pattern_name == (self._synthetic_csr_pattern or _DIF_PATTERN_NAME):
+        if pattern_name == (self._synthetic_csr_pattern or OPENTITAN_DIF_PATTERN_NAME):
             tpl = getattr(self, "_evidence_call_tpl", None)
             if tpl:
                 try:

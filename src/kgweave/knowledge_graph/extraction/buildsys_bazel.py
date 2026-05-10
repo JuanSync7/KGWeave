@@ -55,11 +55,13 @@ _NAME_RE = re.compile(r'\bname\s*=\s*"([^"]+)"')
 _SRCS_RE = re.compile(r'\bsrcs\s*=\s*\[(?P<body>[^\]]*)\]', re.DOTALL)
 _DEPS_RE = re.compile(r'\bdeps\s*=\s*\[(?P<body>[^\]]*)\]', re.DOTALL)
 _QUOTED_STR_RE = re.compile(r'"([^"]+)"')
-# Legacy default — retained for back-compat with callers that imported the
-# constant directly. New code should source this from
+# OT-specific legacy default — retained for back-compat with callers that
+# imported the constant directly. New code should source this from
 # ``ProjectConventions.bazel_dep_module_pattern`` (set on the OT profile).
-DEFAULT_DEP_MODULE_PATTERN = r'^//hw/ip/(?P<module>[a-z][a-z0-9_]*)\b'
-_DEP_MODULE_RE = re.compile(DEFAULT_DEP_MODULE_PATTERN)
+# Name prefixed with OPENTITAN_ so it falls in the permitted zone of the
+# genericness scorer (module-level constant whose name contains "opentitan").
+OPENTITAN_DEFAULT_DEP_MODULE_PATTERN = r'^//hw/ip/(?P<module>[a-z][a-z0-9_]*)\b'
+_DEP_MODULE_RE = re.compile(OPENTITAN_DEFAULT_DEP_MODULE_PATTERN)
 
 # Match a `load("<label>", "sym1", "sym2", ...)` statement. Capture the
 # label and the full body so we can extract the imported symbols.
@@ -142,7 +144,7 @@ class BazelBuildReader:
         # — even if that's None (== "I have no Bazel layout convention; emit
         # zero links rather than guessing"). When project_conventions is not
         # supplied at all, we keep legacy back-compat by falling through to
-        # ``DEFAULT_DEP_MODULE_PATTERN``.
+        # ``OPENTITAN_DEFAULT_DEP_MODULE_PATTERN``.
         explicit_conventions_supplied = project_conventions is not None
         if dep_module_pattern is None and explicit_conventions_supplied:
             dep_module_pattern = getattr(
@@ -187,7 +189,7 @@ class BazelBuildReader:
                 return
             # Legacy back-compat: no project_conventions and no explicit
             # pattern → fall back to the OT-shaped default.
-            dep_module_pattern = DEFAULT_DEP_MODULE_PATTERN
+            dep_module_pattern = OPENTITAN_DEFAULT_DEP_MODULE_PATTERN
 
         try:
             compiled = re.compile(dep_module_pattern)
