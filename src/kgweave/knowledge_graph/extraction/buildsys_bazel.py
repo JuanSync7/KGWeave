@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Sequence
 
 from kgweave.knowledge_graph.common.sw_test_buildsys import BuildSystemLink
+from kgweave.knowledge_graph.common.types import OPENTITAN_PROFILE
 
 __all__ = ["BazelBuildReader", "DEFAULT_RULE_ALLOWLIST", "GENERIC_RULE_ALLOWLIST"]
 
@@ -182,8 +183,9 @@ class BazelBuildReader:
                     "BazelBuildReader: no dep_module_pattern configured on "
                     "supplied project_conventions; Bazel deps will not "
                     "produce test->module links. Set "
-                    "project_conventions=ProjectConventions.opentitan() or "
-                    "supply a custom dep_module_pattern."
+                    "project_conventions=ProjectConventions.%s() or "
+                    "supply a custom dep_module_pattern.",
+                    OPENTITAN_PROFILE,
                 )
                 self._dep_module_re = None
                 return

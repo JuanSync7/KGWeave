@@ -54,6 +54,7 @@ from kgweave.knowledge_graph.common.sw_test_config import (
     SwTestResolutionConfig,
     load_sw_test_config,
 )
+from kgweave.knowledge_graph.common.types import OPENTITAN_PROFILE
 
 __all__ = ["SWTestExtractor", "SW_TEST_SOURCE"]
 
@@ -223,7 +224,7 @@ class SWTestExtractor:
                 )
                 if pc_apis:
                     csr_access_api_patterns = list(pc_apis)
-                elif getattr(project_conventions, "profile", None) == "opentitan":
+                elif getattr(project_conventions, "profile", None) == OPENTITAN_PROFILE:
                     csr_access_api_patterns = list(_DEFAULT_CSR_ACCESS_API_PATTERNS)
                 else:
                     csr_access_api_patterns = []

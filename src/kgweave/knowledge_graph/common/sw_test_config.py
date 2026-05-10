@@ -30,6 +30,7 @@ import yaml
 from kgweave.knowledge_graph.common.sw_test_buildsys import (
     SwTestBuildSystemConfig,
 )
+from kgweave.knowledge_graph.common.types import OPENTITAN_PROFILE
 
 __all__ = [
     "SwTestPattern",
@@ -238,7 +239,7 @@ def load_sw_test_config(
             markers = getattr(project_conventions, "sw_test_markers", None)
             if not markers:
                 # Fall back to a profile-aware default.
-                if getattr(project_conventions, "profile", None) == "opentitan":
+                if getattr(project_conventions, "profile", None) == OPENTITAN_PROFILE:
                     markers = list(OPENTITAN_DEFAULT_TEST_MARKERS)
                 else:
                     markers = list(GENERIC_DEFAULT_TEST_MARKERS)
@@ -251,7 +252,7 @@ def load_sw_test_config(
     if not path:
         # (3) opentitan profile or legacy bare call → OT defaults.
         if project_conventions is None or (
-            getattr(project_conventions, "profile", None) == "opentitan"
+            getattr(project_conventions, "profile", None) == OPENTITAN_PROFILE
         ):
             return _opentitan_defaults(
                 project_conventions=project_conventions,
@@ -262,9 +263,10 @@ def load_sw_test_config(
             "sw_test_config: no sw_test patterns configured "
             "(project_conventions.profile=%r and no YAML supplied). "
             "SW->RTL resolution will produce no links. Set "
-            "project_conventions=ProjectConventions.opentitan() or supply "
+            "project_conventions=ProjectConventions.%s() or supply "
             "an explicit YAML / sw_test_patterns.",
             getattr(project_conventions, "profile", None),
+            OPENTITAN_PROFILE,
         )
         markers = getattr(project_conventions, "sw_test_markers", None)
         if not markers:

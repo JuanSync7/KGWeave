@@ -32,6 +32,7 @@ __all__ = [
     "EdgeTypeDefinition",
     "SchemaDefinition",
     "ProjectConventions",
+    "OPENTITAN_PROFILE",
     "KGConfig",
     "load_schema",
 ]
@@ -39,6 +40,11 @@ __all__ = [
 _schema_logger = logging.getLogger("rag.knowledge_graph.schema")
 
 VALID_CATEGORIES = {"structural", "semantic", "claim"}
+
+#: Canonical profile identifier for the OpenTitan project.  All
+#: ``profile == "opentitan"`` comparisons in extractors must reference
+#: this constant rather than a bare string literal.
+OPENTITAN_PROFILE: str = "opentitan"
 VALID_PHASES = {"phase_1", "phase_1b", "phase_2"}
 
 
