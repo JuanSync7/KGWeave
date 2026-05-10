@@ -3,24 +3,24 @@
 # Walks a directory for .c/.cc/.cpp/.h/.hh/.hpp files. Emits CFile and
 # CFunction entities, defined_in and includes edges, and implements_dpi
 # edges to any DPIBoundary whose name matches an extracted CFunction.
-# DPI-C boundary detection is a separate regex pass over SV files; see
+# DPI-C boundary detection uses pyslang AST walking over SV files; see
 # extract_dpi_boundaries() and extract_dpi_boundaries_with_scope().
 # Exports: CppRefModelExtractor, CPP_REF_MODEL_SOURCE, extract_dpi_boundaries,
 #          extract_dpi_boundaries_with_scope, build_dpi_boundary_entities
-# Deps: pathlib, re, typing, kgweave.knowledge_graph.common
+# Deps: pathlib, re, pyslang, typing, kgweave.knowledge_graph.common
 # @end-summary
 """C/C++ reference-model and DPI-C boundary extractor (Tier 1 + Tier 2).
 
 Walks a directory for C/C++ source files and emits typed nodes + edges.
-No libclang or AST library is required — all detection is pure regex.
-This is a heuristic and documents its known false-negative cases; false
-positives are avoided by conservative pattern selection.
 
-DPI-C boundary detection: a helper ``extract_dpi_boundaries()`` walks SV
-files for ``import "DPI-C"`` declarations and returns a list of function
-name strings. This is a regex pass separate from slang because the DPI
-boundary names are what CppRefModelExtractor fuses against — they must be
-available before or alongside the C/C++ extraction pass.
+C/C++ function detection uses a single conservative regex (no libclang or
+tree-sitter-c is available in this environment; see ``_FUNC_DEF_RE``).  All
+other extraction paths are parser-driven:
+
+- ``#include "..."`` detection: structural line tokeniser (no regex).
+- DPI-C boundary detection: pyslang AST walk over SV files — immune to
+  unusual spacing, CRLF line endings, and complex return types such as
+  ``bit[7:0]`` that the old regex silently dropped.
 
 Heuristic limitations (Phase 1 acceptable, Tier 3 libclang work deferred):
   - Template function definitions (``template<typename T> T foo(...)``) are
@@ -46,6 +46,8 @@ import re
 from pathlib import Path
 from typing import Any, Iterable, List, Optional, Set, Tuple
 
+import pyslang
+
 from kgweave.knowledge_graph.common import (
     Entity,
     ExtractionResult,
@@ -68,32 +70,16 @@ _logger = logging.getLogger("rag.knowledge_graph.cpp_extractor")
 
 _CPP_EXTENSIONS = {".c", ".cc", ".cpp", ".h", ".hh", ".hpp"}
 
-_FUNC_DEF_RE = re.compile(
+# noqa: regex-ok — C/C++ function-definition heuristic. No tree-sitter-c or
+# libclang grammar is available in this environment; a pure-regex fallback is
+# the only viable option until a C/C++ parser dependency is added (Tier 3).
+_FUNC_DEF_RE = re.compile(  # noqa: regex-ok
     r"^(?:static\s+|inline\s+|extern\s+)*"
     r"(?:const\s+)?"
     r"[\w:*&<>\s]+"
     r"\s(\w+)\s*"
     r"\([^;{)]*\)\s*"
     r"\{",
-    re.MULTILINE,
-)
-
-_INCLUDE_LOCAL_RE = re.compile(r'^\s*#include\s+"([^"]+)"', re.MULTILINE)
-
-_DPI_IMPORT_RE = re.compile(
-    r'import\s+"DPI-C"\s+(?:context\s+)?(?:function|task)\s+'
-    r'(?:[\w:*&]+\s+)?(\w+)\s*\(',
-)
-
-# Matches the opening of a named SV scope (module / package / interface / program).
-_SV_SCOPE_OPEN_RE = re.compile(
-    r'^\s*(module|package|interface|program)\s+(\w+)',
-    re.MULTILINE,
-)
-
-# Matches the closing keyword of any SV scope.
-_SV_SCOPE_CLOSE_RE = re.compile(
-    r'^\s*end(?:module|package|interface|program)\b',
     re.MULTILINE,
 )
 
@@ -153,9 +139,33 @@ def _extract_functions(text: str) -> List[str]:
 
 
 def _extract_local_includes(text: str) -> List[str]:
-    """Return local include targets from ``#include "..."`` directives."""
+    """Return local include targets from ``#include "..."`` directives.
+
+    Uses a structural line tokeniser: strips block comments, then for each
+    line checks for a ``#include`` preprocessor directive followed by a
+    double-quoted path.  This avoids a regex and correctly handles arbitrary
+    whitespace between ``#``, ``include``, and the quoted string.
+    """
     stripped = _strip_block_comments(text)
-    return _INCLUDE_LOCAL_RE.findall(stripped)
+    results: List[str] = []
+    for raw_line in stripped.splitlines():
+        tok = raw_line.strip()
+        # Must be a preprocessor directive
+        if tok[:1] != "#":
+            continue
+        rest = tok[1:].lstrip()
+        # Must be an #include directive
+        if rest[:7] != "include":
+            continue
+        after = rest[7:].lstrip()
+        # Local include only: double-quoted path, not angle-bracket
+        if after[:1] != '"':
+            continue
+        close = after.find('"', 1)
+        if close < 0:
+            continue
+        results.append(after[1:close])
+    return results
 
 
 class CppRefModelExtractor:
@@ -316,16 +326,71 @@ class CppRefModelExtractor:
                 ))
 
 
+def _sv_scope_of(node: "pyslang.SyntaxNode") -> Tuple[str, str]:
+    """Walk up the pyslang syntax-tree to find the nearest enclosing SV scope.
+
+    Returns ``(scope_kind, scope_name)`` where ``scope_kind`` is one of
+    ``"module"``, ``"package"``, ``"interface"``, ``"program"``, or
+    ``"<file>"`` (compilation-unit level, rare but valid SV).
+
+    Using the parent-pointer chain in the AST is both simpler and more
+    correct than the old event-stream approach: it is immune to unusual
+    whitespace, CRLF endings, and nested-scope edge cases.
+
+    pyslang represents each SV scope kind as a *distinct* AST class:
+    ``ModuleDeclaration``, ``InterfaceDeclaration``, ``ProgramDeclaration``,
+    and ``PackageDeclaration``.  Each has a ``header.name`` identifier token.
+    """
+    _FILE_SCOPE = "<file>"
+    parent = node.parent
+    while parent is not None:
+        kind_str = str(parent.kind)
+        if "PackageDeclaration" in kind_str:
+            return ("package", str(parent.header.name).strip())
+        if "InterfaceDeclaration" in kind_str:
+            return ("interface", str(parent.header.name).strip())
+        if "ProgramDeclaration" in kind_str:
+            return ("program", str(parent.header.name).strip())
+        if "ModuleDeclaration" in kind_str:
+            return ("module", str(parent.header.name).strip())
+        parent = parent.parent
+    return (_FILE_SCOPE, _FILE_SCOPE)
+
+
+def _collect_dpi_imports(
+    node: "pyslang.SyntaxNode",
+    seen: Set[Tuple[str, str]],
+    result: List[Tuple[str, str, str]],
+) -> None:
+    """Recursively walk a pyslang syntax node and collect DPI import entries."""
+    if isinstance(node, pyslang.DPIImportSyntax):
+        dpi_name = str(node.method.name.identifier).strip()
+        if dpi_name:
+            scope_kind, scope_name = _sv_scope_of(node)
+            key = (scope_name, dpi_name)
+            if key not in seen:
+                seen.add(key)
+                result.append((scope_name, scope_kind, dpi_name))
+    if isinstance(node, pyslang.SyntaxNode):
+        for child in node:
+            if isinstance(child, pyslang.SyntaxNode):
+                _collect_dpi_imports(child, seen, result)
+
+
 def extract_dpi_boundaries_with_scope(
     sv_files: Iterable[str],
 ) -> List[Tuple[str, str, str]]:
     """Extract DPI-C imports with their enclosing SV scope.
 
-    Scans each SV file line-by-line (via compiled regexes), tracking the
-    innermost ``module``/``package``/``interface``/``program`` scope.  Resets
-    to ``("<file>", "<file>")`` on any ``end*`` keyword.  Nested scopes are
-    flattened — the innermost scope wins, which is correct for SV because the
-    language forbids nested module/package definitions.
+    Parses each SV file with pyslang, then walks the syntax tree to locate
+    ``DPIImportSyntax`` nodes and reads the enclosing scope via the
+    parent-pointer chain.  This replaces the old regex event-stream approach
+    and correctly handles:
+
+    - Packed / complex return types (e.g. ``bit[7:0]``) that the old
+      ``(?:[\\w:*&]+\\s+)?`` pattern silently dropped.
+    - Arbitrary whitespace and CRLF line endings.
+    - No false positives from commented-out imports (pyslang strips comments).
 
     Parameters
     ----------
@@ -340,7 +405,6 @@ def extract_dpi_boundaries_with_scope(
         ``"interface"``, ``"program"``, or ``"<file>"`` (compilation-unit
         scope, rare but legal SV).
     """
-    _FILE_SCOPE = "<file>"
     seen: Set[Tuple[str, str]] = set()  # (scope_name, dpi_name) pairs
     result: List[Tuple[str, str, str]] = []
 
@@ -351,36 +415,13 @@ def extract_dpi_boundaries_with_scope(
             _logger.warning("Could not read SV file %s: %s", path_str, exc)
             continue
 
-        # Build an event stream: (position, kind, payload) where kind is
-        # "open", "close", or "dpi".
-        events: List[Tuple[int, str, str, str]] = []
-        for m in _SV_SCOPE_OPEN_RE.finditer(text):
-            events.append((m.start(), "open", m.group(1), m.group(2)))
-        for m in _SV_SCOPE_CLOSE_RE.finditer(text):
-            events.append((m.start(), "close", "", ""))
-        for m in _DPI_IMPORT_RE.finditer(text):
-            events.append((m.start(), "dpi", "", m.group(1)))
-
-        events.sort(key=lambda e: e[0])
-
-        scope_kind: str = _FILE_SCOPE
-        scope_name: str = _FILE_SCOPE
-
-        for _pos, kind, skind, payload in events:
-            if kind == "open":
-                scope_kind = skind
-                scope_name = payload
-            elif kind == "close":
-                scope_kind = _FILE_SCOPE
-                scope_name = _FILE_SCOPE
-            else:  # "dpi"
-                dpi_name = payload
-                if not dpi_name:
-                    continue
-                key = (scope_name, dpi_name)
-                if key not in seen:
-                    seen.add(key)
-                    result.append((scope_name, scope_kind, dpi_name))
+        try:
+            tree = pyslang.SyntaxTree.fromText(text)
+            _collect_dpi_imports(tree.root, seen, result)
+        except Exception as exc:  # pyslang parse error → skip file gracefully
+            _logger.warning(
+                "pyslang failed to parse SV file %s: %s", path_str, exc
+            )
 
     return result
 

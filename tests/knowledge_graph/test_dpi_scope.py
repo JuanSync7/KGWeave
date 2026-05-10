@@ -272,3 +272,33 @@ def test_aes_model_dpi_pkg_scope_real_file() -> None:
         assert scope_kind == "package", (
             f"Unexpected scope_kind {scope_kind!r} for {dpi_name!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Structural-parser regression: complex return type (regex was blind to bit[7:0])
+# ---------------------------------------------------------------------------
+
+def test_dpi_import_with_packed_return_type(tmp_path: Path) -> None:
+    """extract_dpi_boundaries_with_scope must capture DPI functions whose return
+    type is a packed vector (e.g. ``bit[7:0]``).
+
+    The old regex-based implementation used ``(?:[\\w:*&]+\\s+)?`` to skip the
+    return type, which silently dropped any DPI function with a bracketed return
+    type such as ``bit[7:0]``.  The pyslang-based replacement parses the SV AST
+    and is immune to return-type syntax.
+    """
+    sv = _write_sv(
+        tmp_path,
+        "packed_ret.sv",
+        'package packed_pkg;\n'
+        '  import "DPI-C" function chandle fn_chandle();\n'
+        '  import "DPI-C" function bit [7:0] fn_packed_byte();\n'
+        'endpackage\n',
+    )
+    result = extract_dpi_boundaries_with_scope([sv])
+    names = {r[2] for r in result}
+    assert "fn_chandle" in names, f"fn_chandle missing from {names}"
+    assert "fn_packed_byte" in names, (
+        "fn_packed_byte with packed return type 'bit[7:0]' was not extracted — "
+        "the extractor may still use a regex that drops bracketed return types"
+    )
