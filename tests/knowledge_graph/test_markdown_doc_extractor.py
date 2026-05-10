@@ -131,3 +131,54 @@ def test_extractor_source_attribution() -> None:
         assert t.extractor_source == "markdown_doc"
     for e in result.entities:
         assert e.extractor_source == ["markdown_doc"]
+
+
+# ---------------------------------------------------------------------------
+# Setext-style headings (underline syntax) — missed by ATX-only regex
+# ---------------------------------------------------------------------------
+
+
+def test_setext_headings_parsed_as_sections() -> None:
+    """Setext-style (underline) h1/h2 headings must be recognised as Section
+    entities.  The old ATX-only regex (^#{1,3}\\s+) silently dropped these,
+    requiring a proper Markdown parser (mistune) to handle them correctly."""
+    md = (
+        "AES Core\n"
+        "========\n"
+        "\n"
+        "Overview of the AES core implementation.\n"
+        "\n"
+        "Sub Section\n"
+        "-----------\n"
+        "\n"
+        "Details go here.\n"
+    )
+    extractor = MarkdownDocExtractor()
+    result = extractor.extract(md, source="aes_core.md")
+
+    sections = [e for e in result.entities if e.type == "Section"]
+    names = {e.name for e in sections}
+    # Both setext-style headings must produce Section entities.
+    assert "aes_core.md#aes-core" in names, f"setext h1 not found; got {names}"
+    assert "aes_core.md#sub-section" in names, f"setext h2 not found; got {names}"
+
+
+def test_fenced_block_excludes_entity_mentions() -> None:
+    """Mentions inside fenced code blocks must NOT produce fusion entities.
+    This verifies the parser-driven (mistune) code-block exclusion replaces
+    the old ``_FENCED_BLOCK_RE.sub(...)`` regex approach."""
+    md = (
+        "# Guide\n\n"
+        "```verilog\n"
+        "// This block mentions aes_core but should be excluded\n"
+        "module aes_core (...);\n"
+        "```\n\n"
+        "Prose paragraph without any module names.\n"
+    )
+    extractor = MarkdownDocExtractor(known_entity_names=["aes_core"])
+    result = extractor.extract(md, source="guide.md")
+
+    fusion = [e for e in result.entities if e.type == "RTL_Module"]
+    assert fusion == [], (
+        f"Entity mention inside fenced block must be excluded; got {fusion}"
+    )
