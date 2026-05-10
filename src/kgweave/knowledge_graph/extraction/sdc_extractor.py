@@ -5,7 +5,7 @@
 # anchored to existing ClockDomain / Port / Signal entities (case-insensitive
 # fusion via known_entity_names lookup, mirroring MarkdownDocExtractor).
 # Exports: SDCExtractor, SDC_SOURCE
-# Deps: re, os, src.kgweave.knowledge_graph.common
+# Deps: os, src.kgweave.knowledge_graph.common
 # @end-summary
 """Synopsys Design Constraints (SDC) extractor.
 
@@ -56,7 +56,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from kgweave.knowledge_graph.common import (
@@ -201,14 +200,79 @@ def _tokenize(line: str) -> List[str]:
 # ---------------------------------------------------------------------------
 
 
-_GET_RE = re.compile(
-    r"\[\s*(get_ports|get_clocks|get_pins|get_cells|get_nets|all_inputs|all_outputs|all_clocks|all_registers)"
-    r"(?:\s+(.*?))?\s*\]",
-    re.DOTALL,
-)
+# Structural SDC command names that yield object collections but no concrete
+# named identifier we can fuse to. Used by _mine_identifiers below.
+_COLLECTION_CMDS = frozenset({
+    "all_inputs", "all_outputs", "all_clocks", "all_registers",
+})
+
+# Named get_* commands whose first non-flag argument IS a concrete name.
+_GET_CMDS = frozenset({
+    "get_ports", "get_clocks", "get_pins", "get_cells", "get_nets",
+})
 
 
-def _mine_identifiers(token: str) -> List[str]:
+def _parse_bracket_expr(inner: str) -> List[str]:
+    """Parse the interior of a ``[cmd arg...]`` Tcl bracket expression.
+
+    Returns the list of bare identifier strings, or an empty list when the
+    command is a collection constructor with no concrete single name (e.g.
+    ``all_inputs``) or when the command is unknown.
+
+    No regex is used — the inner string is split on whitespace and the
+    first word is the command name. Brace-lists in the argument are handled
+    by stripping outer ``{}``.
+    """
+    inner = inner.strip()
+    if not inner:
+        return []
+
+    # Split on whitespace to separate command from arguments.
+    parts = inner.split()
+    if not parts:
+        return []
+
+    cmd = parts[0]
+
+    if cmd in _COLLECTION_CMDS:
+        return []
+    if cmd not in _GET_CMDS:
+        # Unknown command (e.g. remove_from_collection, filter_collection) —
+        # cannot safely extract identifiers.
+        return []
+
+    # Remaining parts are the command arguments.
+    args = parts[1:]
+    if not args:
+        return []
+
+    # Collapse brace-grouped arguments: ``{a b}`` appears as multiple tokens
+    # after split if the outer caller didn't preserve them, but _tokenize
+    # keeps brace groups verbatim so in practice ``args`` is already split
+    # at the top level. We re-join and re-split to handle both styles.
+    joined = " ".join(args).strip()
+    if joined and joined[0] == "{" and joined[-1] == "}":
+        joined = joined[1:-1]
+
+    # Strip option flags (start with '-') — same logic as before, no regex.
+    words: List[str] = []
+    skip_next = False
+    for w in joined.split():
+        if skip_next:
+            skip_next = False
+            continue
+        if w and w[0] == "-":
+            if w in ("-hierarchical", "-hier", "-regexp", "-nocase"):
+                continue
+            # Conservative: assume unknown flags consume the next word.
+            skip_next = True
+            continue
+        words.append(w)
+
+    return [_clean_id(w) for w in words if _clean_id(w)]
+
+
+def _mine_identifiers(raw: str) -> List[str]:
     """Return bare identifiers referenced in a token.
 
     Handles:
@@ -218,49 +282,24 @@ def _mine_identifiers(token: str) -> List[str]:
     * ``[get_pins divider/q]`` → ``["q"]`` (last path component)
     * ``[all_inputs]`` / ``[remove_from_collection ...]`` → ``[]``
     * Bare ``main_clk`` → ``["main_clk"]``
+
+    Implemented without ``re`` — structural character and string operations only.
     """
-    if not token:
+    if not raw:
         return []
+    first = raw[0]
+    last = raw[-1]
     # Bare brace list: {a b c}
-    if token.startswith("{") and token.endswith("}"):
-        inner = token[1:-1]
+    if first == "{" and last == "}":
+        inner = raw[1:-1]
         return [_clean_id(t) for t in inner.split() if _clean_id(t)]
-    # Bracket expression: [get_X ...]
-    m = _GET_RE.search(token)
-    if m:
-        cmd = m.group(1)
-        if cmd in ("all_inputs", "all_outputs", "all_clocks", "all_registers"):
-            return []
-        rest = (m.group(2) or "").strip()
-        if not rest:
-            return []
-        # Strip a single set of {} if present.
-        if rest.startswith("{") and rest.endswith("}"):
-            rest = rest[1:-1]
-        # Drop common option flags (-hierarchical, -filter, -of_objects, etc.)
-        words: List[str] = []
-        skip_next = False
-        for w in rest.split():
-            if skip_next:
-                skip_next = False
-                continue
-            if w.startswith("-"):
-                if w in ("-hierarchical", "-hier", "-regexp", "-nocase"):
-                    continue
-                # -filter "..." consumes the next token; we cannot know which
-                # take an arg, so be conservative and drop the next token too.
-                skip_next = True
-                continue
-            words.append(w)
-        return [_clean_id(w) for w in words if _clean_id(w)]
-    # Anything else with brackets we cannot parse — skip.
-    if token.startswith("[") and token.endswith("]"):
+    # Bracket expression: [cmd arg...]
+    if first == "[" and last == "]":
+        return _parse_bracket_expr(raw[1:-1])
+    # Tcl-substituted variable: $CLK or ${CLK} — no usable identifier.
+    if first == "$":
         return []
-    # Bare identifier — possibly Tcl-substituted ${CLK} which we keep literal
-    # but treat as no usable identifier (callers detect the $).
-    if token.startswith("$") or token.startswith("${"):
-        return []
-    cid = _clean_id(token)
+    cid = _clean_id(raw)
     return [cid] if cid else []
 
 
@@ -744,12 +783,20 @@ class SDCExtractor:
         return bare
 
 
-_NUMERIC_RE = re.compile(r"^-?\d+(\.\d+)?([eE][-+]?\d+)?$")
-
-
 def _looks_numeric(tok: str) -> bool:
-    """Return True for a literal numeric token (``2``, ``2.0``, ``1e-3``)."""
-    return bool(_NUMERIC_RE.match(tok.strip()))
+    """Return True for a literal numeric token (``2``, ``2.0``, ``1e-3``).
+
+    Uses stdlib ``float()`` parsing — no regex required.  A leading ``-``
+    sign is valid for delay values (e.g. ``-2.5``).
+    """
+    s = tok.strip()
+    if not s:
+        return False
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
 
 
 def _ensure_list(value: Any) -> List[str]:
