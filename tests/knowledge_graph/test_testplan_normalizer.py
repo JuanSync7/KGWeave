@@ -99,6 +99,24 @@ def test_malformed_llm_response_handled() -> None:
     assert out["covergroups"] == []
 
 
+def test_normalizer_prompt_no_opentitan_reference() -> None:
+    """TESTPLAN_NORMALIZER_PROMPT must not mention OpenTitan or lowrisc.
+
+    The prompt format describes a generic testplan HJSON schema — the
+    'OpenTitan-style' qualifier is project-specific and must be removed.
+    """
+    from kgweave.knowledge_graph.extraction.testplan_normalizer import (
+        TESTPLAN_NORMALIZER_PROMPT,
+    )
+
+    prompt_lower = TESTPLAN_NORMALIZER_PROMPT.lower()
+    for forbidden in ("opentitan", "lowrisc"):
+        assert forbidden not in prompt_lower, (
+            f"TESTPLAN_NORMALIZER_PROMPT contains project-specific term '{forbidden}'. "
+            "Use generic language (e.g. 'testplan-style HJSON-compatible') instead."
+        )
+
+
 def test_drops_invalid_testpoint_entries() -> None:
     bad = json.dumps({
         "name": "x",

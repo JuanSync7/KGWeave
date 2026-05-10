@@ -95,7 +95,7 @@ CLAIM_EXTRACTION_PROMPT: str = (
     "    {\n"
     '      "id": "c1",\n'
     '      "type": "BehavioralClaim",\n'
-    '      "target": "aes_cipher_core",\n'
+    '      "target": "example_module",\n'
     '      "evidence_span": "The cipher completes in 14 cycles.",\n'
     '      "verification_strength": "coverage",\n'
     '      "parent_id": null,\n'

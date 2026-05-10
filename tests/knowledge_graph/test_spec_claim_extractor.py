@@ -267,6 +267,26 @@ def test_unknown_claim_type_dropped() -> None:
     assert all(e.type != "FantasyClaim" for e in res.entities)
 
 
+def test_claim_extraction_prompt_no_ot_module_names() -> None:
+    """CLAIM_EXTRACTION_PROMPT must not reference any aes_-prefixed module names.
+
+    The prompt uses an example JSON block to illustrate the output schema.
+    That example must use a generic module name, not an OpenTitan-specific
+    identifier like ``aes_cipher_core``.
+    """
+    import re
+    from kgweave.knowledge_graph.extraction.spec_claim_extractor import (
+        CLAIM_EXTRACTION_PROMPT,
+    )
+
+    ot_pattern = re.compile(r"\baes_[a-z][a-z0-9_]*")
+    matches = ot_pattern.findall(CLAIM_EXTRACTION_PROMPT)
+    assert matches == [], (
+        f"CLAIM_EXTRACTION_PROMPT contains OT-specific module identifiers: {matches}. "
+        "Use a generic placeholder (e.g. 'example_module') instead."
+    )
+
+
 @pytest.mark.skipif(
     not os.getenv("OPENAI_API_KEY"),
     reason="real-LLM smoke test gated on OPENAI_API_KEY",

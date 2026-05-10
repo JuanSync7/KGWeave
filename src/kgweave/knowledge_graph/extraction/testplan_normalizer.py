@@ -32,7 +32,7 @@ _logger = logging.getLogger("kgweave.knowledge_graph.testplan_normalizer")
 
 TESTPLAN_NORMALIZER_PROMPT: str = (
     "You are a testplan normalizer. Convert the freeform testplan text below "
-    "into a strict OpenTitan-style HJSON-compatible JSON object.\n\n"
+    "into a strict testplan-style HJSON-compatible JSON object.\n\n"
     "## Output schema (strict JSON, no commentary)\n"
     "{\n"
     '  "name": "<testplan name; use the document title if present, else \'testplan\'>",\n'
