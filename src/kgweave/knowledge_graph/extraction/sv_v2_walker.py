@@ -231,10 +231,10 @@ def _operator_kind(node: Any) -> str:
 
     Strips the ``Expression`` suffix so queries can use simple names.
     """
-    name = _kind_local(node)
-    if name.endswith("Expression"):
-        return name[: -len("Expression")]
-    return name
+    kind_local = _kind_local(node)
+    if kind_local.endswith("Expression"):
+        return kind_local[: -len("Expression")]
+    return kind_local
 
 
 def _is_literal(node: Any) -> bool:

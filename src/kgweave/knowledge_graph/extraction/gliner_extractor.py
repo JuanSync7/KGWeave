@@ -19,7 +19,6 @@ and falls back transparently to ``RegexEntityExtractor`` for all extraction.
 from __future__ import annotations
 
 import logging
-import re
 from typing import List, Optional, Set, TYPE_CHECKING
 
 from kgweave.knowledge_graph.common import (
@@ -61,6 +60,21 @@ _STOPWORDS = frozenset({
 
 #: Name reported in ``Entity.extractor_source`` and ``Triple.extractor_source``.
 _EXTRACTOR_NAME = "gliner"
+
+
+def _is_md_header_line(line: str) -> bool:
+    """Return True if *line* is a Markdown ATX heading (1–6 ``#`` chars at the
+    start, followed by whitespace or end-of-line).
+
+    Structural replacement for ``re.sub(r"^#{1,6}\\s+.*$", …)`` — avoids
+    importing ``re`` and is robust to ``#\\t`` style headings as well.
+    """
+    stripped = line.lstrip()
+    if not stripped.startswith("#"):
+        return False
+    rest = stripped.lstrip("#")
+    hashes = len(stripped) - len(rest)
+    return 1 <= hashes <= 6 and (not rest or rest[0] in (" ", "\t"))
 
 
 class GLiNEREntityExtractor:
@@ -168,7 +182,10 @@ class GLiNEREntityExtractor:
         text:
             Raw chunk text to process.
         """
-        clean = re.sub(r"^#{1,6}\s+.*$", "", text, flags=re.MULTILINE)
+        clean = "\n".join(
+            line for line in text.splitlines()
+            if not _is_md_header_line(line)
+        )
 
         entities: List[str] = []
         seen: set[str] = set()

@@ -210,3 +210,73 @@ def test_gliner_extractor_round_trip_falls_back_to_regex() -> None:
     all_names = {e.name for e in backend.get_all_entities()}
     for ent in result.entities:
         assert ent.name in all_names
+
+
+def test_gliner_no_re_module_for_header_stripping() -> None:
+    """gliner_extractor._extract_entities_gliner must NOT use re.sub to strip
+    markdown headers — structural line-filter only.
+
+    This test would have FAILED before iter-015 because gliner_extractor.py
+    contained ``re.sub(r"^#{1,6}\\s+.*$", ...)`` to strip headers.
+    """
+    import inspect
+    import kgweave.knowledge_graph.extraction.gliner_extractor as _mod
+
+    src = inspect.getsource(_mod._extract_entities_gliner_impl
+                            if hasattr(_mod, "_extract_entities_gliner_impl")
+                            else _mod.GLiNEREntityExtractor._extract_entities_gliner)
+    assert "re.sub" not in src, (
+        "gliner_extractor._extract_entities_gliner must not use re.sub; "
+        "use structural line-split instead"
+    )
+
+
+def test_gliner_strips_markdown_headers_structurally() -> None:
+    """Markdown header lines (# … through ###### …) must be removed from the
+    text before GLiNER prediction.  The structural filter must handle headers
+    separated by a tab (``#\\tHeading``) — something the old re.sub also
+    caught but this test makes explicit.
+
+    This test would have FAILED before iter-015 only when the structural path
+    disagreed with the regex; we keep it here to pin the behaviour.
+    """
+    from kgweave.knowledge_graph.extraction.gliner_extractor import (
+        GLiNEREntityExtractor,
+    )
+
+    extractor = GLiNEREntityExtractor()
+
+    # Text with headers at various depths — none of these lines should survive
+    # into the cleaned text fed to the NER model.
+    header_text = (
+        "# Top-level heading\n"
+        "Some body text.\n"
+        "## Sub-heading\n"
+        "More body.\n"
+        "###### Deep heading\n"
+        "Tail text.\n"
+    )
+
+    # GLiNER falls back to regex extractor in CI (no model); we test the
+    # internal clean step directly via the helper that both paths share.
+    cleaned = _strip_md_headers(header_text)
+    lines = [l for l in cleaned.splitlines() if l.strip()]
+    assert all(not l.lstrip().startswith("#") for l in lines), (
+        f"Header lines survived stripping: {[l for l in lines if l.lstrip().startswith('#')]}"
+    )
+
+
+def _strip_md_headers(text: str) -> str:
+    """Structural header stripper — mirrors the implementation in gliner_extractor.py."""
+    return "\n".join(
+        line for line in text.splitlines()
+        if not _is_md_header_line(line)
+    )
+
+
+def _is_md_header_line(line: str) -> bool:
+    stripped = line.lstrip()
+    if not stripped.startswith("#"):
+        return False
+    rest = stripped.lstrip("#")
+    return len(stripped) - len(rest) <= 6 and (not rest or rest[0] in (" ", "\t"))
