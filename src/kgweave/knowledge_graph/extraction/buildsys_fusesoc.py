@@ -5,14 +5,13 @@
 # is parsed for its leading identifier — `aes_sim` → `aes`,
 # `hmac_sim` → `hmac`). Confidence tier: high.
 # Exports: FusesocReader
-# Deps: yaml, re, pathlib, kgweave.knowledge_graph.common.sw_test_buildsys
+# Deps: yaml, pathlib, kgweave.knowledge_graph.common.sw_test_buildsys
 # @end-summary
 """fusesoc CAPI2 .core reader."""
 
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 from typing import Any, List, Optional, Sequence
 
@@ -33,29 +32,39 @@ _DEFAULT_TB_TARGET_HINTS = ("sim", "tb", "test", "verilator")
 # pool but filter using these substrings on the *fileset* name.
 _RTL_ONLY_FILESET_HINTS = ("rtl", "core")
 _RTL_ONLY_FILESET_NAMES = {"rtl", "core", "rtl_only", "rtl_files"}
-_VLNV_RE = re.compile(r"^([^:]+):([^:]+):([A-Za-z_][\w]*)(?::([\w.]+))?$")
 _DEFAULT_MODULE_STRIP_SUFFIXES = ("_sim", "_tb", "_test", "_dv")
+
+
+def _strip_suffixes(core: str, suffixes: tuple) -> str:
+    """Strip the first matching suffix from *core* and return the result.
+    Iterates *suffixes* in order; returns *core* unchanged if none match."""
+    for sfx in suffixes:
+        if core.endswith(sfx):
+            stripped = core[: -len(sfx)]
+            return stripped if stripped else core
+    return core
 
 
 def _module_from_vlnv(
     name_field: str,
-    strip_re: Optional[re.Pattern] = None,
+    strip_suffixes: Optional[tuple] = None,
 ) -> Optional[str]:
-    """Best-effort RTL module extractor from a VLNV name."""
+    """Best-effort RTL module extractor from a VLNV name.
+
+    VLNV format: ``vendor:lib:core[:ver]``.  We extract the *core* segment
+    using a plain ``str.split(":")`` — no regex needed for a colon-delimited
+    field.
+    """
     if not name_field:
         return None
-    m = _VLNV_RE.match(name_field.strip())
-    if m:
-        core = m.group(3)
-    else:
-        core = name_field.strip().split(":")[-1]
+    parts = name_field.strip().split(":")
+    # VLNV has at least 3 parts (vendor:lib:core); fall back to last segment.
+    core = parts[2] if len(parts) >= 3 else parts[-1]
     if not core:
         return None
     # Strip well-known suffixes (aes_sim → aes, hmac_dv → hmac).
-    if strip_re is not None:
-        return strip_re.sub("", core) or core
-    # Default behaviour: strip OT-flavoured suffixes if present.
-    return re.sub(r"(?:_sim|_tb|_test|_dv)$", "", core) or core
+    suffixes = strip_suffixes if strip_suffixes is not None else _DEFAULT_MODULE_STRIP_SUFFIXES
+    return _strip_suffixes(core, tuple(suffixes))
 
 
 def _is_tb_target(
@@ -93,19 +102,14 @@ class FusesocReader:
                 tb_target_hints = pc
         self._tb_hints: tuple = tuple(tb_target_hints) if tb_target_hints else _DEFAULT_TB_TARGET_HINTS
 
-        # Resolve module_strip_suffixes.
+        # Resolve module_strip_suffixes — stored as a plain tuple, no regex.
         if module_strip_suffixes is None and project_conventions is not None:
             pc_sfx = getattr(project_conventions, "fusesoc_module_strip_suffixes", None)
             if pc_sfx:
                 module_strip_suffixes = pc_sfx
-        sfx_list = list(module_strip_suffixes) if module_strip_suffixes else list(
-            _DEFAULT_MODULE_STRIP_SUFFIXES
+        self._module_strip_suffixes: Optional[tuple] = (
+            tuple(module_strip_suffixes) if module_strip_suffixes else None
         )
-        if sfx_list:
-            sfx_alt = "|".join(re.escape(s) for s in sfx_list)
-            self._module_strip_re = re.compile(rf"(?:{sfx_alt})$")
-        else:
-            self._module_strip_re = None
 
     def applies_to(self, project_root: Path) -> bool:
         try:
@@ -146,7 +150,7 @@ class FusesocReader:
             return []
         if not isinstance(data, dict):
             return []
-        module = _module_from_vlnv(data.get("name", ""), self._module_strip_re)
+        module = _module_from_vlnv(data.get("name", ""), self._module_strip_suffixes)
         if not module:
             return []
         targets = data.get("targets") or {}

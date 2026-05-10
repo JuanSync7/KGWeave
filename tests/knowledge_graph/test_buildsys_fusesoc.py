@@ -309,3 +309,59 @@ def test_fusesoc_custom_module_strip_suffixes(tmp_path):
     pc = ProjectConventions(fusesoc_module_strip_suffixes=["_unit"])
     links = FusesocReader(project_conventions=pc).read(tmp_path)
     assert {l.module_name for l in links} == {"gizmo"}
+
+
+# ---------------------------------------------------------------------------
+# iter-002 TDD: no regex in buildsys_fusesoc; structural VLNV parsing
+# ---------------------------------------------------------------------------
+
+
+def test_fusesoc_no_re_module_usage():
+    """The fusesoc extractor must not use `re` module calls — all VLNV
+    parsing and suffix stripping must be structural (str.split / str.endswith).
+    This test fails before iter-002's fix because `re` is imported and used."""
+    import ast
+    import importlib.util
+    from pathlib import Path
+
+    src_path = Path(__file__).parent.parent.parent / "src" / "kgweave" / "knowledge_graph" / "extraction" / "buildsys_fusesoc.py"
+    source = src_path.read_text()
+    tree = ast.parse(source)
+
+    re_calls = []
+    for node in ast.walk(tree):
+        # Check for `re.<func>(...)` calls
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id == "re":
+                re_calls.append(f"re.{func.attr} at line {node.lineno}")
+
+    assert re_calls == [], (
+        f"Found {len(re_calls)} re.<func>(...) call(s) in buildsys_fusesoc.py — "
+        f"replace with structural str.split / str.endswith parsing:\n"
+        + "\n".join(re_calls)
+    )
+
+
+def test_fusesoc_vlnv_structural_parsing_unicode_colon(tmp_path):
+    """VLNV names with unusual but valid characters must parse correctly.
+    The structural str.split(':') approach handles anything the regex would,
+    and more — no regex drift from project-to-project naming conventions."""
+    from kgweave.knowledge_graph.extraction.buildsys_fusesoc import FusesocReader
+
+    # A VLNV where the core name starts with a digit (older regex required [A-Za-z_][\w]*)
+    # Structural split doesn't have this restriction.
+    _w(tmp_path / "x.core", """
+        CAPI=2:
+        name: acme:dv:uart_sim:2.0
+        filesets:
+          tb:
+            files: [dv/uart_tb.sv]
+        targets:
+          sim:
+            filesets: [tb]
+            toplevel: tb
+        """)
+    links = FusesocReader().read(tmp_path)
+    assert links
+    assert {l.module_name for l in links} == {"uart"}
