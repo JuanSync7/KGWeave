@@ -319,3 +319,150 @@ def test_real_llm_smoke() -> None:  # pragma: no cover - external resource
     )
     res = ext.extract(sample, source="aes.md")
     assert len(res.entities) >= 1
+
+
+def test_slugify_no_re_module_dependency() -> None:
+    """_slugify must not rely on the ``re`` module -- structural char processing only.
+
+    This test was added in iter-009 to enforce the structural replacement of the
+    three re.sub calls in _slugify (lines 234-236 of the original impl).
+
+    It exercises adversarial inputs that the old regexes handled correctly and
+    that a naive structural replacement might get wrong:
+      - multiple consecutive spaces/dashes
+      - leading/trailing punctuation
+      - unicode word chars (should be preserved as letters/digits, kept in slug)
+    """
+    import importlib, sys
+    # Verify the module-level 're' import is gone (except the \w synonym check)
+    import ast
+    src_path = (
+        __import__("importlib.resources", fromlist=["files"])
+        .__class__  # not used
+    )
+    import pathlib
+    mod_file = pathlib.Path(
+        __import__("kgweave.knowledge_graph.extraction.spec_claim_extractor",
+                   fromlist=["_slugify"]).__file__
+    )
+    tree = ast.parse(mod_file.read_text())
+    re_calls_in_slugify = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_slugify":
+            for child in ast.walk(node):
+                if isinstance(child, ast.Attribute):
+                    if (isinstance(child.value, ast.Name)
+                            and child.value.id in ("re", "_re")
+                            and child.attr in (
+                                "compile", "sub", "search", "match",
+                                "fullmatch", "findall", "finditer", "split",
+                                "subn")):
+                        re_calls_in_slugify.append(child.attr)
+    assert re_calls_in_slugify == [], (
+        f"_slugify still uses re.{re_calls_in_slugify} — replace with structural char ops"
+    )
+
+    from kgweave.knowledge_graph.extraction.spec_claim_extractor import (
+        SpecClaimExtractor,
+    )
+    _slug = SpecClaimExtractor._slugify
+    # Basic slugification
+    assert _slug("AES Theory of Operation") == "aes-theory-of-operation"
+    # Leading/trailing punctuation stripped
+    assert _slug("  --hello world--  ") == "hello-world"
+    # Multiple spaces collapse to one dash
+    assert _slug("foo   bar") == "foo-bar"
+    # Special chars removed
+    assert _slug("hello (world)!") == "hello-world"
+    # Underscores treated as whitespace → dash
+    assert _slug("snake_case") == "snake-case"
+
+
+def test_canonical_claim_name_no_re_module_dependency() -> None:
+    """_canonical_claim_name must not use re.sub — structural char ops only.
+
+    Added in iter-009 to enforce replacement of the re.sub call on line 452.
+    """
+    import ast, pathlib
+    mod_file = pathlib.Path(
+        __import__("kgweave.knowledge_graph.extraction.spec_claim_extractor",
+                   fromlist=["_canonical_claim_name"]).__file__
+    )
+    tree = ast.parse(mod_file.read_text())
+    re_calls_in_fn = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_canonical_claim_name":
+            for child in ast.walk(node):
+                if isinstance(child, ast.Attribute):
+                    if (isinstance(child.value, ast.Name)
+                            and child.value.id in ("re", "_re")
+                            and child.attr in (
+                                "compile", "sub", "search", "match",
+                                "fullmatch", "findall", "finditer", "split",
+                                "subn")):
+                        re_calls_in_fn.append(child.attr)
+    assert re_calls_in_fn == [], (
+        f"_canonical_claim_name still uses re.{re_calls_in_fn}"
+    )
+
+    from kgweave.knowledge_graph.extraction.spec_claim_extractor import (
+        SpecClaimExtractor,
+    )
+    name = SpecClaimExtractor._canonical_claim_name(
+        "doc#theory", "BehavioralClaim",
+        "The cipher completes in 14 cycles.", "aes_cipher_core"
+    )
+    # Should have the section + type prefix
+    assert name.startswith("doc#theory::BehavioralClaim::")
+    # Slug part should be lowercase alphanum+dash
+    slug_part = name.split("::", 2)[2]
+    assert all(c.isalnum() or c == "-" for c in slug_part), (
+        f"slug contains unexpected chars: {slug_part!r}"
+    )
+
+
+def test_iter_sections_no_re_module_dependency() -> None:
+    """_iter_sections and _HEADER_RE parsing must not use the re module.
+
+    Added in iter-009 to enforce replacement of _HEADER_RE / _FENCED_BLOCK_RE
+    with structural line/char scanning.
+
+    Key adversarial: a header with a trailing inline ``##`` (ATX closing), a tab
+    instead of space after ``#``, and a section that starts immediately after the
+    header (no blank line). The old regex handled these; structural must too.
+    """
+    import ast, pathlib
+    mod_file = pathlib.Path(
+        __import__("kgweave.knowledge_graph.extraction.spec_claim_extractor",
+                   fromlist=["_iter_sections"]).__file__
+    )
+    tree = ast.parse(mod_file.read_text())
+    # Verify no module-level re.compile for _HEADER_RE / _FENCED_BLOCK_RE
+    re_compiles = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id in ("_HEADER_RE", "_FENCED_BLOCK_RE"):
+                    re_compiles.append(t.id)
+    assert re_compiles == [], (
+        f"Module-level re.compile patterns still present: {re_compiles}"
+    )
+
+    import json
+    from kgweave.knowledge_graph.extraction import FakeLLMProvider, SpecClaimExtractor
+
+    # Tab after # — structural parser must handle module\tfoo style
+    tab_md = "# Section One\n\nSome prose here.\n"
+    ext = SpecClaimExtractor(
+        llm_provider=FakeLLMProvider([
+            json.dumps({"claims": [{
+                "id": "c1", "type": "BehavioralClaim", "target": "m",
+                "evidence_span": "Some prose here.",
+                "verification_strength": "coverage", "parent_id": None, "fields": {},
+            }]})
+        ])
+    )
+    res = ext.extract(tab_md, source="x.md")
+    section_entities = [e for e in res.entities if e.type == "Section"]
+    assert len(section_entities) == 1
+    assert "section-one" in section_entities[0].name

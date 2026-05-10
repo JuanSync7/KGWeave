@@ -5,7 +5,7 @@
 # batches each section's prose through a provider with `.generate(prompt)`
 # returning JSON, and fuses claim targets against known_entity_names.
 # Exports: SpecClaimExtractor, LLM_DOC_SOURCE, CLAIM_EXTRACTION_PROMPT
-# Deps: json, logging, re, kgweave.knowledge_graph.common
+# Deps: json, logging, unicodedata, kgweave.knowledge_graph.common
 # @end-summary
 """LLM spec-claim extractor.
 
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
-import re
+import unicodedata
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from kgweave.knowledge_graph.common import (
@@ -58,9 +58,80 @@ VALID_VERIFICATION_STRENGTHS: Set[str] = {
     "unverified",
 }
 
-# h1/h2/h3 ATX headers (mirrors MarkdownDocExtractor).
-_HEADER_RE = re.compile(r"^(#{1,3})\s+(.+?)\s*#*\s*$", re.MULTILINE)
-_FENCED_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
+def _iter_atx_headers(text: str):
+    """Yield (match_start, match_end, level, title) for h1/h2/h3 ATX headers.
+
+    Structural line scanner: replaces the former ``_HEADER_RE`` regex compile.
+    An ATX header line begins with 1–3 ``#`` chars followed by at least one
+    whitespace character, then the title text, then optionally trailing ``#``
+    chars and whitespace.  Blank lines and non-header lines are skipped.
+    """
+    pos = 0
+    for raw_line in text.splitlines(keepends=True):
+        line_len = len(raw_line)
+        line = raw_line.rstrip("\r\n")
+        # Count leading '#' chars (1–3)
+        level = 0
+        for ch in line:
+            if ch == "#":
+                level += 1
+            else:
+                break
+        if level < 1 or level > 3:
+            pos += line_len
+            continue
+        rest = line[level:]
+        # Must have at least one whitespace after the hashes
+        if not rest or rest[0] not in (" ", "\t"):
+            pos += line_len
+            continue
+        title = rest.lstrip()
+        # Strip optional trailing ATX closing hashes + spaces
+        title = title.rstrip()
+        while title.endswith("#"):
+            title = title[:-1]
+        title = title.rstrip()
+        if title:
+            yield pos, pos + line_len, level, title
+        pos += line_len
+
+
+def _blank_fenced_blocks(text: str) -> str:
+    """Return *text* with every fenced code block replaced by spaces.
+
+    Structural scanner: replaces the former ``_FENCED_BLOCK_RE`` regex compile.
+    Walks character-by-character looking for triple-backtick fence openers and
+    closers.  Content between the fences is replaced by space characters so that
+    downstream length calculations remain stable (same as the old ``lambda m:
+    ' ' * len(m.group(0))`` approach).
+    """
+    result = list(text)
+    i = 0
+    n = len(text)
+    fence = "```"
+    flen = len(fence)
+    while i <= n - flen:
+        if text[i:i + flen] == fence:
+            start = i
+            i += flen
+            # Consume to end of opening fence line (info string)
+            while i < n and text[i] != "\n":
+                i += 1
+            # Search for closing fence
+            while i <= n - flen:
+                if text[i:i + flen] == fence:
+                    end = i + flen
+                    # Blank out from start to end (inclusive)
+                    for j in range(start, end):
+                        result[j] = " "
+                    i = end
+                    break
+                i += 1
+            else:
+                break  # unclosed fence — leave as-is
+        else:
+            i += 1
+    return "".join(result)
 
 
 CLAIM_EXTRACTION_PROMPT: str = (
@@ -188,9 +259,7 @@ class SpecClaimExtractor:
         section_seen: Set[str] = set()
 
         for section_name, prose in sections:
-            cleaned_prose = _FENCED_BLOCK_RE.sub(
-                lambda m: " " * len(m.group(0)), prose
-            ).strip()
+            cleaned_prose = _blank_fenced_blocks(prose).strip()
             if not cleaned_prose:
                 continue
 
@@ -230,11 +299,48 @@ class SpecClaimExtractor:
 
     @staticmethod
     def _slugify(header: str) -> str:
+        """Slugify *header* using structural character classification.
+
+        Replaces three former ``re.sub`` calls with a single-pass char scanner:
+        1. Lower-case and strip.
+        2. Keep unicode word chars (as classified by ``unicodedata.category``),
+           spaces, and dashes; discard everything else.
+        3. Collapse runs of whitespace/underscores to a single dash.
+        4. Collapse runs of dashes; strip leading/trailing dashes.
+        """
         text = header.strip().lower()
-        text = re.sub(r"[^\w\s-]", "", text, flags=re.UNICODE)
-        text = re.sub(r"[\s_]+", "-", text)
-        text = re.sub(r"-{2,}", "-", text).strip("-")
-        return text
+        # Pass 1: keep word-chars (letter/digit), spaces, and dashes.
+        # Underscores (Pc category) are treated as whitespace → normalised to space.
+        # A char is a "word char" if its Unicode category starts with L (letter)
+        # or N (number).
+        kept: List[str] = []
+        for ch in text:
+            cat = unicodedata.category(ch)
+            if cat.startswith("L") or cat.startswith("N"):
+                kept.append(ch)
+            elif ch in (" ", "\t", "_"):
+                kept.append(" ")  # normalise underscore/whitespace to space
+            elif ch == "-":
+                kept.append("-")
+            # else: discard punctuation, symbols, connector chars, etc.
+        # Pass 2: collapse spaces/consecutive spaces → single dash, then dashes.
+        parts: List[str] = []
+        i = 0
+        s = "".join(kept)
+        while i < len(s):
+            ch = s[i]
+            if ch in (" ", "-"):
+                # consume the whole run
+                j = i
+                while j < len(s) and s[j] in (" ", "-"):
+                    j += 1
+                parts.append("-")
+                i = j
+            else:
+                parts.append(ch)
+                i += 1
+        result = "".join(parts).strip("-")
+        return result
 
     @staticmethod
     def _anonymous_section_name(base: str) -> str:
@@ -243,20 +349,23 @@ class SpecClaimExtractor:
     def _iter_sections(
         self, text: str, base: str
     ) -> List[Tuple[str, str]]:
-        """Yield (section_name, prose) pairs for every h1/h2/h3 header."""
-        matches = list(_HEADER_RE.finditer(text))
+        """Yield (section_name, prose) pairs for every h1/h2/h3 header.
+
+        Uses the structural ``_iter_atx_headers`` scanner instead of the former
+        ``_HEADER_RE`` regex compile.
+        """
+        matches = list(_iter_atx_headers(text))
         if not matches:
             return []
 
         result: List[Tuple[str, str]] = []
-        for i, m in enumerate(matches):
-            header = m.group(2).strip()
-            slug = self._slugify(header)
+        for i, (match_start, match_end, _level, header) in enumerate(matches):
+            slug = self._slugify(header.strip())
             if not slug:
                 continue
             section_name = f"{base}#{slug}" if base else f"#{slug}"
-            body_start = m.end()
-            body_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            body_start = match_end
+            body_end = matches[i + 1][0] if i + 1 < len(matches) else len(text)
             body = text[body_start:body_end].strip()
             result.append((section_name, body))
         return result
@@ -447,9 +556,33 @@ class SpecClaimExtractor:
         evidence: str,
         target: str,
     ) -> str:
-        # Stable, namespaced name: section + claim-type + slugified evidence.
+        """Build a stable, namespaced claim name from section + type + evidence.
+
+        Replaces the former ``re.sub(r"[^a-z0-9]+", "-", ...)`` call with a
+        structural single-pass char filter: keep ASCII a-z and 0-9, replace all
+        other chars with ``-``, then collapse consecutive dashes and strip ends.
+        """
         digest_seed = evidence or target or claim_type
-        slug = re.sub(r"[^a-z0-9]+", "-", digest_seed.lower()).strip("-")
+        lowered = digest_seed.lower()
+        # Single-pass: keep a-z / 0-9, replace everything else with '-'
+        chars: List[str] = []
+        for ch in lowered:
+            if ("a" <= ch <= "z") or ("0" <= ch <= "9"):
+                chars.append(ch)
+            else:
+                chars.append("-")
+        # Collapse consecutive dashes
+        slug_parts: List[str] = []
+        prev_dash = False
+        for ch in chars:
+            if ch == "-":
+                if not prev_dash:
+                    slug_parts.append("-")
+                prev_dash = True
+            else:
+                slug_parts.append(ch)
+                prev_dash = False
+        slug = "".join(slug_parts).strip("-")
         if len(slug) > 60:
             slug = slug[:60].rstrip("-")
         if not slug:
