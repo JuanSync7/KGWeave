@@ -1,0 +1,3 @@
+iteration	commit	hypothesis	score	status	summary
+001	c8e8aece86e4cdce25ea1be6bc5ab5a7b057fe20	—	9	keep	baseline
+002	d20cab1	Rename DEFAULT_DEP_MODULE_PATTERN->OPENTITAN_DEFAULT_DEP_MODULE_PATTERN and _DIF_PATTERN_NAME->OPENTITAN_DIF_PATTERN_NAME to place constants in scorer permitted zones	7	keep	score 9->7; guard PASS; two regression tests added
