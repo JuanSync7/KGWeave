@@ -256,3 +256,94 @@ def test_covers_skips_ambiguous_match() -> None:
     assert not covers, (
         f"ambiguous normalized match should be skipped, got covers: {covers}"
     )
+
+
+# -- Goal #3: structural (regex-free) code-span stripping -------------------
+
+
+def test_no_compiled_regex_patterns_in_module() -> None:
+    """_FENCED_BLOCK_RE and _INLINE_CODE_RE must be removed; module uses
+    structural parsing, not compiled regex, for code-span suppression.
+
+    This test would have failed before iter-014 because the module-level
+    ``_FENCED_BLOCK_RE`` and ``_INLINE_CODE_RE`` compiled patterns existed.
+    """
+    import kgweave.knowledge_graph.extraction.testplan_extractor as _mod
+
+    assert not hasattr(_mod, "_FENCED_BLOCK_RE"), (
+        "_FENCED_BLOCK_RE compiled regex must be removed; use structural scanner"
+    )
+    assert not hasattr(_mod, "_INLINE_CODE_RE"), (
+        "_INLINE_CODE_RE compiled regex must be removed; use structural scanner"
+    )
+
+
+def test_fenced_block_suppresses_entity_mention() -> None:
+    """Entity name inside a fenced code block must NOT produce a mentions edge.
+
+    Verifies that the structural fenced-block scanner (introduced in iter-014)
+    correctly blanks the entity name even when the block contains a literal
+    newline (``\\n``), matching the re.DOTALL behaviour of the old regex.
+    """
+    import json as _json
+
+    desc = "Before. ```\ncipher_core\n``` after."
+    hjson_text = _json.dumps({
+        "testpoints": [{
+            "name": "smoke",
+            "desc": desc,
+            "stage": "V1",
+            "tests": ["aes_smoke"],
+        }]
+    })
+    res = _make(known=["cipher_core"]).extract(hjson_text, source="test.hjson")
+    mentions = [t for t in res.triples if t.predicate == "mentions"]
+    assert not any(t.object == "cipher_core" for t in mentions), (
+        f"entity inside fenced block must not produce mentions edge, got: {mentions}"
+    )
+
+
+def test_strip_code_spans_preserves_length() -> None:
+    """_strip_code_spans must return a string of the same byte-length as the
+    input (positions used by _evidence_window must remain valid).
+
+    The structural scanner introduced in iter-014 must maintain this invariant.
+    """
+    from kgweave.knowledge_graph.extraction.testplan_extractor import (
+        TestplanExtractor,
+    )
+
+    cases = [
+        "plain text",
+        "has `inline` code",
+        "fenced ```\nblock\n``` here",
+        "multiple `a` and `b` spans",
+        "",
+    ]
+    extractor = TestplanExtractor()
+    for text in cases:
+        result = extractor._strip_code_spans(text)
+        assert len(result) == len(text), (
+            f"_strip_code_spans changed length for {text!r}: "
+            f"{len(text)} -> {len(result)}"
+        )
+
+
+def test_normalize_sva_candidate_consecutive_special_chars() -> None:
+    """_normalize_sva_candidate must collapse multiple consecutive non-alnum
+    chars to a single underscore separator (structural char scanner).
+
+    Input ``A__data___known_a`` normalises identically to ``data_known``.
+    This was previously handled by ``re.sub(r'[^a-z0-9]+', '_', s)``; the
+    structural replacement must preserve this behaviour.
+    """
+    from kgweave.knowledge_graph.extraction.testplan_extractor import (
+        _normalize_sva_candidate,
+    )
+
+    # Multi-underscore separators collapse to single separator after
+    # prefix/suffix stripping (same as old re.sub behaviour).
+    result = _normalize_sva_candidate("A__data___known_a")
+    assert result == "data_known", (
+        f"expected 'data_known', got {result!r}"
+    )

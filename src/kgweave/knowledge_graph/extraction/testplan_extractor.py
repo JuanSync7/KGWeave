@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import hjson
@@ -45,10 +44,6 @@ __all__ = ["TestplanExtractor", "TESTPLAN_SOURCE"]
 TESTPLAN_SOURCE = "testplan"
 
 _logger = logging.getLogger("rag.knowledge_graph.testplan")
-
-
-_FENCED_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
-_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 
 
 _SVA_PREFIXES = ("a_", "prim_")
@@ -73,7 +68,20 @@ def _normalize_sva_candidate(
     if not name:
         return ""
     s = name.lower()
-    s = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
+    # Structural char scanner: collapse each run of non-alphanumeric chars to
+    # a single underscore separator (equivalent to re.sub(r"[^a-z0-9]+","_",s)
+    # followed by strip("_")).
+    _buf: List[str] = []
+    _in_sep = False
+    for _ch in s:
+        if _ch.isalpha() or _ch.isdigit():
+            if _in_sep and _buf:
+                _buf.append("_")
+            _buf.append(_ch)
+            _in_sep = False
+        else:
+            _in_sep = True
+    s = "".join(_buf)
     changed = True
     while changed:
         changed = False
@@ -154,6 +162,43 @@ def _basename_no_ext(source: str) -> str:
     base = os.path.basename(source)
     stem, _ = os.path.splitext(base)
     return stem or base
+
+
+def _is_word_char(ch: str) -> bool:
+    """Return True if *ch* is a word character (alphanumeric or underscore)."""
+    return ch.isalnum() or ch == "_"
+
+
+def _find_word_bounded(
+    text: str, name: str
+) -> "Optional[tuple[int, int]]":
+    """Find *name* in *text* with word-boundary semantics; return (start, end).
+
+    Both *text* and *name* must already be lowercased by the caller.
+    Word boundary: the characters immediately before ``start`` and at ``end``
+    must not be alphanumeric or underscore (matching ``\\b`` semantics).
+    Returns ``None`` when no match exists.
+
+    Handles names that contain non-word characters (e.g. a dot-qualified
+    canonical such as ``aes.cipher_core``): the boundary check only applies
+    to the first and last character of the matched span.
+    """
+    if not name:
+        return None
+    n_len = len(name)
+    t_len = len(text)
+    pos = 0
+    while pos <= t_len - n_len:
+        idx = text.find(name, pos)
+        if idx == -1:
+            return None
+        end = idx + n_len
+        left_ok = (idx == 0) or not _is_word_char(text[idx - 1])
+        right_ok = (end >= t_len) or not _is_word_char(text[end])
+        if left_ok and right_ok:
+            return idx, end
+        pos = idx + 1
+    return None
 
 
 class TestplanExtractor:
@@ -447,13 +492,54 @@ class TestplanExtractor:
 
     @staticmethod
     def _strip_code_spans(text: str) -> str:
-        stripped = _FENCED_BLOCK_RE.sub(
-            lambda m: " " * len(m.group(0)), text
-        )
-        stripped = _INLINE_CODE_RE.sub(
-            lambda m: " " * len(m.group(0)), stripped
-        )
-        return stripped
+        """Blank out fenced code blocks and inline code spans.
+
+        Preserves character positions (replaces each code-span char with a
+        space) so that ``_evidence_window`` start/end indices remain valid.
+
+        Implemented as a single-pass structural state-machine scanner:
+        - Triple-backtick sequences open/close fenced blocks (multi-line OK).
+        - Single-backtick sequences open/close inline spans (newline breaks).
+        No regex is used.
+        """
+        buf = list(text)
+        i = 0
+        n = len(text)
+        while i < n:
+            if text[i] != "`":
+                i += 1
+                continue
+            # Fenced block: triple backtick ````` ... `````
+            if i + 2 < n and text[i + 1] == "`" and text[i + 2] == "`":
+                start = i
+                i += 3
+                # Scan forward for closing triple backtick.
+                while i < n:
+                    if (
+                        i + 2 < n
+                        and text[i] == "`"
+                        and text[i + 1] == "`"
+                        and text[i + 2] == "`"
+                    ):
+                        i += 3
+                        break
+                    i += 1
+                # Blank the entire fenced block (including delimiters).
+                for k in range(start, min(i, n)):
+                    buf[k] = " "
+            else:
+                # Inline code span: single backtick, terminated by matching
+                # backtick or newline (newline cancels the span).
+                start = i
+                i += 1
+                while i < n and text[i] != "`" and text[i] != "\n":
+                    i += 1
+                if i < n and text[i] == "`":
+                    i += 1  # consume closing backtick
+                    for k in range(start, i):
+                        buf[k] = " "
+                # Unclosed inline span (hit newline or EOF): leave as-is.
+        return "".join(buf)
 
     @staticmethod
     def _evidence_window(text: str, start: int, end: int) -> str:
@@ -492,20 +578,18 @@ class TestplanExtractor:
         subject_lower = subject.lower()
         subject_tail = subject_lower.rsplit(".", 1)[-1]
         seen: Set[str] = set()
+        stripped_lower = stripped.lower()
         for canonical in self._known_names:
             canon_lower = canonical.lower()
             if canon_lower == subject_lower or canon_lower == subject_tail:
                 continue
-            pattern = re.compile(
-                r"\b" + re.escape(canonical) + r"\b", re.IGNORECASE
-            )
-            m = pattern.search(stripped)
-            if m is None:
+            span = _find_word_bounded(stripped_lower, canon_lower)
+            if span is None:
                 continue
             if canonical in seen:
                 continue
             seen.add(canonical)
-            evidence = self._evidence_window(desc, m.start(), m.end())
+            evidence = self._evidence_window(desc, span[0], span[1])
             triples.append(Triple(
                 subject=subject,
                 predicate="mentions",
