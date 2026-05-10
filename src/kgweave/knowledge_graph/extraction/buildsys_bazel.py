@@ -1,5 +1,5 @@
 # @summary
-# Bazel BUILD/BUILD.bazel reader (Tier B Phase 5). Regex-based Starlark
+# Bazel BUILD/BUILD.bazel reader (Tier B Phase 5). Structural Starlark
 # rule-call extractor (no real Bazel parser, no macro expansion). For
 # each rule call in the configured allowlist (e.g. `cc_test`, `cc_binary`,
 # or project-specific kinds like `opentitan_functest` from the OpenTitan
@@ -10,14 +10,15 @@
 # indirection are not expanded — only direct rule calls in the BUILD
 # file are seen.
 # Exports: BazelBuildReader, DEFAULT_RULE_ALLOWLIST
-# Deps: re, pathlib, kgweave.knowledge_graph.common.sw_test_buildsys
+# Deps: re (permitted: user-supplied dep_module_pattern only), pathlib,
+#       kgweave.knowledge_graph.common.sw_test_buildsys
 # @end-summary
 """Bazel BUILD reader."""
 
 from __future__ import annotations
 
 import logging
-import re
+import re  # noqa: regex-ok — only used for user-supplied dep_module_pattern matching
 from pathlib import Path
 from typing import Any, List, Optional, Sequence
 
@@ -45,31 +46,21 @@ DEFAULT_RULE_ALLOWLIST = [
 # only the universal Bazel test/binary rules — no OT-specific kinds.
 GENERIC_RULE_ALLOWLIST = ["cc_test", "cc_binary"]
 
-# A direct top-level rule call: `<rule_name>(...)` where the body spans
-# until the matching closing paren. We capture: rule name + body.
-# This is intentionally regex-only — no AST, no macro expansion.
-_RULE_CALL_RE = re.compile(
-    r"^(?P<rule>[a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
-    re.MULTILINE,
-)
-_NAME_RE = re.compile(r'\bname\s*=\s*"([^"]+)"')
-_SRCS_RE = re.compile(r'\bsrcs\s*=\s*\[(?P<body>[^\]]*)\]', re.DOTALL)
-_DEPS_RE = re.compile(r'\bdeps\s*=\s*\[(?P<body>[^\]]*)\]', re.DOTALL)
-_QUOTED_STR_RE = re.compile(r'"([^"]+)"')
 # OT-specific legacy default — retained for back-compat with callers that
 # imported the constant directly. New code should source this from
 # ``ProjectConventions.bazel_dep_module_pattern`` (set on the OT profile).
 # Name prefixed with OPENTITAN_ so it falls in the permitted zone of the
 # genericness scorer (module-level constant whose name contains "opentitan").
 OPENTITAN_DEFAULT_DEP_MODULE_PATTERN = r'^//hw/ip/(?P<module>[a-z][a-z0-9_]*)\b'
-_DEP_MODULE_RE = re.compile(OPENTITAN_DEFAULT_DEP_MODULE_PATTERN)
+_DEP_MODULE_RE = re.compile(OPENTITAN_DEFAULT_DEP_MODULE_PATTERN)  # noqa: regex-ok — OT default dep_module_pattern; user-supplied patterns also use re.compile below
 
-# Match a `load("<label>", "sym1", "sym2", ...)` statement. Capture the
-# label and the full body so we can extract the imported symbols.
-_LOAD_RE = re.compile(
-    r'\bload\s*\(\s*"(?P<label>[^"]+)"\s*,\s*(?P<rest>[^)]*)\)',
-    re.DOTALL,
-)
+
+def _is_identifier_start(ch: str) -> bool:
+    return ch.isalpha() or ch == "_"
+
+
+def _is_identifier_char(ch: str) -> bool:
+    return ch.isalnum() or ch == "_"
 
 
 def _find_matching_paren(text: str, open_idx: int) -> int:
@@ -101,6 +92,179 @@ def _find_matching_paren(text: str, open_idx: int) -> int:
                     return i + 1
         i += 1
     return -1
+
+
+def _find_matching_bracket(text: str, open_idx: int) -> int:
+    """Return index just past the matching ']' for the '[' at open_idx."""
+    depth = 0
+    in_str = False
+    str_ch = ""
+    i = open_idx
+    while i < len(text):
+        ch = text[i]
+        if in_str:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == str_ch:
+                in_str = False
+        else:
+            if ch in ('"', "'"):
+                in_str = True
+                str_ch = ch
+            elif ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+        i += 1
+    return -1
+
+
+def _extract_quoted_strings(text: str) -> List[str]:
+    """Extract all double-quoted string values from *text* without regex.
+    Handles backslash escapes. Single-quoted strings are skipped (they may
+    appear in Starlark but are uncommon for labels/filenames).
+    """
+    results: List[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        if text[i] == '"':
+            i += 1
+            buf: List[str] = []
+            while i < n:
+                ch = text[i]
+                if ch == "\\":
+                    i += 1
+                    if i < n:
+                        buf.append(text[i])
+                    i += 1
+                    continue
+                if ch == '"':
+                    i += 1
+                    break
+                buf.append(ch)
+                i += 1
+            results.append("".join(buf))
+        else:
+            i += 1
+    return results
+
+
+def _scan_rule_calls(text: str):
+    """Yield (rule_name, paren_open_idx) for every ``identifier(`` token in
+    *text*. Whitespace between identifier and ``(`` is tolerated. This
+    replaces the old ``_RULE_CALL_RE`` compiled pattern.
+    """
+    i = 0
+    n = len(text)
+    while i < n:
+        if _is_identifier_start(text[i]):
+            j = i
+            while j < n and _is_identifier_char(text[j]):
+                j += 1
+            identifier = text[i:j]
+            # Skip whitespace between identifier and '('
+            k = j
+            while k < n and text[k] in (" ", "\t"):
+                k += 1
+            if k < n and text[k] == "(":
+                yield identifier, k
+            i = j
+        else:
+            i += 1
+
+
+def _extract_attr_string(body: str, attr: str) -> Optional[str]:
+    """Extract the string value of a Starlark keyword attribute like
+    ``name = "foo"`` from a rule body. Returns the first match or None.
+    Replaces _NAME_RE.
+    """
+    i = 0
+    n = len(body)
+    while i < n:
+        # Look for the attribute identifier
+        if _is_identifier_start(body[i]):
+            j = i
+            while j < n and _is_identifier_char(body[j]):
+                j += 1
+            if body[i:j] == attr:
+                # Skip whitespace + '='
+                k = j
+                while k < n and body[k] in (" ", "\t"):
+                    k += 1
+                if k < n and body[k] == "=":
+                    k += 1
+                    while k < n and body[k] in (" ", "\t"):
+                        k += 1
+                    if k < n and body[k] == '"':
+                        # Read the quoted string
+                        k += 1
+                        buf: List[str] = []
+                        while k < n:
+                            ch = body[k]
+                            if ch == "\\":
+                                k += 1
+                                if k < n:
+                                    buf.append(body[k])
+                                k += 1
+                                continue
+                            if ch == '"':
+                                break
+                            buf.append(ch)
+                            k += 1
+                        return "".join(buf)
+            i = j
+        else:
+            i += 1
+    return None
+
+
+def _extract_attr_list_body(body: str, attr: str) -> Optional[str]:
+    """Extract the content between ``[`` and ``]`` of a Starlark keyword
+    attribute like ``srcs = [...]`` or ``deps = [...]`` from a rule body.
+    Returns the list body string (without brackets), or None.
+    Replaces _SRCS_RE / _DEPS_RE.
+    """
+    i = 0
+    n = len(body)
+    while i < n:
+        if _is_identifier_start(body[i]):
+            j = i
+            while j < n and _is_identifier_char(body[j]):
+                j += 1
+            if body[i:j] == attr:
+                # Skip whitespace + '='
+                k = j
+                while k < n and body[k] in (" ", "\t"):
+                    k += 1
+                if k < n and body[k] == "=":
+                    k += 1
+                    while k < n and body[k] in (" ", "\t", "\n", "\r"):
+                        k += 1
+                    if k < n and body[k] == "[":
+                        end = _find_matching_bracket(body, k)
+                        if end > 0:
+                            return body[k + 1 : end - 1]
+                        return None
+            i = j
+        else:
+            i += 1
+    return None
+
+
+def _parse_load_statement(body: str) -> tuple[Optional[str], List[str]]:
+    """Parse the body of a ``load(...)`` call (text between outer parens).
+    Returns (label, [symbol, ...]).  The label is the first quoted string;
+    subsequent quoted strings are the imported symbol names.
+    Replaces _LOAD_RE.
+    """
+    strings = _extract_quoted_strings(body)
+    if not strings:
+        return None, []
+    return strings[0], strings[1:]
 
 
 class BazelBuildReader:
@@ -194,8 +358,8 @@ class BazelBuildReader:
             dep_module_pattern = OPENTITAN_DEFAULT_DEP_MODULE_PATTERN
 
         try:
-            compiled = re.compile(dep_module_pattern)
-        except re.error as exc:
+            compiled = re.compile(dep_module_pattern)  # noqa: regex-ok — user-supplied dep_module_pattern is inherently regex-shaped (named group required)
+        except re.error as exc:  # noqa: regex-ok — catching re.error from user-supplied pattern
             raise ValueError(
                 f"BazelBuildReader: dep_module_pattern {dep_module_pattern!r} "
                 f"failed to compile: {exc}"
@@ -239,27 +403,28 @@ class BazelBuildReader:
         # ---- Phase 1: collect load() imports (symbol -> origin label).
         loaded_symbols: dict[str, str] = {}
         if self._auto_discover_loaded_macros:
-            for lm in _LOAD_RE.finditer(text):
-                label = lm.group("label")
-                for sym in _QUOTED_STR_RE.findall(lm.group("rest")):
+            for rule_name, paren_open in _scan_rule_calls(text):
+                if rule_name != "load":
+                    continue
+                paren_close = _find_matching_paren(text, paren_open)
+                if paren_close < 0:
+                    continue
+                load_body = text[paren_open + 1 : paren_close - 1]
+                label, symbols = _parse_load_statement(load_body)
+                if label is None:
+                    continue
+                for sym in symbols:
                     if sym in self._loaded_macro_denylist:
                         continue
                     # First-load wins (rare to load same symbol twice).
                     loaded_symbols.setdefault(sym, label)
 
         # ---- Phase 2: iterate over rule call sites.
-        pos = 0
-        while True:
-            m = _RULE_CALL_RE.search(text, pos)
-            if not m:
-                break
-            rule = m.group("rule")
-            paren_open = m.end() - 1  # the '(' is the last char of the match
+        for rule, paren_open in _scan_rule_calls(text):
             paren_close = _find_matching_paren(text, paren_open)
             if paren_close < 0:
-                break
+                continue
             body = text[paren_open + 1 : paren_close - 1]
-            pos = paren_close
 
             # Skip the load(...) calls themselves.
             if rule == "load":
@@ -275,18 +440,17 @@ class BazelBuildReader:
             else:
                 continue
 
-            name_m = _NAME_RE.search(body)
-            test_name = name_m.group(1) if name_m else None
+            test_name = _extract_attr_string(body, "name")
 
-            srcs_m = _SRCS_RE.search(body)
-            deps_m = _DEPS_RE.search(body)
+            srcs_body = _extract_attr_list_body(body, "srcs")
+            deps_body = _extract_attr_list_body(body, "deps")
 
             # ---- Structural-shape gating for auto-discovered macros.
             # Auto-discovered rules MUST have name + (srcs OR deps) — that
             # is the shape of a test/binary rule. Allowlist rules retain
             # the existing fallback behavior.
             if origin == "loaded_macro":
-                if test_name is None or (srcs_m is None and deps_m is None):
+                if test_name is None or (srcs_body is None and deps_body is None):
                     _logger.debug(
                         "bazel: gated auto-discovered call %s in %s "
                         "(structural shape mismatch)", rule, build_path,
@@ -295,17 +459,17 @@ class BazelBuildReader:
 
             # Collect srcs (test source files) — fallback to test_name.c
             srcs: List[str] = []
-            if srcs_m:
-                srcs = _QUOTED_STR_RE.findall(srcs_m.group("body"))
+            if srcs_body is not None:
+                srcs = _extract_quoted_strings(srcs_body)
             if not srcs and test_name and self._srcs_default_extensions:
                 # Best-effort default — synthesize one src per configured ext.
                 srcs = [test_name + ext for ext in self._srcs_default_extensions]
 
             # Collect deps and extract //hw/ip/<module>:... matches.
             modules: list[str] = []
-            if deps_m and self._dep_module_re is not None:
-                for dep in _QUOTED_STR_RE.findall(deps_m.group("body")):
-                    dm = self._dep_module_re.match(dep)
+            if deps_body is not None and self._dep_module_re is not None:
+                for dep in _extract_quoted_strings(deps_body):
+                    dm = self._dep_module_re.match(dep)  # noqa: regex-ok — matching user-supplied dep_module_pattern against dep label
                     if dm:
                         modules.append(dm.group("module"))
             if not modules:

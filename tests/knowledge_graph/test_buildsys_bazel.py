@@ -859,3 +859,58 @@ def test_sw_test_extractor_strict_generic_no_dif_api_call_pattern(tmp_path):
         "Strict-generic SWTestExtractor must not set _synthetic_csr_pattern "
         "to 'dif_api_call' (an OT-specific pattern name)."
     )
+
+
+# ---------------------------------------------------------------------------
+# iter-005: structural-parse replacement — no regex for Starlark tokens
+# ---------------------------------------------------------------------------
+
+
+def test_bazel_no_unpermitted_regex_in_source():
+    """iter-005: buildsys_bazel.py must not use re.compile/search/match/etc.
+    for Starlark token extraction (rule names, quoted strings, attribute kv
+    pairs). Only the user-configurable dep_module_pattern may remain, and it
+    must carry a noqa: regex-ok annotation."""
+    import ast
+    from pathlib import Path
+
+    src_path = (
+        Path(__file__).parent.parent.parent
+        / "src" / "kgweave" / "knowledge_graph" / "extraction" / "buildsys_bazel.py"
+    )
+    source = src_path.read_text()
+    lines = source.splitlines()
+
+    # Count re.<func>(...) calls that are NOT marked regex-ok
+    unpermitted = []
+    for i, line in enumerate(lines, 1):
+        if "re." in line or "import re" in line:
+            if "# noqa: regex-ok" not in line:
+                unpermitted.append((i, line.strip()))
+
+    assert unpermitted == [], (
+        f"buildsys_bazel.py has unpermitted re.* usages (iter-005 fix not applied):\n"
+        + "\n".join(f"  L{ln}: {txt}" for ln, txt in unpermitted)
+    )
+
+
+def test_bazel_tab_indented_rule_extracted(tmp_path):
+    """iter-005: structural parser handles tab-indented BUILD files where
+    the old _RULE_CALL_RE with re.MULTILINE could fail on \\t-prefixed lines."""
+    from kgweave.knowledge_graph.extraction.buildsys_bazel import BazelBuildReader
+
+    # Some real-world BUILD files use hard-tabs; the old regex anchored on ^
+    # with re.MULTILINE but token-scanned from column 0.  The structural
+    # parser should be whitespace-agnostic.
+    content = (
+        "\topentitan_functest(\n"
+        '\t\tname = "tab_test",\n'
+        '\t\tsrcs = ["tab_test.c"],\n'
+        '\t\tdeps = ["//hw/ip/aes:dif"],\n'
+        "\t)\n"
+    )
+    (tmp_path / "BUILD").write_text(content)
+    links = BazelBuildReader().read(tmp_path)
+    assert links, "structural parser must handle tab-indented BUILD files"
+    assert {l.module_name for l in links} == {"aes"}
+    assert any("tab_test.c" in l.test_path for l in links)
