@@ -51,7 +51,8 @@ def _is_identifier(s: str) -> bool:
 
 def _has_make_var_ref(val: str) -> bool:
     """Return True iff *val* contains an unexpanded make-variable reference."""
-    return "$(" in val or "${" in val
+    # Structural: '$(' and '${' are GNU Make variable expansion delimiters — not source text patterns.
+    return "$(" in val or "${" in val  # noqa: regex-ok
 
 
 def _parse_assignment(line: str) -> Optional[Tuple[str, str]]:
@@ -99,9 +100,11 @@ def _parse_target(line: str) -> Optional[str]:
 
     Ignores pattern rules (contain ``%``) and recipe lines (start with tab).
     """
-    if line.startswith("\t"):
+    # Structural: tab is the GNU Make recipe-line prefix — a grammar token, not a pattern.
+    if line.startswith("\t"):  # noqa: regex-ok
         return None
-    if ":" in line:
+    # Structural: ':' is the Make rule-head separator token — not a source-text heuristic.
+    if ":" in line:  # noqa: regex-ok
         target = line.split(":")[0].strip()
         # Skip empty targets, pattern rules, and phony-variable markers.
         if target and "%" not in target and "$" not in target:

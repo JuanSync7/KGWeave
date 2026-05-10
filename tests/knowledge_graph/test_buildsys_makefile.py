@@ -340,3 +340,36 @@ def test_makefile_make_var_ref_detection(tmp_path):
     # No module because the value is a variable reference.
     links = MakefileReader().read(tmp_path)
     assert links == []
+
+
+# ---------------------------------------------------------------------------
+# (iter-012) Structural helpers: zero scorer hits for buildsys_makefile.py
+# ---------------------------------------------------------------------------
+
+
+def test_makefile_structural_helpers_no_scorer_hits():
+    """After iter-012, all fragility-scorer hits in buildsys_makefile.py
+    must be suppressed with # noqa: regex-ok markers because the checks
+    are genuinely structural (tab = Make recipe prefix, ':' = target
+    separator, '$(' / '${' = Make variable expansion syntax) and cannot
+    be replaced with a higher-level parser."""
+    import json
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "scripts/regex_fragility_scorer.py"],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).parents[2],
+    )
+    assert result.returncode == 0, f"Scorer failed: {result.stderr}"
+    data = json.loads(result.stdout)
+    mf_hits = [
+        h for h in data["hits"]
+        if "buildsys_makefile" in h["file"]
+    ]
+    assert mf_hits == [], (
+        f"buildsys_makefile.py still has {len(mf_hits)} scorer hit(s): "
+        + "; ".join(f"L{h['line']}: {h['snippet']}" for h in mf_hits)
+    )
