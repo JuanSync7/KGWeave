@@ -1,9 +1,11 @@
 [
   "AnsiPortListSyntax",
+  "BinaryEventExpressionSyntax",
   "ContinuousAssignSyntax",
   "DataDeclarationSyntax",
   "DeclaratorSyntax",
   "EqualsValueClauseSyntax",
+  "EventControlWithExpressionSyntax",
   "ExpressionStatementSyntax",
   "ImplicitAnsiPortSyntax",
   "IntegerTypeSyntax",
@@ -11,7 +13,11 @@
   "ModuleHeaderSyntax",
   "ParameterDeclarationSyntax",
   "ParameterPortListSyntax",
+  "ParenthesizedEventExpressionSyntax",
+  "ProceduralBlockSyntax",
   "RangeDimensionSpecifierSyntax",
+  "SignalEventExpressionSyntax",
+  "TimingControlStatementSyntax",
   "VariableDimensionSyntax",
   "VariablePortHeaderSyntax"
 ]

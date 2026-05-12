@@ -1,8 +1,9 @@
-iteration	commit	hypothesis	score	status	summary
-000	—	—	48	scaffold	PROGRAM.md, fifo.sv, inventory.py, score.py, test_roundtrip.py (baseline xfail) created
-001	pending	universal structural lift/unlift (class+kind+tokens+trivia) gives lossless class-stream round-trip	47	pass	scripts/lift.py + scripts/unlift.py + conftest.py; xfail removed; ModuleDeclarationSyntax covered
-002	pending	module header + param port list + ANSI port list round-trip via per-class token-text fingerprint	44	pass	added _assert_class_roundtrip helper + token-text-stream oracle; covered ModuleHeader/ParameterPortList/AnsiPortList
-003	pending	implicit ANSI port + variable port header round-trip	42	pass	covered ImplicitAnsiPortSyntax/VariablePortHeaderSyntax
-004	pending	parameter decl + integer type + declarator + equals clause round-trip	38	pass	covered ParameterDeclaration/IntegerType/Declarator/EqualsValueClause
-005	pending	data decl + variable dim + range dim specifier round-trip	35	pass	covered DataDeclaration/VariableDimension/RangeDimensionSpecifier
-006	pending	continuous assign + expression statement round-trip	33	pass	covered ContinuousAssign/ExpressionStatement
+iteration	layer	commit	hypothesis	score	status	summary
+000	struct	—	—	48	scaffold	PROGRAM.md, fifo.sv, inventory.py, score.py, test_roundtrip.py (baseline xfail) created
+001	struct	pending	universal structural lift/unlift (class+kind+tokens+trivia) gives lossless class-stream round-trip	47	pass	scripts/lift.py + scripts/unlift.py + conftest.py; xfail removed; ModuleDeclarationSyntax covered
+002	struct	pending	module header + param port list + ANSI port list round-trip via per-class token-text fingerprint	44	pass	added _assert_class_roundtrip helper + token-text-stream oracle; covered ModuleHeader/ParameterPortList/AnsiPortList
+003	struct	pending	implicit ANSI port + variable port header round-trip	42	pass	covered ImplicitAnsiPortSyntax/VariablePortHeaderSyntax
+004	struct	pending	parameter decl + integer type + declarator + equals clause round-trip	38	pass	covered ParameterDeclaration/IntegerType/Declarator/EqualsValueClause
+005	struct	pending	data decl + variable dim + range dim specifier round-trip	35	pass	covered DataDeclaration/VariableDimension/RangeDimensionSpecifier
+006	struct	pending	continuous assign + expression statement round-trip	33	pass	covered ContinuousAssign/ExpressionStatement
+007	struct	pending	procedural block + timing control + event expression family round-trip	27	pass	covered ProceduralBlock/TimingControlStatement/EventControlWithExpression/Binary+Signal+ParenEvent

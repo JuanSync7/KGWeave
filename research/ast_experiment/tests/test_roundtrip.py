@@ -181,6 +181,28 @@ def test_continuous_assign(original_tree):
     _mark_covered({"ContinuousAssignSyntax", "ExpressionStatementSyntax"})
 
 
+def test_procedural_and_timing(original_tree):
+    """iter-007: procedural block + timing control + event expressions round-trip."""
+    reparsed, _ = _roundtrip(original_tree)
+    for cls in (
+        "ProceduralBlockSyntax",
+        "TimingControlStatementSyntax",
+        "EventControlWithExpressionSyntax",
+        "BinaryEventExpressionSyntax",
+        "SignalEventExpressionSyntax",
+        "ParenthesizedEventExpressionSyntax",
+    ):
+        _assert_class_roundtrip(original_tree.root, reparsed.root, cls)
+    _mark_covered({
+        "ProceduralBlockSyntax",
+        "TimingControlStatementSyntax",
+        "EventControlWithExpressionSyntax",
+        "BinaryEventExpressionSyntax",
+        "SignalEventExpressionSyntax",
+        "ParenthesizedEventExpressionSyntax",
+    })
+
+
 def test_full_token_text_stream(original_tree):
     """Strongest oracle: every Token's rawText survives the round-trip in DFS
     order (modulo trivia after the final token, which pyslang drops upstream)."""
