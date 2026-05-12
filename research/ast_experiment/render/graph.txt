@@ -1,0 +1,123 @@
+# Semantic-layer graph (queryable view)
+
+Nodes: 39  Edges: 61
+
+## Nodes by type
+  ContinuousAssignSyntax (3)
+    n0291.ContinuousAssignSyntax
+    n0311.ContinuousAssignSyntax
+    n0331.ContinuousAssignSyntax
+  DeclaratorSyntax (7)
+    n0017.DeclaratorSyntax
+    n0031.DeclaratorSyntax
+    n0184.DeclaratorSyntax
+    n0223.DeclaratorSyntax
+    n0255.DeclaratorSyntax
+    n0287.DeclaratorSyntax
+    n0017.DeclaratorSyntax
+  HierarchicalInstanceSyntax (1)
+    n0124.HierarchicalInstanceSyntax
+  IdentifierSelectNameSyntax (4)
+    n0340.IdentifierSelectNameSyntax
+    n0346.IdentifierSelectNameSyntax
+    n0479.IdentifierSelectNameSyntax
+    n0485.IdentifierSelectNameSyntax
+  ImplicitAnsiPortSyntax (16)
+    n0042.ImplicitAnsiPortSyntax
+    n0053.ImplicitAnsiPortSyntax
+    n0064.ImplicitAnsiPortSyntax
+    n0075.ImplicitAnsiPortSyntax
+    n0086.ImplicitAnsiPortSyntax
+    n0112.ImplicitAnsiPortSyntax
+    n0138.ImplicitAnsiPortSyntax
+    n0149.ImplicitAnsiPortSyntax
+    n0010.ImplicitAnsiPortSyntax
+    n0021.ImplicitAnsiPortSyntax
+    n0032.ImplicitAnsiPortSyntax
+    n0043.ImplicitAnsiPortSyntax
+    n0054.ImplicitAnsiPortSyntax
+    n0075.ImplicitAnsiPortSyntax
+    n0096.ImplicitAnsiPortSyntax
+    n0107.ImplicitAnsiPortSyntax
+  InvocationExpressionSyntax (5)
+    n0205.InvocationExpressionSyntax
+    n0237.InvocationExpressionSyntax
+    n0269.InvocationExpressionSyntax
+    n0353.InvocationExpressionSyntax
+    n0492.InvocationExpressionSyntax
+  ModuleDeclarationSyntax (2)
+    n0001.ModuleDeclarationSyntax
+    n0001.ModuleDeclarationSyntax
+  ProceduralBlockSyntax (1)
+    n0376.ProceduralBlockSyntax
+
+## Edges by type
+  connects (8)
+    n0010.ImplicitAnsiPortSyntax  -->  n0124.HierarchicalInstanceSyntax  [port=clk]
+    n0021.ImplicitAnsiPortSyntax  -->  n0124.HierarchicalInstanceSyntax  [port=rst_n]
+    n0032.ImplicitAnsiPortSyntax  -->  n0124.HierarchicalInstanceSyntax  [port=push]
+    n0043.ImplicitAnsiPortSyntax  -->  n0124.HierarchicalInstanceSyntax  [port=pop]
+    n0054.ImplicitAnsiPortSyntax  -->  n0124.HierarchicalInstanceSyntax  [port=din]
+    n0075.ImplicitAnsiPortSyntax  -->  n0124.HierarchicalInstanceSyntax  [port=dout]
+    n0096.ImplicitAnsiPortSyntax  -->  n0124.HierarchicalInstanceSyntax  [port=full]
+    n0107.ImplicitAnsiPortSyntax  -->  n0124.HierarchicalInstanceSyntax  [port=empty]
+  drives (7)
+    n0291.ContinuousAssignSyntax  -->  n0138.ImplicitAnsiPortSyntax
+    n0311.ContinuousAssignSyntax  -->  n0149.ImplicitAnsiPortSyntax
+    n0331.ContinuousAssignSyntax  -->  n0112.ImplicitAnsiPortSyntax
+    n0376.ProceduralBlockSyntax  -->  n0223.DeclaratorSyntax
+    n0376.ProceduralBlockSyntax  -->  n0255.DeclaratorSyntax
+    n0376.ProceduralBlockSyntax  -->  n0287.DeclaratorSyntax
+    n0376.ProceduralBlockSyntax  -->  n0184.DeclaratorSyntax
+  has_net (4)
+    n0001.ModuleDeclarationSyntax  -->  n0184.DeclaratorSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0223.DeclaratorSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0255.DeclaratorSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0287.DeclaratorSyntax
+  has_param (2)
+    n0001.ModuleDeclarationSyntax  -->  n0017.DeclaratorSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0031.DeclaratorSyntax
+  has_port (16)
+    n0001.ModuleDeclarationSyntax  -->  n0042.ImplicitAnsiPortSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0053.ImplicitAnsiPortSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0064.ImplicitAnsiPortSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0075.ImplicitAnsiPortSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0086.ImplicitAnsiPortSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0112.ImplicitAnsiPortSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0138.ImplicitAnsiPortSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0149.ImplicitAnsiPortSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0010.ImplicitAnsiPortSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0021.ImplicitAnsiPortSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0032.ImplicitAnsiPortSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0043.ImplicitAnsiPortSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0054.ImplicitAnsiPortSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0075.ImplicitAnsiPortSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0096.ImplicitAnsiPortSyntax
+    n0001.ModuleDeclarationSyntax  -->  n0107.ImplicitAnsiPortSyntax
+  instantiates (1)
+    n0001.ModuleDeclarationSyntax  -->  n0124.HierarchicalInstanceSyntax
+  reads (21)
+    n0205.InvocationExpressionSyntax  -->  n0017.DeclaratorSyntax
+    n0237.InvocationExpressionSyntax  -->  n0017.DeclaratorSyntax
+    n0269.InvocationExpressionSyntax  -->  n0017.DeclaratorSyntax
+    n0291.ContinuousAssignSyntax  -->  n0287.DeclaratorSyntax
+    n0291.ContinuousAssignSyntax  -->  n0017.DeclaratorSyntax
+    n0311.ContinuousAssignSyntax  -->  n0287.DeclaratorSyntax
+    n0331.ContinuousAssignSyntax  -->  n0184.DeclaratorSyntax
+    n0331.ContinuousAssignSyntax  -->  n0255.DeclaratorSyntax
+    n0331.ContinuousAssignSyntax  -->  n0017.DeclaratorSyntax
+    n0340.IdentifierSelectNameSyntax  -->  n0184.DeclaratorSyntax
+    n0346.IdentifierSelectNameSyntax  -->  n0255.DeclaratorSyntax
+    n0353.InvocationExpressionSyntax  -->  n0017.DeclaratorSyntax
+    n0376.ProceduralBlockSyntax  -->  n0086.ImplicitAnsiPortSyntax
+    n0376.ProceduralBlockSyntax  -->  n0053.ImplicitAnsiPortSyntax
+    n0376.ProceduralBlockSyntax  -->  n0064.ImplicitAnsiPortSyntax
+    n0376.ProceduralBlockSyntax  -->  n0138.ImplicitAnsiPortSyntax
+    n0376.ProceduralBlockSyntax  -->  n0075.ImplicitAnsiPortSyntax
+    n0376.ProceduralBlockSyntax  -->  n0149.ImplicitAnsiPortSyntax
+    n0479.IdentifierSelectNameSyntax  -->  n0184.DeclaratorSyntax
+    n0485.IdentifierSelectNameSyntax  -->  n0223.DeclaratorSyntax
+    n0492.InvocationExpressionSyntax  -->  n0017.DeclaratorSyntax
+  sensitive_to (2)
+    n0376.ProceduralBlockSyntax  -->  n0042.ImplicitAnsiPortSyntax  [posedge]
+    n0376.ProceduralBlockSyntax  -->  n0053.ImplicitAnsiPortSyntax  [negedge]

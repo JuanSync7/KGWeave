@@ -38,15 +38,22 @@ def _trivia_records(token: Any) -> list[dict[str, str]]:
 
 
 class _Builder:
-    def __init__(self, source_manager: Any | None = None) -> None:
+    def __init__(
+        self,
+        source_manager: Any | None = None,
+        id_prefix: str = "",
+        start_counter: int = 0,
+    ) -> None:
         self.nodes: list[dict[str, Any]] = []
         self.edges: list[dict[str, Any]] = []
-        self._counter = 0
+        self._counter = start_counter
         self._sm = source_manager
+        self._id_prefix = id_prefix
 
     def _new_id(self, cls_name: str) -> str:
         self._counter += 1
-        return f"n{self._counter:04d}.{cls_name}"
+        prefix = f"{self._id_prefix}:" if self._id_prefix else ""
+        return f"{prefix}n{self._counter:04d}.{cls_name}"
 
     def visit(self, node: Any) -> str:
         cls_name = type(node).__name__
@@ -103,18 +110,33 @@ class _Builder:
         return nid
 
 
-def lift(tree: Any) -> dict[str, Any]:
+def lift(
+    tree: Any,
+    *,
+    graph: dict[str, Any] | None = None,
+    id_prefix: str = "",
+) -> dict[str, Any]:
     """Convert a pyslang SyntaxTree into the structural graph dict.
 
     Token payloads carry an optional ``source.line`` derived from the syntax
     tree's source manager. The line is metadata only — emit reads rawText +
     trivia, so round-trip is unaffected.
+
+    If ``graph`` is provided, nodes/edges are appended in place and the same
+    dict is returned. ``id_prefix`` namespaces the generated node ids — used
+    by :func:`build_kg` to keep ids globally unique across multiple files.
+    The returned graph's ``order`` list grows by one entry per appended tree.
     """
     sm = getattr(tree, "sourceManager", None)
-    builder = _Builder(source_manager=sm)
+    builder = _Builder(source_manager=sm, id_prefix=id_prefix, start_counter=0)
     root_id = builder.visit(tree.root)
-    return {
-        "nodes": builder.nodes,
-        "edges": builder.edges,
-        "order": [root_id],
-    }
+    if graph is None:
+        return {
+            "nodes": builder.nodes,
+            "edges": builder.edges,
+            "order": [root_id],
+        }
+    graph["nodes"].extend(builder.nodes)
+    graph["edges"].extend(builder.edges)
+    graph.setdefault("order", []).append(root_id)
+    return graph

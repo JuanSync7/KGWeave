@@ -318,16 +318,30 @@ def _lhs_target_name(lhs: Any) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def promote(graph: dict[str, Any], syntax_tree: Any, compilation: Any) -> None:
+def promote(
+    graph: dict[str, Any],
+    syntax_tree: Any,
+    compilation: Any,
+    *,
+    node_offset: int | None = None,
+) -> None:
     """Apply S1..S5 (per-module) plus S6 (hierarchical instantiation) in a
     single DFS over the syntax tree, mutating ``graph``.
 
     Identity keys in ``semantic_name_index`` are hierarchical paths
     (``"<module>.<name>"`` for declarations, ``"<parent>.<inst>"`` for
     instances). Scopes are sourced from the elaborated
-    ``InstanceBodySymbol`` chain so the chain matches pyslang's elaboration."""
+    ``InstanceBodySymbol`` chain so the chain matches pyslang's elaboration.
+
+    ``node_offset`` is the starting index into ``graph['nodes']`` for the
+    sub-range produced by ``lift`` for this tree. ``None`` means "this tree
+    starts at offset 0" (single-tree, back-compat). The name_index is reused
+    if it already exists on the graph (so multi-tree callers can resolve
+    cross-tree references)."""
     nodes_list = graph["nodes"]
-    name_index: dict[str, str] = {}
+    if node_offset is None:
+        node_offset = 0
+    name_index: dict[str, str] = graph.setdefault("semantic_name_index", {})
     leaks: list[dict[str, str]] = graph.setdefault("semantic_leaks", [])
 
     # Build a lookup from module name → elaborated InstanceBodySymbol (where
@@ -365,7 +379,7 @@ def promote(graph: dict[str, Any], syntax_tree: Any, compilation: Any) -> None:
         idx = state["idx"]
         state["idx"] += 1
         c = _cls(node)
-        gid = nodes_list[idx]["id"]
+        gid = nodes_list[node_offset + idx]["id"]
         pushed = None
         popped_module = False
 
@@ -373,7 +387,7 @@ def promote(graph: dict[str, Any], syntax_tree: Any, compilation: Any) -> None:
             mname = _module_name_of(node)
             state["module_stack"].append((gid, mname))
             popped_module = True
-            _mark(nodes_list[idx], role="module", name=mname, path=mname)
+            _mark(nodes_list[node_offset + idx], role="module", name=mname, path=mname)
             name_index["module:" + mname] = gid
             # Also register the module's path as a top-level lookup so that
             # ``find_by_name('top')`` resolves to the module node directly.
@@ -387,7 +401,7 @@ def promote(graph: dict[str, Any], syntax_tree: Any, compilation: Any) -> None:
                 if ids:
                     pname = ids[0].valueText
                     ppath = f"{mname}.{pname}"
-                    _mark(nodes_list[idx], role="port", name=pname, path=ppath)
+                    _mark(nodes_list[node_offset + idx], role="port", name=pname, path=ppath)
                     _add_edge(graph, mod_gid, gid, "has_port")
                     name_index[ppath] = gid
                     port_names_by_module.setdefault(mname, set()).add(pname)
@@ -404,11 +418,11 @@ def promote(graph: dict[str, Any], syntax_tree: Any, compilation: Any) -> None:
                     dname = ids[0].valueText
                     dpath = f"{mname}.{dname}"
                     if state["in_param"] > 0:
-                        _mark(nodes_list[idx], role="param", name=dname, path=dpath)
+                        _mark(nodes_list[node_offset + idx], role="param", name=dname, path=dpath)
                         _add_edge(graph, mod_gid, gid, "has_param")
                         name_index[dpath] = gid
                     elif state["in_data"] > 0 and dname not in port_names_by_module.get(mname, set()):
-                        _mark(nodes_list[idx], role="net", name=dname, path=dpath)
+                        _mark(nodes_list[node_offset + idx], role="net", name=dname, path=dpath)
                         _add_edge(graph, mod_gid, gid, "has_net")
                         name_index[dpath] = gid
 
@@ -438,7 +452,7 @@ def promote(graph: dict[str, Any], syntax_tree: Any, compilation: Any) -> None:
         idx = state2["idx"]
         state2["idx"] += 1
         c = _cls(node)
-        gid = nodes_list[idx]["id"]
+        gid = nodes_list[node_offset + idx]["id"]
         popped = False
         if c == "ModuleDeclarationSyntax":
             mname = _module_name_of(node)
@@ -448,15 +462,15 @@ def promote(graph: dict[str, Any], syntax_tree: Any, compilation: Any) -> None:
         scope = module_scope_by_name.get(mname)
         scope_path = mname
         if c == "ContinuousAssignSyntax":
-            _rule_s2(graph, node, gid, nodes_list[idx], scope, name_index, leaks, scope_path)
+            _rule_s2(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks, scope_path)
         elif c == "ProceduralBlockSyntax":
-            _rule_s3(graph, node, gid, nodes_list[idx], scope, name_index, leaks, scope_path)
+            _rule_s3(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks, scope_path)
         elif c == "IdentifierSelectNameSyntax":
-            _rule_s4(graph, node, gid, nodes_list[idx], scope, name_index, leaks, scope_path)
+            _rule_s4(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks, scope_path)
         elif c == "InvocationExpressionSyntax":
-            _rule_s5(graph, node, gid, nodes_list[idx], scope, name_index, leaks, scope_path)
+            _rule_s5(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks, scope_path)
         elif c == "HierarchyInstantiationSyntax":
-            _rule_s6(graph, node, gid, nodes_list[idx], scope, name_index, leaks,
+            _rule_s6(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks,
                      scope_path, mod_gid)
         if not _is_token(node):
             try:

@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>RagWeave Knowledge Graph</title>
+  <script src="https://unpkg.com/graphology@0.25.4/dist/graphology.umd.min.js"></script>
+  <script src="https://unpkg.com/sigma@3.0.3/dist/sigma.min.js"></script>
+  <script src="https://unpkg.com/graphology-library@0.7.1/dist/graphology-library.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden; }
+    #graph-container { width: 100vw; height: 100vh; }
+    #search-container {
+      position: absolute; top: 10px; left: 10px; z-index: 10;
+      background: rgba(255,255,255,0.95); padding: 8px; border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    #search-input {
+      width: 250px; padding: 6px 10px; border: 1px solid #ddd;
+      border-radius: 4px; font-size: 14px;
+    }
+    #legend {
+      position: absolute; bottom: 10px; left: 10px; z-index: 10;
+      background: rgba(255,255,255,0.95); padding: 10px; border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15); max-height: 200px; overflow-y: auto;
+      font-size: 12px;
+    }
+    .legend-item { display: flex; align-items: center; margin: 3px 0; }
+    .legend-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      margin-right: 6px; flex-shrink: 0;
+    }
+    #tooltip {
+      position: absolute; z-index: 20; background: rgba(0,0,0,0.85);
+      color: white; padding: 8px 12px; border-radius: 4px; font-size: 12px;
+      pointer-events: none; display: none; max-width: 300px;
+    }
+    #info {
+      position: absolute; top: 10px; right: 10px; z-index: 10;
+      background: rgba(255,255,255,0.95); padding: 8px 12px; border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15); font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div id="search-container">
+    <input id="search-input" type="text" placeholder="Search entities..." />
+  </div>
+  <div id="graph-container"></div>
+  <div id="legend"></div>
+  <div id="tooltip"></div>
+  <div id="info"></div>
+  <script>
+    const graphData = {"nodes": [{"key": "top", "attributes": {"label": "top", "entityType": "RTL_Module", "display_type": "RTL_Module", "community": null, "size": 3, "color": "#000075", "sources": "top.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "top.clk", "attributes": {"label": "top.clk", "entityType": "Port", "display_type": "Port", "community": null, "size": 3, "color": "#42d4f4", "sources": "top.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "top.rst_n", "attributes": {"label": "top.rst_n", "entityType": "Port", "display_type": "Port", "community": null, "size": 3, "color": "#42d4f4", "sources": "top.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "top.push", "attributes": {"label": "top.push", "entityType": "Port", "display_type": "Port", "community": null, "size": 3, "color": "#42d4f4", "sources": "top.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "top.pop", "attributes": {"label": "top.pop", "entityType": "Port", "display_type": "Port", "community": null, "size": 3, "color": "#42d4f4", "sources": "top.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "top.din", "attributes": {"label": "top.din", "entityType": "Port", "display_type": "Port", "community": null, "size": 3, "color": "#42d4f4", "sources": "top.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "top.dout", "attributes": {"label": "top.dout", "entityType": "Port", "display_type": "Port", "community": null, "size": 3, "color": "#42d4f4", "sources": "top.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "top.full", "attributes": {"label": "top.full", "entityType": "Port", "display_type": "Port", "community": null, "size": 3, "color": "#42d4f4", "sources": "top.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "top.empty", "attributes": {"label": "top.empty", "entityType": "Port", "display_type": "Port", "community": null, "size": 3, "color": "#42d4f4", "sources": "top.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "top.u_fifo", "attributes": {"label": "top.u_fifo", "entityType": "Instance", "display_type": "Instance", "community": null, "size": 3, "color": "#000075", "sources": "top.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "fifo", "attributes": {"label": "fifo", "entityType": "RTL_Module", "display_type": "RTL_Module", "community": null, "size": 3, "color": "#000075", "sources": "fifo.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "fifo.DEPTH", "attributes": {"label": "fifo.DEPTH", "entityType": "Parameter", "display_type": "Parameter", "community": null, "size": 3, "color": "#000075", "sources": "fifo.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "fifo.WIDTH", "attributes": {"label": "fifo.WIDTH", "entityType": "Parameter", "display_type": "Parameter", "community": null, "size": 3, "color": "#000075", "sources": "fifo.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "fifo.clk", "attributes": {"label": "fifo.clk", "entityType": "Port", "display_type": "Port", "community": null, "size": 3, "color": "#42d4f4", "sources": "fifo.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "fifo.rst_n", "attributes": {"label": "fifo.rst_n", "entityType": "Port", "display_type": "Port", "community": null, "size": 3, "color": "#42d4f4", "sources": "fifo.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "fifo.push", "attributes": {"label": "fifo.push", "entityType": "Port", "display_type": "Port", "community": null, "size": 3, "color": "#42d4f4", "sources": "fifo.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "fifo.pop", "attributes": {"label": "fifo.pop", "entityType": "Port", "display_type": "Port", "community": null, "size": 3, "color": "#42d4f4", "sources": "fifo.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "fifo.din", "attributes": {"label": "fifo.din", "entityType": "Port", "display_type": "Port", "community": null, "size": 3, "color": "#42d4f4", "sources": "fifo.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "fifo.dout", "attributes": {"label": "fifo.dout", "entityType": "Port", "display_type": "Port", "community": null, "size": 3, "color": "#42d4f4", "sources": "fifo.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "fifo.full", "attributes": {"label": "fifo.full", "entityType": "Port", "display_type": "Port", "community": null, "size": 3, "color": "#42d4f4", "sources": "fifo.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "fifo.empty", "attributes": {"label": "fifo.empty", "entityType": "Port", "display_type": "Port", "community": null, "size": 3, "color": "#42d4f4", "sources": "fifo.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "fifo.mem", "attributes": {"label": "fifo.mem", "entityType": "Net", "display_type": "Net", "community": null, "size": 3, "color": "#469990", "sources": "fifo.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "n0426.InvocationExpressionSyntax", "attributes": {"label": "n0426.InvocationExpressionSyntax", "entityType": "Invocation", "display_type": "Invocation", "community": null, "size": 3, "color": "#aaffc3", "sources": "ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "fifo.wr_ptr", "attributes": {"label": "fifo.wr_ptr", "entityType": "Net", "display_type": "Net", "community": null, "size": 3, "color": "#469990", "sources": "fifo.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "n0458.InvocationExpressionSyntax", "attributes": {"label": "n0458.InvocationExpressionSyntax", "entityType": "Invocation", "display_type": "Invocation", "community": null, "size": 3, "color": "#aaffc3", "sources": "ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "fifo.rd_ptr", "attributes": {"label": "fifo.rd_ptr", "entityType": "Net", "display_type": "Net", "community": null, "size": 3, "color": "#469990", "sources": "fifo.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "n0490.InvocationExpressionSyntax", "attributes": {"label": "n0490.InvocationExpressionSyntax", "entityType": "Invocation", "display_type": "Invocation", "community": null, "size": 3, "color": "#aaffc3", "sources": "ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "fifo.count", "attributes": {"label": "fifo.count", "entityType": "Net", "display_type": "Net", "community": null, "size": 3, "color": "#469990", "sources": "fifo.sv, ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "n0512.ContinuousAssignSyntax", "attributes": {"label": "n0512.ContinuousAssignSyntax", "entityType": "ContinuousAssign", "display_type": "ContinuousAssign", "community": null, "size": 3, "color": "#bfef45", "sources": "ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "n0532.ContinuousAssignSyntax", "attributes": {"label": "n0532.ContinuousAssignSyntax", "entityType": "ContinuousAssign", "display_type": "ContinuousAssign", "community": null, "size": 3, "color": "#bfef45", "sources": "ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "n0552.ContinuousAssignSyntax", "attributes": {"label": "n0552.ContinuousAssignSyntax", "entityType": "ContinuousAssign", "display_type": "ContinuousAssign", "community": null, "size": 3, "color": "#bfef45", "sources": "ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "n0561.IdentifierSelectNameSyntax", "attributes": {"label": "n0561.IdentifierSelectNameSyntax", "entityType": "Selector", "display_type": "Selector", "community": null, "size": 3, "color": "#e6194b", "sources": "ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "n0567.IdentifierSelectNameSyntax", "attributes": {"label": "n0567.IdentifierSelectNameSyntax", "entityType": "Selector", "display_type": "Selector", "community": null, "size": 3, "color": "#e6194b", "sources": "ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "n0574.InvocationExpressionSyntax", "attributes": {"label": "n0574.InvocationExpressionSyntax", "entityType": "Invocation", "display_type": "Invocation", "community": null, "size": 3, "color": "#aaffc3", "sources": "ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "n0597.ProceduralBlockSyntax", "attributes": {"label": "n0597.ProceduralBlockSyntax", "entityType": "ProceduralBlock", "display_type": "ProceduralBlock", "community": null, "size": 3, "color": "#ffe119", "sources": "ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "n0700.IdentifierSelectNameSyntax", "attributes": {"label": "n0700.IdentifierSelectNameSyntax", "entityType": "Selector", "display_type": "Selector", "community": null, "size": 3, "color": "#e6194b", "sources": "ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "n0706.IdentifierSelectNameSyntax", "attributes": {"label": "n0706.IdentifierSelectNameSyntax", "entityType": "Selector", "display_type": "Selector", "community": null, "size": 3, "color": "#e6194b", "sources": "ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}, {"key": "n0713.InvocationExpressionSyntax", "attributes": {"label": "n0713.InvocationExpressionSyntax", "entityType": "Invocation", "display_type": "Invocation", "community": null, "size": 3, "color": "#aaffc3", "sources": "ast_experiment", "mentions": 1, "reachable": true, "opacity": 1.0}}], "edges": [{"key": "e0", "source": "top", "target": "top.clk", "attributes": {"label": "has_port", "color": "#cccccc", "size": 1.5, "predicate": "has_port", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e1", "source": "top", "target": "top.rst_n", "attributes": {"label": "has_port", "color": "#cccccc", "size": 1.5, "predicate": "has_port", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e2", "source": "top", "target": "top.push", "attributes": {"label": "has_port", "color": "#cccccc", "size": 1.5, "predicate": "has_port", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e3", "source": "top", "target": "top.pop", "attributes": {"label": "has_port", "color": "#cccccc", "size": 1.5, "predicate": "has_port", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e4", "source": "top", "target": "top.din", "attributes": {"label": "has_port", "color": "#cccccc", "size": 1.5, "predicate": "has_port", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e5", "source": "top", "target": "top.dout", "attributes": {"label": "has_port", "color": "#cccccc", "size": 1.5, "predicate": "has_port", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e6", "source": "top", "target": "top.full", "attributes": {"label": "has_port", "color": "#cccccc", "size": 1.5, "predicate": "has_port", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e7", "source": "top", "target": "top.empty", "attributes": {"label": "has_port", "color": "#cccccc", "size": 1.5, "predicate": "has_port", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e8", "source": "top", "target": "top.u_fifo", "attributes": {"label": "instantiates", "color": "#b34700", "size": 1.5, "predicate": "instantiates", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e9", "source": "top.clk", "target": "fifo.clk", "attributes": {"label": "connects", "color": "#cccccc", "size": 1.5, "predicate": "connects", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e10", "source": "top.rst_n", "target": "fifo.rst_n", "attributes": {"label": "connects", "color": "#cccccc", "size": 1.5, "predicate": "connects", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e11", "source": "top.push", "target": "fifo.push", "attributes": {"label": "connects", "color": "#cccccc", "size": 1.5, "predicate": "connects", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e12", "source": "top.pop", "target": "fifo.pop", "attributes": {"label": "connects", "color": "#cccccc", "size": 1.5, "predicate": "connects", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e13", "source": "top.din", "target": "fifo.din", "attributes": {"label": "connects", "color": "#cccccc", "size": 1.5, "predicate": "connects", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e14", "source": "top.dout", "target": "fifo.dout", "attributes": {"label": "connects", "color": "#cccccc", "size": 1.5, "predicate": "connects", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e15", "source": "top.full", "target": "fifo.full", "attributes": {"label": "connects", "color": "#cccccc", "size": 1.5, "predicate": "connects", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e16", "source": "top.empty", "target": "fifo.empty", "attributes": {"label": "connects", "color": "#cccccc", "size": 1.5, "predicate": "connects", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e17", "source": "top.u_fifo", "target": "fifo", "attributes": {"label": "of_module", "color": "#cccccc", "size": 1.5, "predicate": "of_module", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e18", "source": "fifo", "target": "fifo.DEPTH", "attributes": {"label": "has_param", "color": "#cccccc", "size": 1.5, "predicate": "has_param", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e19", "source": "fifo", "target": "fifo.WIDTH", "attributes": {"label": "has_param", "color": "#cccccc", "size": 1.5, "predicate": "has_param", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e20", "source": "fifo", "target": "fifo.clk", "attributes": {"label": "has_port", "color": "#cccccc", "size": 1.5, "predicate": "has_port", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e21", "source": "fifo", "target": "fifo.rst_n", "attributes": {"label": "has_port", "color": "#cccccc", "size": 1.5, "predicate": "has_port", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e22", "source": "fifo", "target": "fifo.push", "attributes": {"label": "has_port", "color": "#cccccc", "size": 1.5, "predicate": "has_port", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e23", "source": "fifo", "target": "fifo.pop", "attributes": {"label": "has_port", "color": "#cccccc", "size": 1.5, "predicate": "has_port", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e24", "source": "fifo", "target": "fifo.din", "attributes": {"label": "has_port", "color": "#cccccc", "size": 1.5, "predicate": "has_port", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e25", "source": "fifo", "target": "fifo.dout", "attributes": {"label": "has_port", "color": "#cccccc", "size": 1.5, "predicate": "has_port", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e26", "source": "fifo", "target": "fifo.full", "attributes": {"label": "has_port", "color": "#cccccc", "size": 1.5, "predicate": "has_port", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e27", "source": "fifo", "target": "fifo.empty", "attributes": {"label": "has_port", "color": "#cccccc", "size": 1.5, "predicate": "has_port", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e28", "source": "fifo", "target": "fifo.mem", "attributes": {"label": "has_net", "color": "#cccccc", "size": 1.5, "predicate": "has_net", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e29", "source": "fifo", "target": "fifo.wr_ptr", "attributes": {"label": "has_net", "color": "#cccccc", "size": 1.5, "predicate": "has_net", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e30", "source": "fifo", "target": "fifo.rd_ptr", "attributes": {"label": "has_net", "color": "#cccccc", "size": 1.5, "predicate": "has_net", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e31", "source": "fifo", "target": "fifo.count", "attributes": {"label": "has_net", "color": "#cccccc", "size": 1.5, "predicate": "has_net", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e32", "source": "n0426.InvocationExpressionSyntax", "target": "fifo.DEPTH", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e33", "source": "n0458.InvocationExpressionSyntax", "target": "fifo.DEPTH", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e34", "source": "n0490.InvocationExpressionSyntax", "target": "fifo.DEPTH", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e35", "source": "n0512.ContinuousAssignSyntax", "target": "fifo.full", "attributes": {"label": "drives", "color": "#27ae60", "size": 1.5, "predicate": "drives", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e36", "source": "n0512.ContinuousAssignSyntax", "target": "fifo.count", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e37", "source": "n0512.ContinuousAssignSyntax", "target": "fifo.DEPTH", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e38", "source": "n0532.ContinuousAssignSyntax", "target": "fifo.empty", "attributes": {"label": "drives", "color": "#27ae60", "size": 1.5, "predicate": "drives", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e39", "source": "n0532.ContinuousAssignSyntax", "target": "fifo.count", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e40", "source": "n0552.ContinuousAssignSyntax", "target": "fifo.dout", "attributes": {"label": "drives", "color": "#27ae60", "size": 1.5, "predicate": "drives", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e41", "source": "n0552.ContinuousAssignSyntax", "target": "fifo.mem", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e42", "source": "n0552.ContinuousAssignSyntax", "target": "fifo.rd_ptr", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e43", "source": "n0552.ContinuousAssignSyntax", "target": "fifo.DEPTH", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e44", "source": "n0561.IdentifierSelectNameSyntax", "target": "fifo.mem", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e45", "source": "n0567.IdentifierSelectNameSyntax", "target": "fifo.rd_ptr", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e46", "source": "n0574.InvocationExpressionSyntax", "target": "fifo.DEPTH", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e47", "source": "n0597.ProceduralBlockSyntax", "target": "fifo.clk", "attributes": {"label": "sensitive_to", "color": "#cccccc", "size": 1.5, "predicate": "sensitive_to", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e48", "source": "n0597.ProceduralBlockSyntax", "target": "fifo.rst_n", "attributes": {"label": "sensitive_to", "color": "#cccccc", "size": 1.5, "predicate": "sensitive_to", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e49", "source": "n0597.ProceduralBlockSyntax", "target": "fifo.rst_n", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e50", "source": "n0597.ProceduralBlockSyntax", "target": "fifo.wr_ptr", "attributes": {"label": "drives", "color": "#27ae60", "size": 1.5, "predicate": "drives", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e51", "source": "n0597.ProceduralBlockSyntax", "target": "fifo.rd_ptr", "attributes": {"label": "drives", "color": "#27ae60", "size": 1.5, "predicate": "drives", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e52", "source": "n0597.ProceduralBlockSyntax", "target": "fifo.count", "attributes": {"label": "drives", "color": "#27ae60", "size": 1.5, "predicate": "drives", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e53", "source": "n0597.ProceduralBlockSyntax", "target": "fifo.mem", "attributes": {"label": "drives", "color": "#27ae60", "size": 1.5, "predicate": "drives", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e54", "source": "n0597.ProceduralBlockSyntax", "target": "fifo.din", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e55", "source": "n0597.ProceduralBlockSyntax", "target": "fifo.push", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e56", "source": "n0597.ProceduralBlockSyntax", "target": "fifo.full", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e57", "source": "n0597.ProceduralBlockSyntax", "target": "fifo.pop", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e58", "source": "n0597.ProceduralBlockSyntax", "target": "fifo.empty", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e59", "source": "n0700.IdentifierSelectNameSyntax", "target": "fifo.mem", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e60", "source": "n0706.IdentifierSelectNameSyntax", "target": "fifo.wr_ptr", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}, {"key": "e61", "source": "n0713.InvocationExpressionSyntax", "target": "fifo.DEPTH", "attributes": {"label": "reads", "color": "#0f9f6c", "size": 1.5, "predicate": "reads", "lhs_slice": null, "rhs_slice": null, "evidence_span": "", "edgeSource": "ast_experiment"}}], "legend": {"mode": "type", "type_colors": {"RTL_Module": "#000075", "Port": "#42d4f4", "Instance": "#000075", "Parameter": "#000075", "Net": "#469990", "Invocation": "#aaffc3", "ContinuousAssign": "#bfef45", "Selector": "#e6194b", "ProceduralBlock": "#ffe119"}, "community_colors": {}, "community_sizes": {}, "edge_styles": {"contains": "#e67e22", "has_register": "#d35400", "has_field": "#e88a36", "has_fsm": "#cb4335", "has_state": "#e74c3c", "has_assertion": "#a93226", "bound_into": "#9c2a1e", "instantiates": "#b34700", "part_of": "#c0392b", "collected_in": "#dc7633", "has_sample_arg": "#e06c1a", "realized_by": "#d98880", "has_ipxact_port": "#bf5a15", "has_ipxact_register": "#a04000", "has_ipxact_field": "#ba4a00", "has_bus_interface": "#d35400", "has_address_block": "#cc5a17", "contains_register": "#9c3d00", "has_ipxact_enum": "#b04508", "has_ipxact_parameter": "#c75d10", "has_ipxact_fileset": "#a64500", "has_logical_port": "#e08e2a", "has_memory_map": "#b85510", "contains_address_block": "#8a3500", "claims_about": "#e07b1f", "decomposes_into": "#c2660c", "includes": "#e59030", "passes_arg": "#f0a040", "clocked_by": "#2980b9", "reset_by": "#1f618d", "depends_on": "#2874a6", "instance_of": "#2c7fb8", "specified_by": "#3498db", "binds_parameter": "#1a5490", "constrains_clock": "#5499c7", "constrains_port": "#7fb3d5", "relative_to_clock": "#21618c", "from_endpoint": "#1b4f72", "to_endpoint": "#154360", "groups_clock": "#5dade2", "specifies": "#3a86b8", "drives": "#27ae60", "connects_to": "#229954", "transitions_to": "#1e8449", "reads": "#0f9f6c", "references": "#7f8c8d", "mentions": "#8e44ad", "references_signal": "#884ea0", "tests": "#9b59b6", "has_stage": "#76448a", "covers": "#a569bd", "has_coverpoint": "#6c3483", "has_bin": "#5b2c6f", "has_cross": "#7d3c98", "observes": "#9b6bbf", "crosses": "#bb8fce", "defined_in": "#633974", "target_entity": "#7d3c98", "enforced_by": "#884ea0", "covered_by": "#a569bd", "measured_by": "#bb8fce", "imports_dpi": "#9b7dbf", "implements_dpi": "#b89fd0", "tests_module": "#c0a0d8", "accesses_csr": "#d0b8e0", "parameterizes": "#8e5ec4", "implemented_by": "#a48bd0", "conforms_to": "#7548b3", "aggregates_port": "#9e76d9", "physical_for": "#b89be5", "exposes_memory_map": "#6f3fb0", "connects_to_address_space": "#5a2f95", "samples_covergroup": "#5b3a96", "wraps_covergroup": "#7a4fb5", "via_wrapper": "#9670c8", "defined_in_uvm_file": "#b292d8", "binds_to_arg": "#cdb3e8"}, "edge_classes": {"Composition": [{"predicate": "instantiates", "color": "#b34700"}], "Dataflow": [{"predicate": "drives", "color": "#27ae60"}, {"predicate": "reads", "color": "#0f9f6c"}]}}};
+
+    // Build graph
+    const graph = new graphology.Graph({multi: false, type: "directed"});
+    graphData.nodes.forEach(n => {
+      // ForceAtlas2 needs initial positions; without them every coord becomes NaN.
+      const attrs = Object.assign({
+        x: Math.random(),
+        y: Math.random(),
+      }, n.attributes);
+      graph.addNode(n.key, attrs);
+    });
+    graphData.edges.forEach(e => {
+      if (graph.hasNode(e.source) && graph.hasNode(e.target)) {
+        try { graph.addEdge(e.source, e.target, e.attributes); } catch(err) {}
+      }
+    });
+
+    // Layout — graphology-library@0.7 exposes layoutForceAtlas2 under graphologyLibrary
+    const FA2 = graphologyLibrary.layoutForceAtlas2;
+    const settings = FA2.inferSettings(graph);
+    FA2.assign(graph, {settings, iterations: 200});
+
+    // Render
+    const container = document.getElementById("graph-container");
+    const renderer = new Sigma(graph, container, {
+      renderEdgeLabels: false,
+      labelRenderedSizeThreshold: 8,
+      defaultEdgeType: "arrow",
+      defaultNodeType: "circle",
+      enableEdgeEvents: true,
+    });
+
+    // Info
+    document.getElementById("info").textContent =
+      `${graph.order} nodes, ${graph.size} edges`;
+
+    // Legend — reflect whatever coloring mode the export actually used
+    const legendEl = document.getElementById("legend");
+    const legend = graphData.legend;
+    const isCommunity = legend.mode === "community";
+    const titleText = isCommunity
+      ? `Communities (top ${Object.keys(legend.community_colors).length} by size)`
+      : "Entity types";
+    const colorMap = isCommunity ? legend.community_colors : legend.type_colors;
+    const sizes = legend.community_sizes || {};
+
+    const title = document.createElement("div");
+    title.style.fontWeight = "600";
+    title.style.marginBottom = "4px";
+    title.textContent = titleText;
+    legendEl.appendChild(title);
+
+    Object.entries(colorMap).forEach(([label, color]) => {
+      const item = document.createElement("div");
+      item.className = "legend-item";
+      let display = label;
+      if (isCommunity) {
+        const cid = label.split(" ")[1];
+        const n = sizes[cid];
+        display = `${label}${n ? ` (${n})` : ""}`;
+      }
+      item.innerHTML = `<span class="legend-dot" style="background:${color}"></span>${display}`;
+      legendEl.appendChild(item);
+    });
+
+    // Edge-predicate legend grouped by semantic class. Each class is its
+    // own bold subsection (Composition / Dependency / Dataflow / Reference);
+    // we skip a class entirely if no predicates of that class appear in
+    // the rendered graph, so the key stays compact.
+    const usedPredicates = new Set(
+      graphData.edges.map(e => e.attributes && e.attributes.label).filter(Boolean)
+    );
+    const edgeClasses = legend.edge_classes || {};
+    const classOrder = ["Composition", "Dependency", "Dataflow", "Reference"];
+    classOrder.forEach(cls => {
+      const entries = (edgeClasses[cls] || [])
+        .filter(e => usedPredicates.has(e.predicate));
+      if (entries.length === 0) return;
+      const header = document.createElement("div");
+      header.style.fontWeight = "700";
+      header.style.fontSize = "11px";
+      header.style.marginTop = "8px";
+      header.style.marginBottom = "3px";
+      header.textContent = cls;
+      legendEl.appendChild(header);
+      entries.forEach(({predicate, color}) => {
+        const item = document.createElement("div");
+        item.className = "legend-item";
+        item.innerHTML = `<span style="display:inline-block;width:18px;height:3px;background:${color};margin-right:6px;vertical-align:middle;flex-shrink:0;"></span>${predicate}`;
+        legendEl.appendChild(item);
+      });
+    });
+
+    // Search
+    const searchInput = document.getElementById("search-input");
+    searchInput.addEventListener("input", () => {
+      const query = searchInput.value.toLowerCase();
+      graph.forEachNode((node, attrs) => {
+        const match = !query || attrs.label.toLowerCase().includes(query);
+        graph.setNodeAttribute(node, "hidden", !match && query.length > 0);
+      });
+      renderer.refresh();
+    });
+
+    // Tooltip — single tooltip surfaces node OR edge data depending on
+    // what the cursor is over. Edge tooltip exposes bit-slice / evidence
+    // info that only lives on edge attrs (notably for `reads` dataflow).
+    const tooltip = document.getElementById("tooltip");
+    const escapeHtml = (s) => String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    renderer.on("enterNode", ({node}) => {
+      const attrs = graph.getNodeAttributes(node);
+      tooltip.innerHTML = `<b>${escapeHtml(attrs.label)}</b><br>Type: ${escapeHtml(attrs.entityType)}<br>Mentions: ${attrs.mentions}<br>Sources: ${escapeHtml(attrs.sources) || "n/a"}`;
+      tooltip.style.display = "block";
+    });
+    renderer.on("leaveNode", () => { tooltip.style.display = "none"; });
+    renderer.on("enterEdge", ({edge}) => {
+      const a = graph.getEdgeAttributes(edge);
+      const [s, t] = graph.extremities(edge);
+      const lines = [
+        `<b>${escapeHtml(s)}</b> &rarr; <b>${escapeHtml(t)}</b>`,
+        `Predicate: ${escapeHtml(a.predicate || a.label)}`,
+      ];
+      if (a.lhs_slice || a.rhs_slice) {
+        lines.push(`Slice: lhs=${escapeHtml(a.lhs_slice) || "—"} rhs=${escapeHtml(a.rhs_slice) || "—"}`);
+      }
+      if (a.evidence_span) {
+        lines.push(`Evidence: <code>${escapeHtml(a.evidence_span)}</code>`);
+      }
+      if (a.edgeSource) {
+        lines.push(`Source: ${escapeHtml(a.edgeSource)}`);
+      }
+      tooltip.innerHTML = lines.join("<br>");
+      tooltip.style.display = "block";
+    });
+    renderer.on("leaveEdge", () => { tooltip.style.display = "none"; });
+    renderer.getMouseCaptor().on("mousemove", (e) => {
+      tooltip.style.left = e.x + 15 + "px";
+      tooltip.style.top = e.y + 15 + "px";
+    });
+  </script>
+</body>
+</html>
