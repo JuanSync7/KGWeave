@@ -127,6 +127,79 @@ def test_cone_of_influence_crosses_hierarchy(multi_bundle):
     assert "top.rst_n" in reached_paths
 
 
+def test_tool_instances_of(multi_bundle):
+    """instances_of('fifo') returns every instance path typed as `fifo`."""
+    _tree, _comp, graph = multi_bundle
+    from scripts.semantic import instances_of
+
+    assert instances_of(graph, "fifo") == ["top.u_fifo"]
+    assert instances_of(graph, "nonexistent") == []
+
+
+def test_tool_port_connections(multi_bundle):
+    """port_connections('top.u_fifo') returns the 8 named-connection entries."""
+    _tree, _comp, graph = multi_bundle
+    from scripts.semantic import port_connections
+
+    pcs = port_connections(graph, "top.u_fifo")
+    by_port = {pc["port"]: pc["src_path"] for pc in pcs}
+    assert by_port == {
+        "clk": "top.clk", "rst_n": "top.rst_n", "push": "top.push",
+        "pop": "top.pop", "din": "top.din", "dout": "top.dout",
+        "full": "top.full", "empty": "top.empty",
+    }
+
+
+def test_tool_sensitivity_of(multi_bundle):
+    """sensitivity_of(<always_ff>) returns clk(posedge) + rst_n(negedge)."""
+    _tree, _comp, graph = multi_bundle
+    from scripts.semantic import queryable_nodes, sensitivity_of
+
+    aff = next(n for n in queryable_nodes(graph)
+               if n.get("semantic", {}).get("role") == "always_ff")
+    s = sensitivity_of(graph, aff["id"])
+    by_sig = {x["signal"]: x["edge"] for x in s}
+    assert by_sig == {"fifo.clk": "posedge", "fifo.rst_n": "negedge"}
+
+
+def test_tool_width_of(multi_bundle):
+    """width_of reports packed/unpacked dim text + data_type keyword."""
+    _tree, _comp, graph = multi_bundle
+    from scripts.semantic import width_of
+
+    assert width_of(graph, "fifo.mem") == {
+        "packed_dim": "[WIDTH-1:0]", "unpacked_dim": "[DEPTH]",
+        "data_type": "logic",
+    }
+    assert width_of(graph, "fifo.wr_ptr")["packed_dim"] == "[$clog2(DEPTH):0]"
+    assert width_of(graph, "fifo.din")["packed_dim"] == "[WIDTH-1:0]"
+    assert width_of(graph, "fifo.full")["packed_dim"] is None
+    assert width_of(graph, "fifo.full")["data_type"] == "logic"
+
+
+def test_tool_default_value_of(multi_bundle):
+    """default_value_of returns the textual default expression of a parameter."""
+    _tree, _comp, graph = multi_bundle
+    from scripts.semantic import default_value_of
+
+    assert default_value_of(graph, "fifo.DEPTH") == "8"
+    assert default_value_of(graph, "fifo.WIDTH") == "32"
+    assert default_value_of(graph, "fifo.mem") is None  # not a param
+
+
+def test_tool_forward_cone(multi_bundle):
+    """forward_cone is the symmetric counterpart of cone_of_influence."""
+    _tree, _comp, graph = multi_bundle
+    from scripts.semantic import forward_cone
+
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    paths = {by_id[i].get("semantic", {}).get("path")
+             for i in forward_cone(graph, "fifo.din")}
+    # din reaches mem (via always_ff write) and dout (via the assign).
+    assert "fifo.mem" in paths
+    assert "fifo.dout" in paths
+
+
 def test_s1_fires_per_module(multi_bundle):
     """S1 must fire on BOTH modules — every module's ports/params/nets are
     promoted with hierarchical paths."""

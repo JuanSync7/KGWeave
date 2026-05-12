@@ -876,6 +876,290 @@ def reads_of(graph: dict[str, Any], name: str) -> list[dict[str, Any]]:
     return neighbors(graph, target["id"], edge_type="reads", direction="in")
 
 
+def instances_of(graph: dict[str, Any], module_name: str) -> list[str]:
+    """Return every instance path whose ``of_module`` points at ``module_name``.
+
+    Pure typed-edge traversal: walks ``of_module`` edges in-reverse from the
+    module-definition node, projecting each source instance's ``semantic.path``.
+    """
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    idx = graph.get("semantic_name_index", {})
+    mod_id = idx.get("module:" + module_name) or idx.get(module_name)
+    if mod_id is None:
+        return []
+    out: list[str] = []
+    for e in graph["edges"]:
+        if e["type"] != "of_module" or e["dst"] != mod_id:
+            continue
+        src = by_id.get(e["src"])
+        if src is None:
+            continue
+        path = src.get("semantic", {}).get("path")
+        if path:
+            out.append(path)
+    return sorted(out)
+
+
+def port_connections(graph: dict[str, Any], instance_path: str) -> list[dict[str, Any]]:
+    """Return the named port-connection map for an instance.
+
+    Each entry is ``{"port": <child-port-name>, "src_path": <parent-net-path>}``
+    derived from every ``connects`` edge whose payload ``instance`` matches
+    ``instance_path``. Edge payload is the sole source of truth — no name-string
+    parsing is involved.
+    """
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    out: list[dict[str, Any]] = []
+    for e in graph["edges"]:
+        if e["type"] != "connects":
+            continue
+        if e["payload"].get("instance") != instance_path:
+            continue
+        src = by_id.get(e["src"])
+        if src is None:
+            continue
+        src_path = src.get("semantic", {}).get("path") or src.get("semantic", {}).get("name")
+        out.append({"port": e["payload"].get("port"), "src_path": src_path})
+    return out
+
+
+def sensitivity_of(graph: dict[str, Any], always_block_id: str) -> list[dict[str, Any]]:
+    """Return ``[{"signal": <net/port path>, "edge": <posedge|negedge|edge>}, …]``
+    from outgoing ``sensitive_to`` edges of an ``always_*`` node."""
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    out: list[dict[str, Any]] = []
+    for e in graph["edges"]:
+        if e["type"] != "sensitive_to" or e["src"] != always_block_id:
+            continue
+        dst = by_id.get(e["dst"])
+        if dst is None:
+            continue
+        sig = dst.get("semantic", {}).get("path") or dst.get("semantic", {}).get("name")
+        out.append({"signal": sig, "edge": e["payload"].get("edge")})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Structural-payload helpers used by width_of / default_value_of.
+# These read only via typed ``child`` edges and Token rawText — no regex,
+# no substring scans over identifiers.
+# ---------------------------------------------------------------------------
+
+
+def _children_of(graph: dict[str, Any], nid: str) -> list[str]:
+    out: list[tuple[int, str]] = []
+    for e in graph["edges"]:
+        if e["type"] != "child" or e["src"] != nid:
+            continue
+        out.append((e["payload"].get("index", 0), e["dst"]))
+    out.sort()
+    return [d for _, d in out]
+
+
+def _parent_of(graph: dict[str, Any], nid: str) -> str | None:
+    for e in graph["edges"]:
+        if e["type"] == "child" and e["dst"] == nid:
+            return e["src"]
+    return None
+
+
+def _text_of_subtree(graph: dict[str, Any], nid: str, include_leading_trivia: bool = False) -> str:
+    """Reconstruct the raw token text under ``nid`` from typed Token payloads.
+
+    The walk follows ordered ``child`` edges only. Token leading trivia is
+    omitted by default so width / default-value strings come out clean
+    (``[WIDTH-1:0]`` not ``"  [WIDTH-1:0]"``).
+    """
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    first = [True]
+
+    def visit(x: str) -> str:
+        n = by_id[x]
+        if n.get("is_token"):
+            payload = n.get("payload", {})
+            tx = ""
+            if include_leading_trivia or not first[0]:
+                for tr in payload.get("trivia", []):
+                    tx += tr.get("text", "")
+            first[0] = False
+            return tx + payload.get("rawText", "")
+        s = ""
+        for c in _children_of(graph, x):
+            s += visit(c)
+        return s
+
+    return visit(nid)
+
+
+def _first_child_of_kind(graph: dict[str, Any], nid: str, kinds: set[str]) -> str | None:
+    """First direct child whose ``type`` (class-name) is in ``kinds``."""
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    for c in _children_of(graph, nid):
+        if by_id[c]["type"] in kinds:
+            return c
+    return None
+
+
+def _descendants_of_kind(graph: dict[str, Any], nid: str, kinds: set[str]) -> list[str]:
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    out: list[str] = []
+    stack = [nid]
+    while stack:
+        x = stack.pop()
+        if by_id[x]["type"] in kinds:
+            out.append(x)
+        for c in reversed(_children_of(graph, x)):
+            stack.append(c)
+    return out
+
+
+def width_of(graph: dict[str, Any], net_or_port_path: str) -> dict[str, Any]:
+    """Return the structural width of a net or port.
+
+    Result shape::
+
+        {"packed_dim": "[WIDTH-1:0]" | None,
+         "unpacked_dim": "[DEPTH]"   | None,
+         "data_type":   "logic"      | None}
+
+    Reads only via typed ``child`` edges + the lifted Token rawText payload.
+    """
+    target = find_by_name(graph, net_or_port_path)
+    if target is None:
+        return {"packed_dim": None, "unpacked_dim": None, "data_type": None}
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    role = target.get("semantic", {}).get("role")
+    nid = target["id"]
+
+    if role == "port":
+        # Port node is ImplicitAnsiPortSyntax. Children: SyntaxList?,
+        # VariablePortHeaderSyntax (contains data-type + packed dim),
+        # DeclaratorSyntax (contains identifier + optional unpacked dim list).
+        header = _first_child_of_kind(graph, nid, {"VariablePortHeaderSyntax"})
+        decl = _first_child_of_kind(graph, nid, {"DeclaratorSyntax"})
+    else:
+        # Net / param: target IS the DeclaratorSyntax. The data-type sits on
+        # the enclosing DataDeclarationSyntax (grandparent: declarator → SepList → DataDecl).
+        decl = nid
+        sep_list = _parent_of(graph, nid)
+        data_decl = _parent_of(graph, sep_list) if sep_list else None
+        if data_decl is not None and by_id[data_decl]["type"] == "DataDeclarationSyntax":
+            header = _first_child_of_kind(graph, data_decl,
+                                          {"IntegerTypeSyntax", "NamedTypeSyntax",
+                                           "ImplicitTypeSyntax"})
+        else:
+            header = None
+
+    packed = None
+    data_type = None
+    if header is not None:
+        # data_type token: first type-keyword Token reachable under the header.
+        _TYPE_KEYWORDS = {"LogicKeyword", "RegKeyword", "WireKeyword",
+                          "BitKeyword", "ByteKeyword", "ShortIntKeyword",
+                          "IntKeyword", "LongIntKeyword", "IntegerKeyword"}
+        stack = [header]
+        while stack:
+            x = stack.pop()
+            cn = by_id[x]
+            if cn.get("is_token"):
+                kind_name = cn.get("kind", "").rsplit(".", 1)[-1]
+                if kind_name in _TYPE_KEYWORDS:
+                    data_type = cn["payload"].get("valueText")
+                    break
+                continue
+            for c in reversed(_children_of(graph, x)):
+                stack.append(c)
+        # packed dim — concatenate every VariableDimensionSyntax found inside header.
+        dims = _descendants_of_kind(graph, header, {"VariableDimensionSyntax"})
+        if dims:
+            # Drop leading whitespace trivia by passing include_leading_trivia=False
+            packed = "".join(_text_of_subtree(graph, d) for d in dims).lstrip()
+
+    unpacked = None
+    if decl is not None:
+        # Unpacked dim sits AFTER the identifier in the DeclaratorSyntax children.
+        # The dims are siblings inside the inner SyntaxList child.
+        for c in _children_of(graph, decl):
+            cn = by_id[c]
+            if cn["type"] == "SyntaxNode" and "SyntaxList" in cn.get("kind", ""):
+                dims = _descendants_of_kind(graph, c, {"VariableDimensionSyntax"})
+                if dims:
+                    unpacked = "".join(_text_of_subtree(graph, d) for d in dims).lstrip()
+                    break
+
+    return {"packed_dim": packed, "unpacked_dim": unpacked, "data_type": data_type}
+
+
+def default_value_of(graph: dict[str, Any], param_path: str) -> str | None:
+    """Return the textual default expression of a parameter, or ``None``.
+
+    The target node is the parameter's ``DeclaratorSyntax``; the default sits in
+    its ``EqualsValueClauseSyntax`` child (``= <expr>``). We project the
+    expression text (right of ``=``) via typed child edges.
+    """
+    target = find_by_name(graph, param_path)
+    if target is None:
+        return None
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    nid = target["id"]
+    eq_clause = _first_child_of_kind(graph, nid, {"EqualsValueClauseSyntax"})
+    if eq_clause is None:
+        return None
+    # The expression is the first non-token, non-empty child after the '=' token.
+    saw_eq = False
+    for c in _children_of(graph, eq_clause):
+        cn = by_id[c]
+        if cn.get("is_token") and cn.get("kind", "").endswith(".Equals"):
+            saw_eq = True
+            continue
+        if not saw_eq:
+            continue
+        # Project this expression's text.
+        text = _text_of_subtree(graph, c).strip()
+        return text if text else None
+    return None
+
+
+def forward_cone(graph: dict[str, Any], name: str) -> set[str]:
+    """Forward reachability: from ``name``, follow what *it drives* (via
+    ``read_by`` semantics — i.e. nodes that read this signal, then what they
+    drive). Crosses hierarchy outward through outgoing ``connects`` edges
+    (child-port → parent-net is one direction; we also follow parent-net →
+    child-port when standing on a parent net).
+
+    Symmetric counterpart to :func:`cone_of_influence`.
+    """
+    target = find_by_name(graph, name)
+    if target is None:
+        return set()
+    seen: set[str] = set()
+    frontier = [target["id"]]
+    while frontier:
+        nxt: list[str] = []
+        for nid in frontier:
+            if nid in seen:
+                continue
+            seen.add(nid)
+            # Nodes that READ this signal (incoming readers).
+            for reader in neighbors(graph, nid, edge_type="reads", direction="in"):
+                if reader["id"] not in seen:
+                    nxt.append(reader["id"])
+                # Whatever those readers DRIVE (outgoing).
+                for d in neighbors(graph, reader["id"], edge_type="drives", direction="out"):
+                    if d["id"] not in seen:
+                        nxt.append(d["id"])
+            # Cross hierarchy outward via connects edges.
+            for connected in neighbors(graph, nid, edge_type="connects", direction="out"):
+                if connected["id"] not in seen:
+                    nxt.append(connected["id"])
+            for connected in neighbors(graph, nid, edge_type="connects", direction="in"):
+                # parent-net → child-port: only follow if we are the source.
+                if connected["id"] not in seen:
+                    nxt.append(connected["id"])
+        frontier = nxt
+    return seen
+
+
 def cone_of_influence(graph: dict[str, Any], name: str) -> set[str]:
     """Backward reachability: from ``name``, follow drivers; from drivers,
     follow what they read; cross hierarchy boundaries via incoming ``connects``
