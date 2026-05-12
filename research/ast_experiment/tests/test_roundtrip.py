@@ -267,6 +267,14 @@ def test_atom_expressions(original_tree):
     })
 
 
+def test_select_family(original_tree):
+    """iter-012: bit select + element select + range select round-trip."""
+    reparsed, _ = _roundtrip(original_tree)
+    for cls in ("BitSelectSyntax", "ElementSelectSyntax", "RangeSelectSyntax"):
+        _assert_class_roundtrip(original_tree.root, reparsed.root, cls)
+    _mark_covered({"BitSelectSyntax", "ElementSelectSyntax", "RangeSelectSyntax"})
+
+
 def test_full_token_text_stream(original_tree):
     """Strongest oracle: every Token's rawText survives the round-trip in DFS
     order (modulo trivia after the final token, which pyslang drops upstream)."""
