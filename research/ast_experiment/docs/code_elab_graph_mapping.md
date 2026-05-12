@@ -1,9 +1,12 @@
-# Code ↔ elab ↔ graph mapping (per construct in fifo.sv + top.sv)
+# Code ↔ elab ↔ graph mapping (per construct in the expanded corpus)
 
-One row per source-level construct present in `fifo.sv` (single module) and
-`top.sv` (instantiates `fifo` once). Each row gives the exact snippet, the
-pyslang class that hosts it, the graph fragment the lift produces, and the
-rule the reverse engine uses to recover the SV text.
+One row per source-level construct present across the 5 SV files in the
+corpus (`fifo_pkg.sv`, `fifo_if.sv`, `fifo.sv`, `top.sv`, `tb_fifo.sv`).
+Each row gives the exact snippet, the pyslang class that hosts it, the
+graph fragment the lift produces, and the rule the reverse engine uses
+to recover the SV text. Phases 1..7 (`EXPANSION_RESULT.md`) tracked the
+incremental additions; the rule register here is the cumulative source of
+truth.
 
 | Snippet from fifo.sv                              | pyslang class(es)                                                       | Graph fragment                                                                                                                  | Reverse rule                                                                 |
 |---------------------------------------------------|-------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------|
@@ -21,7 +24,7 @@ rule the reverse engine uses to recover the SV text.
 | comments / whitespace                              | trivia on adjacent Tokens                                              | `node.payload.trivia` ordered list of `{kind, text}`                                                                              | emitted before each Token's rawText                                          |
 | `fifo u_fifo (.clk(clk), .rst_n(rst_n), …);`       | HierarchyInstantiationSyntax + HierarchicalInstanceSyntax + InstanceNameSyntax + NamedPortConnectionSyntax | type-name Token (`fifo`) + InstanceName(`u_fifo`) + named connections, each with port-name Token after the `.` and an expression child | structural emit                                                              |
 
-## Semantic projection (rules S1..S6)
+## Semantic projection (rules S1..S12)
 
 For each construct above, the table below shows the **semantic projection** the
 promote-on-demand layer applies on top of the structural graph fragment. The
@@ -42,14 +45,34 @@ original SV text.
 | `mem[wr_ptr[...]]` / `rd_ptr[...]`               | `IdentifierSelectNameSyntax`           | `identifier_select`    | outbound `reads` → base symbol (`mem` / `wr_ptr` / `rd_ptr`)                                                 | base = first Identifier token under the SelectName                             |
 | `$clog2(DEPTH)`                                  | `InvocationExpressionSyntax` over `SystemNameSyntax` | `system_call` (`name=$clog2`) | outbound `reads` → DEPTH                                                                | callee Token (`SystemIdentifier` kind) gives sysname; args from ArgumentList   |
 | `fifo u_fifo (.clk(clk), …);` (top.sv)           | `HierarchyInstantiationSyntax` + `HierarchicalInstanceSyntax` + `NamedPortConnectionSyntax` | `instance` (anchored at HierarchicalInstance, `path="top.u_fifo"`, `of_module="fifo"`) | parent module `instantiates` instance; instance `of_module` fifo; for each named connection, parent net/port `connects` to child port with payload `{instance,port}` | type-name from direct Identifier Token of HierarchyInstantiation; instance name from InstanceName Identifier Token; child port resolved via `name_index["fifo.<port>"]` |
+| `fifo #(.DEPTH(16),.WIDTH(32)) u_fifo_a (...);`  | `ParameterValueAssignmentSyntax` + `NamedParamAssignmentSyntax`                              | (no new node; per-instance edges)        | `param_override` edge from instance → child `param` node, payload `{instance,name,value}` | param name from NamedParam's first Identifier after `.`; value text from the expression subtree via `_expression_text` (typed Token concatenation, no regex) |
+| `always_comb if (full) status = FULL; ...`       | `ProceduralBlockSyntax` (kw=`always_comb`)                                                   | `always_comb`                            | `drives`(status), `reads`(full, empty); NO `sensitive_to` edges                            | same descendants walk as `always_ff`, sensitivity block gated off                                                                                              |
+| `package fifo_pkg; ... endpackage`               | `ModuleDeclarationSyntax` (kind=`PackageDeclaration`)                                        | `package`                                | name_index keys: bare-name + `package:<name>`                                              | discriminated by `node.kind == SyntaxKind.PackageDeclaration`                                                                                                  |
+| `typedef enum logic [1:0] { ... } fifo_status_e;`| `TypedefDeclarationSyntax` + `EnumTypeSyntax` + `DeclaratorSyntax` × N                       | `typedef` + N × `enum_value`             | `has_typedef` package → typedef; `has_enum_value` typedef → declarator                     | typedef name = last Identifier Token in the TypedefDeclaration before the `;`                                                                                  |
+| `function automatic logic [...] next_ptr(...);`  | `FunctionDeclarationSyntax` + `FunctionPrototypeSyntax` + `FunctionPortListSyntax`           | `function`                               | `has_function` module → function                                                            | function name = last Identifier in the FunctionPrototype before the FunctionPortList                                                                           |
+| `wr_ptr <= next_ptr(wr_ptr);`                    | `InvocationExpressionSyntax` over `IdentifierNameSyntax` resolving to a function-role anchor | (no new node)                            | `calls` edge from enclosing `always_ff`/`always_comb` → function; pass2 skips S2..S6 inside the function body to avoid leaks | callee identifier looked up against the current module scope; reads-pass skips identifiers in the function-call set                                            |
+| `interface fifo_if #(...) (...); ... endinterface`| `ModuleDeclarationSyntax` (kind=`InterfaceDeclaration`)                                     | `interface`                              | name_index keys: bare-name + `interface:<name>`; `_rule_s6` accepts both prefixes for `of_module` targeting | discriminated by `node.kind == SyntaxKind.InterfaceDeclaration`                                                                                                |
+| `modport producer (input full, …, output push, din);` | `ModportItemSyntax` + `ModportSimplePortListSyntax` + `ModportNamedPortSyntax`         | `modport`                                | `has_modport` interface → modport; semantic `directions` payload = `{signal: keyword}`     | direction keyword token (Input/Output/InOut) per ModportSimplePortList; port names from each ModportNamedPort                                                  |
+| `generate for (genvar i=0; i<NUM_FIFOS; i++) begin: gen_fifos fifo u_fifo_gen(...); end endgenerate` | `LoopGenerateSyntax` + `GenerateBlockSyntax` (syntactic) + `GenerateBlockArraySymbol.entries[i]` (elaborated) | `generate_loop` (syntactic) + N × `generate_block` (synthetic, `gen:`-prefixed) + N × `instance` (synthetic) | `has_generate` module → loop; `contains_block` loop → block; per-block `instantiates` + `of_module` for each elaborated InstanceSymbol child | label from the NamedBlockClause inside the syntactic GenerateBlock; iteration count + per-iteration hierarchical paths from the elaborated GenerateBlockArraySymbol; syntactic HierarchyInstantiation inside the loop is suppressed by an `in_generate` counter in pass2 |
 
 ### Reverse rule (semantic layer)
 
 Identical to the structural one: emit children in DFS order, tokens emit
 trivia+rawText. The semantic layer adds **only** flags (`queryable`,
-`semantic.role`, `semantic.name`, `semantic.path`, …) and new edges of types
-`has_port`, `has_param`, `has_net`, `drives`, `reads`, `sensitive_to`,
-`instantiates`, `of_module`, `connects`. None of the original `child` edges or
-token payloads is altered, so the structural emit is a strict inverse of the
-structural lift regardless of which rules have fired.
+`semantic.role`, `semantic.name`, `semantic.path`, …) and new edges. The
+full edge-type set is `has_port`, `has_param`, `has_net`, `drives`,
+`reads`, `sensitive_to`, `instantiates`, `of_module`, `connects`,
+`param_override`, `has_typedef`, `has_enum_value`, `has_modport`,
+`has_function`, `calls`, `has_generate`, `contains_block`. None of the
+original `child` edges or Token payloads is altered, so the structural
+emit is a strict inverse of the structural lift regardless of which rules
+have fired.
+
+S12 is the only rule that creates **synthetic** nodes (one per elaborated
+generate-block iteration, plus one per generated instance). These nodes
+do not participate in `unlift.emit` — they live alongside the structural
+backbone in `graph["nodes"]` and are skipped by the emitter because the
+structural backbone is walked top-down from `graph["order"]`. Their ids
+are namespaced with a `gen:` prefix so they cannot collide with
+lift-produced ids.
 

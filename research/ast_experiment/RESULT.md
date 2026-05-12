@@ -100,14 +100,26 @@ knows to teach `emit` to deref `{"_node_ref": "<id>"}` slots first.
 
 ## Deferred items
 
-* Generate blocks, interfaces, classes, packages (out of scope per REDIRECT.md).
-* Parameter overrides on instantiation (`#(.DEPTH(16))`) — `top.sv` currently
-  takes the child module's defaults. The connection logic does not yet attempt
-  to track override-resolution.
 * Symbol-pointer-anchored edges that survive renaming — superseded by
   hierarchical-path keying (the redirect explicitly rules these out).
 * Snip-and-ref relocation: only needed if a future rule wants to move a subtree
   under a different parent.
+* Classes / virtual interfaces / clocking blocks — not exercised by the
+  current corpus.
+* Positional parameter overrides (`#(8, 32)`) — only named-style overrides
+  are exercised in the current corpus; the code path is present but
+  unexercised.
+
+## Closed caveats (resolved by Phase 1..7 expansion — see EXPANSION_RESULT.md)
+
+* Generate blocks → **closed by S12** (Phase 6) with elaborated synthetic
+  instance nodes carrying hierarchical paths.
+* Interfaces / modports → **closed by S11** (Phase 5).
+* Packages / typedef-enums → **closed by S9** (Phase 3).
+* Parameter overrides on instantiation → **closed by S7** (Phase 1) with
+  `param_override` edges carrying resolved values.
+* Functions → **closed by S10** (Phase 4) with `calls` edges from
+  callsite blocks.
 
 ## How to reproduce
 
@@ -118,7 +130,9 @@ uv run -- python -m pytest research/ast_experiment/tests/ -x -q
 uv run python research/ast_experiment/scripts/score.py
 ```
 
-Both should report `34 passed` and `score = 0` over the combined corpus.
+Both should report `105 passed` and `score = 0` over the combined
+5-file corpus (`fifo_pkg.sv`, `fifo_if.sv`, `fifo.sv`, `top.sv`,
+`tb_fifo.sv`).
 
 ## Artefacts
 

@@ -114,8 +114,16 @@ the `type` field. Both layers share the same underlying node id space.
 | `instantiates` | parent module → child instance node                            | S6         |
 | `of_module`    | instance node → module-definition node it elaborates           | S6         |
 | `connects`     | parent net/port → child instance's port; payload `{"instance", "port"}` | S6 |
+| `param_override` | instance → child param; payload `{"instance", "name", "value"}` | S7 |
+| `has_typedef`  | package/module → typedef                                       | S9 |
+| `has_enum_value` | typedef → enum-value declarator; payload `{"name", "typedef"}` | S9 |
+| `has_modport`  | interface → modport                                            | S11 |
+| `has_function` | module → function declaration                                  | S10 |
+| `calls`        | always block → function it invokes                             | S10 |
+| `has_generate` | module → loop-generate node                                    | S12 |
+| `contains_block` | generate_loop → synthetic generate_block (one per iteration) | S12 |
 
-### Semantic rule table (S1..S6)
+### Semantic rule table (S1..S12)
 
 | Rule | Syntax trigger                              | Promoted node role    | Edges drawn                              |
 |------|----------------------------------------------|------------------------|-------------------------------------------|
@@ -128,6 +136,16 @@ the `type` field. Both layers share the same underlying node id space.
 | S4   | `IdentifierSelectNameSyntax`                 | `identifier_select`    | `reads`(base symbol)                       |
 | S5   | `InvocationExpressionSyntax` over SystemName | `system_call`          | `reads`(argument identifiers)              |
 | S6   | `HierarchyInstantiationSyntax`               | `instance` (anchored at the `HierarchicalInstanceSyntax`) | parent `instantiates` instance; instance `of_module` definition; parent-net `connects` child-port for each `NamedPortConnectionSyntax` |
+| S7   | `ParameterValueAssignmentSyntax`             | (no new role; edge layered on the instance) | `param_override` edge per `NamedParamAssignmentSyntax`, carrying the textual resolved value |
+| S8   | `ProceduralBlockSyntax` (kw=`always_comb`)   | `always_comb`          | `drives`/`reads` (mirrors S3 minus `sensitive_to`) |
+| S9a  | `ModuleDeclarationSyntax` (kind=`PackageDeclaration`) | `package`     | bare-name + `package:<name>` keys in the name_index |
+| S9b  | `TypedefDeclarationSyntax`                    | `typedef`              | inbound `has_typedef` from package; full path `<pkg>.<typedef>` |
+| S9c  | `DeclaratorSyntax` ∈ EnumTypeSyntax            | `enum_value`           | inbound `has_enum_value` from typedef; payload carries enum value name |
+| S10  | `FunctionDeclarationSyntax`                   | `function`             | inbound `has_function` from module; `calls` edge emitted on every InvocationExpressionSyntax whose callee resolves to a function-role node (pass2 disables S2..S6 inside the function body to avoid local-symbol leaks) |
+| S11a | `ModuleDeclarationSyntax` (kind=`InterfaceDeclaration`) | `interface` | bare-name + `interface:<name>` keys; `_rule_s6` looks up either prefix when wiring `of_module` for interface instantiations |
+| S11b | `ModportItemSyntax`                           | `modport`              | inbound `has_modport` from interface; semantic carries `directions` map of port → direction-keyword |
+| S12a | `LoopGenerateSyntax`                          | `generate_loop`        | inbound `has_generate` from module; `iter_count` payload from the elaborated `GenerateBlockArraySymbol` |
+| S12b | `GenerateBlockArraySymbol.entries[i]` (post-elab synthetic) | `generate_block` | inbound `contains_block` from generate_loop; node id namespaced as `gen:<elaborated-path>`; each `InstanceSymbol` inside becomes a synthetic instance + `of_module` edge |
 
 ### Identifier resolution — hierarchical-path keys
 
