@@ -23,6 +23,8 @@ S5. SystemNameSyntax(``$clog2``) → ``reads``(argument identifiers).
 S7. ParameterValueAssignmentSyntax → ``param_override`` edges from the
     instance node to the child module's ``param`` nodes, with the textual
     resolved expression in the edge payload.
+S8. ProceduralBlockSyntax(always_comb) → ``drives``/``reads`` (mirrors S3
+    minus ``sensitive_to``; pyslang's ``kind`` is ``AlwaysCombBlock``).
 """
 
 from __future__ import annotations
@@ -570,9 +572,18 @@ def _rule_s2(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):
 
 def _rule_s3(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):
     kw = next((c for c in node if _is_token(c)), None)
-    if kw is None or kw.valueText != "always_ff":
+    if kw is None:
         return
-    _mark(gnode, role="always_ff")
+    kw_text = kw.valueText
+    if kw_text == "always_ff":
+        role = "always_ff"
+        do_sensitivity = True
+    elif kw_text == "always_comb":
+        role = "always_comb"
+        do_sensitivity = False
+    else:
+        return
+    _mark(gnode, role=role)
 
     # Helper: collect all descendant syntax nodes in a list (DFS), so we can
     # introspect them without re-walking from the outer DFS.
@@ -587,23 +598,24 @@ def _rule_s3(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):
         for c in children:
             yield from descendants(c)
 
-    # Sensitivity: SignalEventExpressionSyntax.
-    for d in descendants(node):
-        if _cls(d) != "SignalEventExpressionSyntax":
-            continue
-        edge = None
-        for t in descendants(d):
-            if _is_token(t) and t.valueText in {"posedge", "negedge", "edge"}:
-                edge = t.valueText
-                break
-        ids = _identifier_tokens(d)
-        if not ids:
-            continue
-        sig = ids[0].valueText
-        tgt = _resolve(sig, scope=scope, name_index=name_index, leaks=leaks,
-                       context=f"always_ff.sensitive_to[{gid}]", scope_path=scope_path)
-        if tgt is not None:
-            _add_edge(graph, gid, tgt, "sensitive_to", edge=edge)
+    # Sensitivity: SignalEventExpressionSyntax (only for always_ff).
+    if do_sensitivity:
+        for d in descendants(node):
+            if _cls(d) != "SignalEventExpressionSyntax":
+                continue
+            edge = None
+            for t in descendants(d):
+                if _is_token(t) and t.valueText in {"posedge", "negedge", "edge"}:
+                    edge = t.valueText
+                    break
+            ids = _identifier_tokens(d)
+            if not ids:
+                continue
+            sig = ids[0].valueText
+            tgt = _resolve(sig, scope=scope, name_index=name_index, leaks=leaks,
+                           context=f"{role}.sensitive_to[{gid}]", scope_path=scope_path)
+            if tgt is not None:
+                _add_edge(graph, gid, tgt, "sensitive_to", edge=edge)
 
     # Drives / reads from assignment-form BinaryExpressionSyntax.
     for d in descendants(node):
@@ -620,14 +632,14 @@ def _rule_s3(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):
         lhs_name = _lhs_target_name(lhs)
         if lhs_name:
             tgt = _resolve(lhs_name, scope=scope, name_index=name_index, leaks=leaks,
-                           context=f"always_ff.drives[{gid}]", scope_path=scope_path)
+                           context=f"{role}.drives[{gid}]", scope_path=scope_path)
             if tgt is not None and not _has_edge(graph, gid, tgt, "drives"):
                 _add_edge(graph, gid, tgt, "drives")
         for rname in _identifier_names_in(rhs):
             if rname == lhs_name:
                 continue
             src = _resolve(rname, scope=scope, name_index=name_index, leaks=leaks,
-                           context=f"always_ff.reads[{gid}]", scope_path=scope_path)
+                           context=f"{role}.reads[{gid}]", scope_path=scope_path)
             if src is not None and not _has_edge(graph, gid, src, "reads"):
                 _add_edge(graph, gid, src, "reads")
 
@@ -637,7 +649,7 @@ def _rule_s3(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):
         if c == "ConditionalPredicateSyntax":
             for rname in _identifier_names_in(d):
                 src = _resolve(rname, scope=scope, name_index=name_index, leaks=leaks,
-                               context=f"always_ff.reads.predicate[{gid}]", scope_path=scope_path)
+                               context=f"{role}.reads.predicate[{gid}]", scope_path=scope_path)
                 if src is not None and not _has_edge(graph, gid, src, "reads"):
                     _add_edge(graph, gid, src, "reads")
         elif c == "CaseStatementSyntax":
@@ -646,7 +658,7 @@ def _rule_s3(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):
                 continue
             for rname in _identifier_names_in(head):
                 src = _resolve(rname, scope=scope, name_index=name_index, leaks=leaks,
-                               context=f"always_ff.reads.case_head[{gid}]", scope_path=scope_path)
+                               context=f"{role}.reads.case_head[{gid}]", scope_path=scope_path)
                 if src is not None and not _has_edge(graph, gid, src, "reads"):
                     _add_edge(graph, gid, src, "reads")
 

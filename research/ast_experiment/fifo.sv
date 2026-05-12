@@ -9,7 +9,8 @@ module fifo #(
     input  logic [WIDTH-1:0]  din,
     output logic [WIDTH-1:0]  dout,
     output logic              full,
-    output logic              empty
+    output logic              empty,
+    output logic [1:0]        status
 );
 
     logic [WIDTH-1:0] mem [DEPTH];
@@ -40,6 +41,12 @@ module fifo #(
                 default: count <= count;
             endcase
         end
+    end
+
+    always_comb begin
+        if (full)        status = 2'b10;
+        else if (empty)  status = 2'b00;
+        else             status = 2'b01;
     end
 
 endmodule

@@ -61,7 +61,7 @@ def test_s1_module_promotes_ports_params_nets(fixture_bundle):
     assert len(modules) == 1
     assert modules[0]["semantic"]["name"] == "fifo"
     assert {p["semantic"]["name"] for p in ports} == {
-        "clk", "rst_n", "push", "pop", "din", "dout", "full", "empty",
+        "clk", "rst_n", "push", "pop", "din", "dout", "full", "empty", "status",
     }
     assert {p["semantic"]["name"] for p in params} == {"DEPTH", "WIDTH"}
     assert {n["semantic"]["name"] for n in nets} == {"mem", "wr_ptr", "rd_ptr", "count"}

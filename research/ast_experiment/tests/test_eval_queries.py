@@ -85,7 +85,7 @@ class TestGroupA:
                     tok = by_id[eee["dst"]]
                     if tok.get("is_token") and tok["kind"].endswith(".OutputKeyword"):
                         outputs.add(port_node["semantic"]["path"])
-        assert outputs == {"fifo.dout", "fifo.full", "fifo.empty"}
+        assert outputs == {"fifo.dout", "fifo.full", "fifo.empty", "fifo.status"}
 
     def test_A3_nets_have_packed_width_expressions(self, gbundle):
         """A3: every net's packed-dim expression text is preserved."""

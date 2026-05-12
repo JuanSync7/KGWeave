@@ -41,3 +41,5 @@ corpus-01	corpus	pending	expand top.sv with two parameter-overridden fifo instan
 020	struct	pending	cover NamedParamAssignmentSyntax round-trip on top.sv	0	pass	combined structural score back to 0
 S08	sem	pending	S7 ParameterValueAssignmentSyntax promotion: param_override edge from instance to child module's param with resolved value in payload	0	pass	param_overrides('top.u_fifo_a')={DEPTH:16,WIDTH:32}; ('top.u_fifo_b')={DEPTH:8,WIDTH:8}; ('top.u_fifo')={}
 INV08	invariants	pending	8th invariant: every param_override target is a param node on the instance's of_module side	0	pass	test_inv8_param_override_target_is_param green
+corpus-02	corpus	pending	add status output port + always_comb decoder to fifo.sv (no new AST class — ProceduralBlockSyntax already covered, kind=AlwaysCombBlock)	0	pass	score unchanged at 0; test_queries A2 + S1-port-set tests updated for new status port
+S09	sem	pending	S8 ProceduralBlockSyntax(always_comb) promotion: role=always_comb, drives/reads, no sensitive_to	0	pass	cone_of_influence('fifo.status') reaches fifo.count and fifo.DEPTH; sensitivity_of(always_comb)==[]

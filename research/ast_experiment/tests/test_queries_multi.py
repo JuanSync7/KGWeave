@@ -250,6 +250,29 @@ def test_graph_query_connects_edge_payload_filter(multi_bundle):
     assert out == ["top.clk"]
 
 
+def test_s8_always_comb_cone_of_status(multi_bundle):
+    """S8: always_comb is promoted (drives/reads with no sensitive_to).
+
+    The fifo.status output is driven by an always_comb that reads
+    fifo.full / fifo.empty (themselves derived from fifo.count and fifo.DEPTH).
+    cone_of_influence('fifo.status') therefore reaches count and DEPTH.
+    """
+    _tree, _comp, graph = multi_bundle
+    from scripts.semantic import cone_of_influence, queryable_nodes, sensitivity_of
+
+    # always_comb must be promoted with role='always_comb' and ZERO sensitive_to.
+    acombs = [n for n in queryable_nodes(graph)
+              if n.get("semantic", {}).get("role") == "always_comb"]
+    assert len(acombs) == 1, f"expected 1 always_comb, got {len(acombs)}"
+    assert sensitivity_of(graph, acombs[0]["id"]) == []
+
+    seen = cone_of_influence(graph, "fifo.status")
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    paths = {by_id[i].get("semantic", {}).get("path") for i in seen}
+    assert "fifo.count" in paths
+    assert "fifo.DEPTH" in paths
+
+
 def test_s7_param_overrides_per_instance(multi_bundle):
     """S7: param_overrides(instance_path) returns the resolved override map.
 
