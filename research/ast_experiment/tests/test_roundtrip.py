@@ -23,6 +23,7 @@ TOP = HERE / "top.sv"
 PKG = HERE / "fifo_pkg.sv"
 IFACE = HERE / "fifo_if.sv"
 TB = HERE / "tb_fifo.sv"
+BIND = HERE / "fifo_asserts.sv"
 COVERED = HERE / "covered_classes.json"
 
 
@@ -553,3 +554,34 @@ def test_iter025_named_type(fifo_tree_post_import):
     reparsed, _ = _roundtrip(fifo_tree_post_import)
     _assert_class_roundtrip(fifo_tree_post_import.root, reparsed.root, "NamedTypeSyntax")
     _mark_covered({"NamedTypeSyntax"})
+
+
+@pytest.fixture(scope="module")
+def bind_tree():
+    return pyslang.SyntaxTree.fromText(BIND.read_text())
+
+
+def test_bind_parse_baseline(bind_tree):
+    """Sanity: pyslang parses fifo_asserts.sv with no diagnostics."""
+    diags = list(bind_tree.diagnostics)
+    assert not diags, f"fifo_asserts.sv parse diagnostics: {diags}"
+
+
+def test_bind_full_token_text_stream(bind_tree):
+    """Round-trip on fifo_asserts.sv: token text stream is byte-equal."""
+    reparsed, _ = _roundtrip(bind_tree)
+    assert _token_text_stream(reparsed.root) == _token_text_stream(bind_tree.root)
+
+
+def test_iter030_bind_directive(bind_tree):
+    """iter-030: BindDirectiveSyntax + CompilationUnitSyntax round-trip byte-equal.
+
+    The bind directive sits at file scope outside any module (so the tree
+    root is a CompilationUnitSyntax rather than a ModuleDeclarationSyntax).
+    The directive carries the target module name (``fifo``) and a full
+    HierarchyInstantiationSyntax for the binder (``fifo_asserts u_asserts(...)``).
+    """
+    reparsed, _ = _roundtrip(bind_tree)
+    for cls in ("BindDirectiveSyntax", "CompilationUnitSyntax"):
+        _assert_class_roundtrip(bind_tree.root, reparsed.root, cls)
+    _mark_covered({"BindDirectiveSyntax", "CompilationUnitSyntax"})
