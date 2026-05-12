@@ -18,6 +18,11 @@ Sources under test:
 Total pytest run: **34 passed, 0 failed, 0 skipped**
 (`uv run -- python -m pytest research/ast_experiment/tests/ -x -q`).
 
+**Eval-suite scorecard:** see [`EVAL_RESULT.md`](EVAL_RESULT.md).
+After the eval loop, the suite stands at **71 passed** (34 prior + 6 named-tool
+tests + 3 `graph_query` tests + 28 runnable eval queries A..J), score=0,
+leaks=0, round-trip still byte-equal.
+
 ## Round-trip proof statement (combined corpus)
 
 For every pyslang `SyntaxNode` class touched by `fifo.sv` **or** `top.sv` (52

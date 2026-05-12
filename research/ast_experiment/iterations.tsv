@@ -25,3 +25,11 @@ S05	sem	pending	S5 SystemName($clog2) promotion: reads(argument identifier)	0	pa
 018	struct	pending	cover NamedPortConnectionSyntax — combined structural score=0	0	pass	combined corpus structural score reaches 0
 S06	sem	pending	hierarchical-path keying for semantic_name_index; S1..S5 per-module	0	pass	keys become "<module>.<name>"; find_by_name accepts paths or unambiguous bare names; module_scope_by_name resolved via InstanceBodySymbol.name
 S07	sem	pending	S6 HierarchyInstantiation promotion: instance + of_module + connects; cone_of_influence crosses connects	0	pass	test_queries_multi.py: instantiates_of(top), module_of(top.u_fifo), port_connections, cross-hierarchy cone (fifo.count → top.push/pop/rst_n)
+T01	tool	b2bb4b1	port_connections(instance_path) returns list of {port, src_path} from connects edges	0	pass	typed-edge projection; payload.instance + payload.port; eval Group G3
+T02	tool	b2bb4b1	sensitivity_of(always_id) returns list of {signal, edge} from sensitive_to edges	0	pass	powers eval Group C1/C2
+T03	tool	b2bb4b1	width_of(net_or_port_path) returns packed/unpacked/data_type via typed child-edge walk	0	pass	reconstructs from VariableDimensionSyntax + DeclaratorSyntax SyntaxList; no regex
+T04	tool	b2bb4b1	default_value_of(param_path) extracts EqualsValueClauseSyntax expression text	0	pass	powers eval Group F1
+T05	tool	b2bb4b1	instances_of(module_name) returns sorted instance paths via of_module edge reverse	0	pass	typed-edge reverse traversal
+T06	tool	b2bb4b1	forward_cone(name) symmetric BFS counterpart to cone_of_influence	0	pass	follows reads-in then drives-out, crosses connects in both directions; eval Group D2/D3/H1/H3
+G01	gq	ccc83fa	graph_query(pattern) typed multi-hop walker — match + follow[edge/direction/filter/payload_edge] + return	0	pass	powers 3 multi-hop tests; no regex; lift now also tags Tokens with source.line (round-trip unaffected)
+E01	eval	pending	convert EVAL_QUERIES.md groups A..J into 28 pytest cases in tests/test_eval_queries.py	0	pass	71 passed total (34 prior + 6 tool + 3 gq + 28 eval); score=0; leaks=0; round-trip green
