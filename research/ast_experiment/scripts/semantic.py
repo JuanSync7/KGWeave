@@ -324,6 +324,7 @@ def promote(
     compilation: Any,
     *,
     node_offset: int | None = None,
+    phase: str | None = None,
 ) -> None:
     """Apply S1..S5 (per-module) plus S6 (hierarchical instantiation) in a
     single DFS over the syntax tree, mutating ``graph``.
@@ -440,7 +441,10 @@ def promote(
         if popped_module:
             state["module_stack"].pop()
 
-    visit_pass1(syntax_tree.root)
+    if phase in (None, "pass1"):
+        visit_pass1(syntax_tree.root)
+    if phase == "pass1":
+        return
 
     # Second pass — rules S2..S6 (need name_index complete).
     state2 = {"idx": 0, "module_stack": []}

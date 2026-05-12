@@ -24,18 +24,16 @@ TOP = HERE / "top.sv"
 
 @pytest.fixture(scope="module")
 def multi_bundle():
-    # Concatenate the two source files into one syntax tree so the structural
-    # lift and the semantic walk share a single DFS index space.
-    combined = TOP.read_text() + "\n" + FIFO.read_text()
-    tree = pyslang.SyntaxTree.fromText(combined)
-    comp = pyslang.Compilation()
-    comp.addSyntaxTree(tree)
-    from scripts.lift import lift
-    from scripts.semantic import promote
+    # Production multi-file path: each SV file is its own SyntaxTree, lifted
+    # and promoted into one shared graph. The pre-build_kg fixture used a
+    # string-concat hack that bypassed the real multi-file code path and
+    # masked the cross-tree merge bug.
+    from scripts.build import build_kg
 
-    graph = lift(tree)
-    promote(graph, tree, comp)
-    return tree, comp, graph
+    graph, trees, comp = build_kg([TOP, FIFO])
+    # Pick the first tree as the "round-trip representative" — round-trip
+    # tests still exercise the per-tree lift+emit invariant.
+    return trees[0], comp, graph
 
 
 def _queryable_by_role(graph, role):
@@ -45,9 +43,14 @@ def _queryable_by_role(graph, role):
 
 
 def test_multi_roundtrip_after_promote(multi_bundle):
-    """Round-trip must remain green after multi-module promotion."""
+    """Round-trip on the first promoted tree must remain green.
+
+    ``emit(graph)`` walks ``graph['order'][0]`` — the first tree's root — so
+    the byte-equal check applies to that tree only. The build_kg multi-file
+    path stores per-tree roots in ``graph['order']`` so individual files can
+    still be re-emitted independently."""
     tree, _comp, graph = multi_bundle
-    from scripts.unlift import emit
+    from scripts.unlift import unlift, emit  # noqa: PLC0415
     from test_roundtrip import _token_text_stream  # noqa: PLC0415
 
     emitted = emit(graph)

@@ -50,16 +50,27 @@ def build_kg(sv_paths: list[Path]) -> tuple[dict[str, Any], list[Any], Any]:
         n = seen_prefixes.get(stem, 0)
         seen_prefixes[stem] = n + 1
         prefix = stem if n == 0 else f"{stem}{n}"
-        tree = pyslang.SyntaxTree.fromFile(str(path_obj))
+        # ``fromText`` (rather than ``fromFile``) is intentional: pyslang's
+        # file-loader injects a synthetic EOF token with extra trivia that
+        # diverges from ``SyntaxTree.fromText(path.read_text())`` token
+        # streams — keeping the two paths uniform preserves the byte-equal
+        # round-trip invariant.
+        tree = pyslang.SyntaxTree.fromText(path_obj.read_text())
         compilation.addSyntaxTree(tree)
         trees.append(tree)
         prefixes.append(prefix)
         offsets.append(len(graph["nodes"]))
         lift(tree, graph=graph, id_prefix=prefix)
 
-    # Phase 2: promote each tree against the now-final Compilation; the
-    # shared semantic_name_index lets cross-tree references resolve.
+    # Phase 2: run S1 (pass1) across EVERY tree so the shared
+    # semantic_name_index is fully populated before any tree's S6 looks up
+    # ``module:<name>`` for a cross-file instantiation.
     for tree, off in zip(trees, offsets):
-        promote(graph, tree, compilation, node_offset=off)
+        promote(graph, tree, compilation, node_offset=off, phase="pass1")
+
+    # Phase 3: run S2..S6 (pass2) across every tree. S6 can now resolve
+    # cross-file ``of_module`` targets because pass1 already promoted them.
+    for tree, off in zip(trees, offsets):
+        promote(graph, tree, compilation, node_offset=off, phase="pass2")
 
     return graph, trees, compilation
