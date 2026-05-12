@@ -5,3 +5,4 @@ iteration	commit	hypothesis	score	status	summary
 003	pending	implicit ANSI port + variable port header round-trip	42	pass	covered ImplicitAnsiPortSyntax/VariablePortHeaderSyntax
 004	pending	parameter decl + integer type + declarator + equals clause round-trip	38	pass	covered ParameterDeclaration/IntegerType/Declarator/EqualsValueClause
 005	pending	data decl + variable dim + range dim specifier round-trip	35	pass	covered DataDeclaration/VariableDimension/RangeDimensionSpecifier
+006	pending	continuous assign + expression statement round-trip	33	pass	covered ContinuousAssign/ExpressionStatement

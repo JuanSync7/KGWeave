@@ -1,8 +1,10 @@
 [
   "AnsiPortListSyntax",
+  "ContinuousAssignSyntax",
   "DataDeclarationSyntax",
   "DeclaratorSyntax",
   "EqualsValueClauseSyntax",
+  "ExpressionStatementSyntax",
   "ImplicitAnsiPortSyntax",
   "IntegerTypeSyntax",
   "ModuleDeclarationSyntax",

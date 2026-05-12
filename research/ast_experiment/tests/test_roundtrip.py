@@ -173,6 +173,14 @@ def test_data_decl_family(original_tree):
     })
 
 
+def test_continuous_assign(original_tree):
+    """iter-006: continuous assign + expression statement round-trip."""
+    reparsed, _ = _roundtrip(original_tree)
+    for cls in ("ContinuousAssignSyntax", "ExpressionStatementSyntax"):
+        _assert_class_roundtrip(original_tree.root, reparsed.root, cls)
+    _mark_covered({"ContinuousAssignSyntax", "ExpressionStatementSyntax"})
+
+
 def test_full_token_text_stream(original_tree):
     """Strongest oracle: every Token's rawText survives the round-trip in DFS
     order (modulo trivia after the final token, which pyslang drops upstream)."""
