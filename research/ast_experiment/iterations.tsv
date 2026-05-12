@@ -14,3 +14,4 @@ iteration	layer	commit	hypothesis	score	status	summary
 012	struct	pending	bit/element/range select round-trip	8	pass	covered BitSelect/ElementSelect/RangeSelect
 013	struct	pending	system name + invocation + argument list + ordered argument round-trip	4	pass	covered SystemName/InvocationExpression/ArgumentList/OrderedArgument
 014	struct	pending	simple property/sequence + universal SyntaxNode + Token round-trip	0	pass	covered SimplePropertyExpr/SimpleSequenceExpr/SyntaxNode/Token — structural score=0
+S01	sem	pending	S1 ModuleDeclaration promotion: module + has_port/has_param/has_net edges; round-trip preserved	0	pass	scripts/semantic.py + tests/test_queries.py; S2..S5 skipped pending
