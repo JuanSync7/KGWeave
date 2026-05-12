@@ -231,6 +231,24 @@ def test_case_family(original_tree):
     _mark_covered({"CaseStatementSyntax", "StandardCaseItemSyntax", "DefaultCaseItemSyntax"})
 
 
+def test_expression_family(original_tree):
+    """iter-010: binary + prefix-unary + parenthesized + concatenation expressions round-trip."""
+    reparsed, _ = _roundtrip(original_tree)
+    for cls in (
+        "BinaryExpressionSyntax",
+        "PrefixUnaryExpressionSyntax",
+        "ParenthesizedExpressionSyntax",
+        "ConcatenationExpressionSyntax",
+    ):
+        _assert_class_roundtrip(original_tree.root, reparsed.root, cls)
+    _mark_covered({
+        "BinaryExpressionSyntax",
+        "PrefixUnaryExpressionSyntax",
+        "ParenthesizedExpressionSyntax",
+        "ConcatenationExpressionSyntax",
+    })
+
+
 def test_full_token_text_stream(original_tree):
     """Strongest oracle: every Token's rawText survives the round-trip in DFS
     order (modulo trivia after the final token, which pyslang drops upstream)."""
