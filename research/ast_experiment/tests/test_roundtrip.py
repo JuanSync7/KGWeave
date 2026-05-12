@@ -139,6 +139,24 @@ def test_port_family(original_tree):
     _mark_covered({"ImplicitAnsiPortSyntax", "VariablePortHeaderSyntax"})
 
 
+def test_param_decl_family(original_tree):
+    """iter-004: parameter decl + integer type + declarator + equals clause."""
+    reparsed, _ = _roundtrip(original_tree)
+    for cls in (
+        "ParameterDeclarationSyntax",
+        "IntegerTypeSyntax",
+        "DeclaratorSyntax",
+        "EqualsValueClauseSyntax",
+    ):
+        _assert_class_roundtrip(original_tree.root, reparsed.root, cls)
+    _mark_covered({
+        "ParameterDeclarationSyntax",
+        "IntegerTypeSyntax",
+        "DeclaratorSyntax",
+        "EqualsValueClauseSyntax",
+    })
+
+
 def test_full_token_text_stream(original_tree):
     """Strongest oracle: every Token's rawText survives the round-trip in DFS
     order (modulo trivia after the final token, which pyslang drops upstream)."""

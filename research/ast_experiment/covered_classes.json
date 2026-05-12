@@ -1,8 +1,12 @@
 [
   "AnsiPortListSyntax",
+  "DeclaratorSyntax",
+  "EqualsValueClauseSyntax",
   "ImplicitAnsiPortSyntax",
+  "IntegerTypeSyntax",
   "ModuleDeclarationSyntax",
   "ModuleHeaderSyntax",
+  "ParameterDeclarationSyntax",
   "ParameterPortListSyntax",
   "VariablePortHeaderSyntax"
 ]

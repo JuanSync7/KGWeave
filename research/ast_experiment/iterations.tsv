@@ -3,3 +3,4 @@ iteration	commit	hypothesis	score	status	summary
 001	pending	universal structural lift/unlift (class+kind+tokens+trivia) gives lossless class-stream round-trip	47	pass	scripts/lift.py + scripts/unlift.py + conftest.py; xfail removed; ModuleDeclarationSyntax covered
 002	pending	module header + param port list + ANSI port list round-trip via per-class token-text fingerprint	44	pass	added _assert_class_roundtrip helper + token-text-stream oracle; covered ModuleHeader/ParameterPortList/AnsiPortList
 003	pending	implicit ANSI port + variable port header round-trip	42	pass	covered ImplicitAnsiPortSyntax/VariablePortHeaderSyntax
+004	pending	parameter decl + integer type + declarator + equals clause round-trip	38	pass	covered ParameterDeclaration/IntegerType/Declarator/EqualsValueClause
