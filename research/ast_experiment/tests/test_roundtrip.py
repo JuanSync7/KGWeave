@@ -19,6 +19,7 @@ import pytest
 
 HERE = Path(__file__).resolve().parent.parent
 SRC = HERE / "fifo.sv"
+TOP = HERE / "top.sv"
 COVERED = HERE / "covered_classes.json"
 
 
@@ -43,6 +44,11 @@ def _mark_covered(classes):
 @pytest.fixture(scope="module")
 def original_tree():
     return pyslang.SyntaxTree.fromText(SRC.read_text())
+
+
+@pytest.fixture(scope="module")
+def top_tree():
+    return pyslang.SyntaxTree.fromText(TOP.read_text())
 
 
 def test_parse_baseline(original_tree):
@@ -318,3 +324,24 @@ def test_full_token_text_stream(original_tree):
     orig = _token_text_stream(original_tree.root)
     rt = _token_text_stream(reparsed.root)
     assert orig == rt, "Token text streams diverge"
+
+
+def test_top_parse_baseline(top_tree):
+    """Sanity: pyslang can parse top.sv with no diagnostics."""
+    diags = list(top_tree.diagnostics)
+    assert not diags, f"top.sv baseline parse has diagnostics: {diags}"
+
+
+def test_top_full_token_text_stream(top_tree):
+    """Round-trip on top.sv: full token text stream is byte-equal."""
+    reparsed, _ = _roundtrip(top_tree)
+    orig = _token_text_stream(top_tree.root)
+    rt = _token_text_stream(reparsed.root)
+    assert orig == rt, "top.sv token text streams diverge"
+
+
+def test_iter015_hierarchy_instantiation(top_tree):
+    """iter-015: HierarchyInstantiationSyntax round-trips byte-equal."""
+    reparsed, _ = _roundtrip(top_tree)
+    _assert_class_roundtrip(top_tree.root, reparsed.root, "HierarchyInstantiationSyntax")
+    _mark_covered({"HierarchyInstantiationSyntax"})

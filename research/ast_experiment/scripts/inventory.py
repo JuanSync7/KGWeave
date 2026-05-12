@@ -17,7 +17,7 @@ from typing import Any
 import pyslang
 
 HERE = Path(__file__).resolve().parent.parent
-SRC = HERE / "fifo.sv"
+SRCS = [HERE / "fifo.sv", HERE / "top.sv"]
 OUT = HERE / "elab_dump.json"
 CLASSES_OUT = HERE / "ast_classes.json"
 
@@ -81,13 +81,14 @@ def collect_classes(tree: dict[str, Any], bag: set[str]) -> None:
 
 
 def main() -> int:
-    text = SRC.read_text()
-    syntax_tree = pyslang.SyntaxTree.fromText(text)
-    root = syntax_tree.root
-    dump = walk_syntax(root)
-
+    dump: dict[str, Any] = {}
     classes: set[str] = set()
-    collect_classes(dump, classes)
+    for src in SRCS:
+        text = src.read_text()
+        syntax_tree = pyslang.SyntaxTree.fromText(text)
+        sub = walk_syntax(syntax_tree.root)
+        dump[src.name] = sub
+        collect_classes(sub, classes)
 
     OUT.write_text(json.dumps(dump, indent=2))
     CLASSES_OUT.write_text(json.dumps(sorted(classes), indent=2))
