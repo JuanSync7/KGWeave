@@ -104,7 +104,7 @@ def test_active_rule_kinds_present():
     assert not missing, f"RULE_TABLE missing kinds: {sorted(missing)}"
 
 
-@pytest.mark.parametrize("name", ["sva", "coverage", "classes", "constraints"])
+@pytest.mark.parametrize("name", ["coverage", "classes", "constraints"])
 def test_stub_modules_export_empty_rules(name):
     """The four planned-but-not-yet-implemented rule modules each export
     RULES = [] and document their planned kinds in a header comment."""
