@@ -16,6 +16,7 @@ Re-exports (preserved from the old monolithic `scripts/semantic.py`)::
 
 from __future__ import annotations
 
+from .dispatch import promote
 from .queries import (
     neighbors,
     find_by_name,
@@ -36,6 +37,7 @@ from .queries import (
 )
 
 __all__ = [
+    "promote",
     "neighbors", "find_by_name",
     "find_drivers", "cone_of_influence", "forward_cone", "reads_of",
     "port_connections", "instances_of", "param_overrides",
@@ -43,5 +45,4 @@ __all__ = [
     "sensitivity_of",
     "width_of", "default_value_of",
     "graph_query", "queryable_nodes",
-    # promote is added in split-04 when dispatch.py lands.
 ]
