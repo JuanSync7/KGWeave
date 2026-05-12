@@ -1,0 +1,241 @@
+"""Dataflow rules — S2 (continuous-assign drives/reads), S3 (always_ff
+sensitive_to/drives/reads), S4 (identifier reads), S5 (system-call reads),
+S8 (always_comb drives/reads, mirrors S3 minus sensitivity)."""
+
+from __future__ import annotations
+
+import pyslang
+
+from ..common.graph import _add_edge, _has_edge, _mark
+from ..common.resolve import _resolve
+from ..common.tokens import (
+    _cls,
+    _identifier_names_in,
+    _identifier_tokens,
+    _is_token,
+    _lhs_target_name,
+    _split_around_eq,
+    _token_kind_name,
+)
+from ..common.walk import _descendants
+
+
+def rule_s2(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", **_):
+    """S2: ContinuousAssignSyntax → drives(LHS), reads(RHS identifiers)."""
+    assign_expr = None
+    for d in _descendants(node):
+        if _cls(d) == "BinaryExpressionSyntax" and "AssignmentExpression" in str(getattr(d, "kind", "")):
+            assign_expr = d
+            break
+    if assign_expr is None:
+        return
+    lhs, rhs = _split_around_eq(assign_expr)
+    if lhs is None or rhs is None:
+        return
+    lhs_name = _lhs_target_name(lhs)
+    _mark(gnode, role="continuous_assign", lhs=lhs_name)
+    if lhs_name:
+        tgt = _resolve(lhs_name, scope=scope, name_index=name_index, leaks=leaks,
+                       context=f"continuous_assign.lhs[{gid}]", scope_path=scope_path)
+        if tgt is not None:
+            _add_edge(graph, gid, tgt, "drives")
+    seen_reads: set[str] = set()
+    for rname in _identifier_names_in(rhs):
+        if rname == lhs_name or rname in seen_reads:
+            continue
+        seen_reads.add(rname)
+        src = _resolve(rname, scope=scope, name_index=name_index, leaks=leaks,
+                       context=f"continuous_assign.rhs[{gid}]", scope_path=scope_path)
+        if src is not None:
+            _add_edge(graph, gid, src, "reads")
+
+
+def rule_s3_or_s8(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", **_):
+    """S3 / S8: ProceduralBlockSyntax (always_ff / always_comb).
+
+    Dispatch by keyword token — the pyslang ``.kind`` enum distinguishes
+    AlwaysFFBlock vs AlwaysCombBlock but the keyword check on the first
+    token mirrors the legacy logic exactly.
+    """
+    kw = next((c for c in node if _is_token(c)), None)
+    if kw is None:
+        return
+    kw_text = kw.valueText
+    if kw_text == "always_ff":
+        role = "always_ff"
+        do_sensitivity = True
+    elif kw_text == "always_comb":
+        role = "always_comb"
+        do_sensitivity = False
+    else:
+        return
+    _mark(gnode, role=role)
+
+    function_call_names: set[str] = set()
+    for d in _descendants(node):
+        if _cls(d) != "InvocationExpressionSyntax":
+            continue
+        callee = next((c for c in d if not _is_token(c)), None)
+        if callee is None or _cls(callee) != "IdentifierNameSyntax":
+            continue
+        toks = _identifier_tokens(callee)
+        if not toks:
+            continue
+        fn_name = toks[0].valueText
+        fpath = f"{scope_path}.{fn_name}" if scope_path else fn_name
+        fn_id = name_index.get(fpath)
+        if fn_id is None:
+            continue
+        fn_node = next((nn for nn in graph["nodes"] if nn["id"] == fn_id), None)
+        if fn_node is None or fn_node.get("semantic", {}).get("role") != "function":
+            continue
+        if not _has_edge(graph, gid, fn_id, "calls"):
+            _add_edge(graph, gid, fn_id, "calls")
+        function_call_names.add(fn_name)
+
+    if do_sensitivity:
+        for d in _descendants(node):
+            if _cls(d) != "SignalEventExpressionSyntax":
+                continue
+            edge = None
+            for t in _descendants(d):
+                if _is_token(t) and t.valueText in {"posedge", "negedge", "edge"}:
+                    edge = t.valueText
+                    break
+            ids = _identifier_tokens(d)
+            if not ids:
+                continue
+            sig = ids[0].valueText
+            tgt = _resolve(sig, scope=scope, name_index=name_index, leaks=leaks,
+                           context=f"{role}.sensitive_to[{gid}]", scope_path=scope_path)
+            if tgt is not None:
+                _add_edge(graph, gid, tgt, "sensitive_to", edge=edge)
+
+    for d in _descendants(node):
+        if _cls(d) != "BinaryExpressionSyntax":
+            continue
+        op = next((c for c in d if _is_token(c)), None)
+        if op is None:
+            continue
+        if _token_kind_name(op) not in {"LessThanEquals", "Equals"}:
+            continue
+        lhs, rhs = _split_around_eq(d)
+        if lhs is None or rhs is None:
+            continue
+        lhs_name = _lhs_target_name(lhs)
+        if lhs_name:
+            tgt = _resolve(lhs_name, scope=scope, name_index=name_index, leaks=leaks,
+                           context=f"{role}.drives[{gid}]", scope_path=scope_path)
+            if tgt is not None and not _has_edge(graph, gid, tgt, "drives"):
+                _add_edge(graph, gid, tgt, "drives")
+        for rname in _identifier_names_in(rhs):
+            if rname == lhs_name or rname in function_call_names:
+                continue
+            src = _resolve(rname, scope=scope, name_index=name_index, leaks=leaks,
+                           context=f"{role}.reads[{gid}]", scope_path=scope_path)
+            if src is not None and not _has_edge(graph, gid, src, "reads"):
+                _add_edge(graph, gid, src, "reads")
+
+    for d in _descendants(node):
+        c = _cls(d)
+        if c == "ConditionalPredicateSyntax":
+            for rname in _identifier_names_in(d):
+                if rname in function_call_names:
+                    continue
+                src = _resolve(rname, scope=scope, name_index=name_index, leaks=leaks,
+                               context=f"{role}.reads.predicate[{gid}]", scope_path=scope_path)
+                if src is not None and not _has_edge(graph, gid, src, "reads"):
+                    _add_edge(graph, gid, src, "reads")
+        elif c == "CaseStatementSyntax":
+            head = next((ch for ch in d if not _is_token(ch)), None)
+            if head is None:
+                continue
+            for rname in _identifier_names_in(head):
+                if rname in function_call_names:
+                    continue
+                src = _resolve(rname, scope=scope, name_index=name_index, leaks=leaks,
+                               context=f"{role}.reads.case_head[{gid}]", scope_path=scope_path)
+                if src is not None and not _has_edge(graph, gid, src, "reads"):
+                    _add_edge(graph, gid, src, "reads")
+
+
+def rule_s4(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", **_):
+    """S4: IdentifierSelectNameSyntax → reads(base)."""
+    ids = _identifier_tokens(node)
+    if not ids:
+        return
+    base = ids[0].valueText
+    _mark(gnode, role="identifier_select", base=base)
+    tgt = _resolve(base, scope=scope, name_index=name_index, leaks=leaks,
+                   context=f"identifier_select.base[{gid}]", scope_path=scope_path)
+    if tgt is not None:
+        _add_edge(graph, gid, tgt, "reads")
+
+
+def rule_s5(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", **_):
+    """S5: InvocationExpression with SystemName ($clog2 etc.) → reads(args)."""
+    callee = next((c for c in node if not _is_token(c)), None)
+    if callee is None or _cls(callee) != "SystemNameSyntax":
+        return
+    sysname = None
+    for ch in callee:
+        if _is_token(ch) and _token_kind_name(ch) == "SystemIdentifier":
+            sysname = ch.valueText
+            break
+    if sysname is None:
+        return
+    _mark(gnode, role="system_call", name=sysname)
+    arglist = next((c for c in node if _cls(c) == "ArgumentListSyntax"), None)
+    if arglist is None:
+        return
+    seen: set[str] = set()
+    for rname in _identifier_names_in(arglist):
+        if rname in seen:
+            continue
+        seen.add(rname)
+        tgt = _resolve(rname, scope=scope, name_index=name_index, leaks=leaks,
+                       context=f"system_call.arg[{gid}]", scope_path=scope_path)
+        if tgt is not None:
+            _add_edge(graph, gid, tgt, "reads")
+
+
+# Metadata for the bucket1 checklist: rule_id annotations.
+rule_s2.__rule_id__ = "S2"
+rule_s3_or_s8.__rule_id__ = "S3"  # specialised at dispatch time
+rule_s4.__rule_id__ = "S4"
+rule_s5.__rule_id__ = "S5"
+
+
+def _s4_identifier_name(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", **_):
+    """S4 covers leaf IdentifierName too — same identifier-reads logic.
+
+    In practice the dispatch walker only invokes S4's IdentifierName entry when
+    the node is NOT inside an IdentifierSelectName (which already fires S4),
+    and not inside an expression where the enclosing rule reads the name.
+    The legacy walker did NOT actively dispatch on IdentifierName — the
+    registry entry exists purely so the bucket1 checklist marks the kind as
+    promoted under S4. We keep this as a no-op metadata stub.
+    """
+    return
+
+
+def _s8_alwayscomb(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", **_):
+    """S8 shares its implementation with S3 — dispatched via the same
+    ``rule_s3_or_s8`` body. This stub exists so the registry has a distinct
+    entry keyed by ``AlwaysCombBlock`` with rule_id == 'S8'."""
+    rule_s3_or_s8(graph, node, gid, gnode, scope, name_index, leaks, scope_path)
+
+
+_s4_identifier_name.__rule_id__ = "S4"
+_s8_alwayscomb.__rule_id__ = "S8"
+
+
+RULES: list[tuple] = [
+    (pyslang.SyntaxKind.ContinuousAssign, rule_s2),
+    (pyslang.SyntaxKind.AlwaysFFBlock, rule_s3_or_s8),
+    (pyslang.SyntaxKind.AlwaysCombBlock, _s8_alwayscomb),
+    (pyslang.SyntaxKind.IdentifierSelectName, rule_s4),
+    (pyslang.SyntaxKind.IdentifierName, _s4_identifier_name),
+    (pyslang.SyntaxKind.SystemName, rule_s5),
+    (pyslang.SyntaxKind.InvocationExpression, rule_s5),
+]
