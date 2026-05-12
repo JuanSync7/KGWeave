@@ -19,7 +19,7 @@ TOP = HERE / "top.sv"
 def test_build_kg_unifies_cross_file_of_module_edge():
     """build_kg([FIFO, TOP]) must materialise the top.u_fifo --of_module--> fifo edge."""
     from research.ast_experiment.src.build import build_kg
-    from scripts.semantic import find_by_name, neighbors
+    from research.ast_experiment.src.semantic import find_by_name, neighbors
 
     graph, _trees, _comp = build_kg([FIFO, TOP])
 
@@ -44,7 +44,7 @@ def test_build_kg_node_ids_globally_unique():
 def test_build_kg_both_modules_promoted():
     """Both 'fifo' and 'top' modules are promoted under the same name_index."""
     from research.ast_experiment.src.build import build_kg
-    from scripts.semantic import find_by_name
+    from research.ast_experiment.src.semantic import find_by_name
 
     graph, _trees, _comp = build_kg([FIFO, TOP])
     assert find_by_name(graph, "fifo")["semantic"]["role"] == "module"

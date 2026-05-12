@@ -55,7 +55,7 @@ def graph(kg):
 
 
 def _queryable(graph):
-    from scripts.semantic import queryable_nodes
+    from research.ast_experiment.src.semantic import queryable_nodes
 
     return list(queryable_nodes(graph))
 

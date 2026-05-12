@@ -24,7 +24,7 @@ def fixture_bundle():
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
     from research.ast_experiment.src.lift import lift
-    from scripts.semantic import promote
+    from research.ast_experiment.src.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -32,7 +32,7 @@ def fixture_bundle():
 
 
 def _queryable_by_role(graph, role):
-    from scripts.semantic import queryable_nodes
+    from research.ast_experiment.src.semantic import queryable_nodes
 
     return [n for n in queryable_nodes(graph) if n.get("semantic", {}).get("role") == role]
 
@@ -70,7 +70,7 @@ def test_s1_module_promotes_ports_params_nets(fixture_bundle):
 def test_s2_continuous_assign_drives_and_reads(fixture_bundle):
     """S2: who_drives('dout') yields exactly one continuous_assign node."""
     _tree, _comp, graph = fixture_bundle
-    from scripts.semantic import find_drivers
+    from research.ast_experiment.src.semantic import find_drivers
 
     drivers = find_drivers(graph, "dout")
     assert len(drivers) == 1
@@ -79,7 +79,7 @@ def test_s2_continuous_assign_drives_and_reads(fixture_bundle):
     full_drivers = find_drivers(graph, "full")
     assert len(full_drivers) == 1
     # The 'full' assign reads `count` (and the param DEPTH via name resolution).
-    from scripts.semantic import neighbors
+    from research.ast_experiment.src.semantic import neighbors
 
     reads = neighbors(graph, full_drivers[0]["id"], edge_type="reads", direction="out")
     read_names = {r["semantic"].get("name") for r in reads}
@@ -93,7 +93,7 @@ def test_s3_always_ff_sensitivity_and_drives(fixture_bundle):
     always = _queryable_by_role(graph, "always_ff")
     assert len(always) == 1
     aff = always[0]
-    from scripts.semantic import neighbors
+    from research.ast_experiment.src.semantic import neighbors
 
     sens = neighbors(graph, aff["id"], edge_type="sensitive_to", direction="out")
     sens_names = {s["semantic"].get("name") for s in sens}
@@ -119,7 +119,7 @@ def test_s4_identifier_select_reads_base(fixture_bundle):
     bases = {s["semantic"]["base"] for s in selects}
     assert {"mem", "rd_ptr", "wr_ptr"} <= bases
     # mem and rd_ptr appear in the same expression — both must have a reads edge.
-    from scripts.semantic import neighbors
+    from research.ast_experiment.src.semantic import neighbors
 
     for s in selects:
         if s["semantic"]["base"] == "mem":
@@ -132,7 +132,7 @@ def test_s5_system_call_clog2_reads_depth(fixture_bundle):
     _tree, _comp, graph = fixture_bundle
     calls = _queryable_by_role(graph, "system_call")
     assert calls, "expected at least one $clog2 invocation"
-    from scripts.semantic import neighbors
+    from research.ast_experiment.src.semantic import neighbors
 
     for c in calls:
         assert c["semantic"]["name"] == "$clog2"

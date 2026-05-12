@@ -17,6 +17,7 @@ Re-exports (preserved from the old monolithic `scripts/semantic.py`)::
 from __future__ import annotations
 
 from .dispatch import promote
+from .queries import _text_of_subtree  # noqa: F401 — exposed for tests
 from .queries import (
     neighbors,
     find_by_name,
