@@ -109,7 +109,6 @@ def test_s3_always_ff_sensitivity_and_drives(fixture_bundle):
     assert {"push", "pop", "rst_n"} <= read_names
 
 
-@pytest.mark.skip(reason="enabled in sem-04")
 def test_s4_identifier_select_reads_base(fixture_bundle):
     """S4: every IdentifierSelectNameSyntax `reads` its base symbol.
 
