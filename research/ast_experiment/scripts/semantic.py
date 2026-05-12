@@ -114,10 +114,67 @@ def _has_edge(graph: dict[str, Any], src: str, dst: str, etype: str) -> bool:
 
 
 def _module_scope(compilation: Any) -> Any:
+    """Legacy: return the FIRST top instance body. Retained for back-compat;
+    multi-module callers should iterate ``_all_module_scopes``."""
     top = list(compilation.getRoot().topInstances)
     if not top:
         return None
     return top[0].body
+
+
+def _all_module_scopes(compilation: Any) -> list[Any]:
+    """Return every elaborated ``InstanceBodySymbol`` in the compilation.
+
+    Walks every top instance and recursively descends through child instance
+    symbols. The path of each scope is reconstructed by
+    ``_scope_path_of(scope)``.
+    """
+    out: list[Any] = []
+    seen: set[int] = set()
+
+    def visit(scope: Any) -> None:
+        if scope is None:
+            return
+        key = id(scope)
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(scope)
+
+    for inst in compilation.getRoot().topInstances:
+        body = getattr(inst, "body", None)
+        visit(body)
+    return out
+
+
+def _scope_path_of(scope: Any) -> str:
+    """Hierarchical path for an elaborated scope.
+
+    For a top-level module body this is just the module name (e.g. ``"fifo"``
+    or ``"top"``). For a nested instance body it would be the dotted chain
+    ``parent.inst_name.child_inst...`` — pyslang's ``hierarchicalPath`` covers
+    this when available; otherwise fall back to the scope's ``name``.
+    """
+    if scope is None:
+        return ""
+    # Prefer the symbol's elaborated hierarchical path if exposed.
+    for attr in ("hierarchicalPath",):
+        try:
+            v = getattr(scope, attr, None)
+            if isinstance(v, str) and v:
+                # pyslang sometimes uses ``$root.top`` — strip the leading marker.
+                if v.startswith("$root."):
+                    return v[len("$root."):]
+                return v
+        except Exception:
+            pass
+    try:
+        nm = getattr(scope, "name", None)
+        if isinstance(nm, str) and nm:
+            return nm
+    except Exception:
+        pass
+    return ""
 
 
 def _lookup_name(scope: Any, name: str) -> Any | None:
@@ -142,10 +199,23 @@ def _resolve(
     name_index: dict[str, str],
     leaks: list[dict[str, str]],
     context: str,
+    scope_path: str = "",
 ) -> str | None:
-    """Resolve ``name`` to a graph id; record a leak if we fall back."""
+    """Resolve ``name`` to a graph id; record a leak if we fall back.
+
+    Keys in ``name_index`` are hierarchical: ``"<scope_path>.<name>"``. If a
+    bare ``name`` is passed we first expand it against ``scope_path``.
+    """
     sym = _lookup_name(scope, name)
-    nid = name_index.get(name)
+    key = f"{scope_path}.{name}" if scope_path else name
+    nid = name_index.get(key)
+    if nid is None:
+        # Fallback: bare-name lookup across all modules (ambiguous-safe — only
+        # accept if exactly one match). This is the documented "name lookup
+        # with a bare name → expand against current scope" rule.
+        candidates = [v for k, v in name_index.items() if k.endswith("." + name) or k == name]
+        if len(candidates) == 1:
+            nid = candidates[0]
     if nid is None:
         leaks.append({"context": context, "name": name, "reason": "no_promoted_anchor"})
         return None
@@ -234,28 +304,45 @@ def _lhs_target_name(lhs: Any) -> str | None:
 
 
 def promote(graph: dict[str, Any], syntax_tree: Any, compilation: Any) -> None:
-    """Apply S1..S5 in a single DFS over the syntax tree, mutating ``graph``."""
+    """Apply S1..S5 (per-module) plus S6 (hierarchical instantiation) in a
+    single DFS over the syntax tree, mutating ``graph``.
+
+    Identity keys in ``semantic_name_index`` are hierarchical paths
+    (``"<module>.<name>"`` for declarations, ``"<parent>.<inst>"`` for
+    instances). Scopes are sourced from the elaborated
+    ``InstanceBodySymbol`` chain so the chain matches pyslang's elaboration."""
     nodes_list = graph["nodes"]
-    scope = _module_scope(compilation)
     name_index: dict[str, str] = {}
     leaks: list[dict[str, str]] = graph.setdefault("semantic_leaks", [])
 
-    # Pass 1 — index nodes and snapshot per-class subtrees we'll need.
-    # We collect, in DFS order, the dfs_index plus the syntax wrapper *only*
-    # for the duration of the immediate frame.  All decisions are taken
-    # before we leave the frame.
-    port_names: set[str] = set()
+    # Build a lookup from module name → elaborated InstanceBodySymbol (where
+    # available). Compilation may not have top-instance bodies for every
+    # syntactic module (only roots/non-uninstantiated), so we fall back to
+    # ``None`` and rely on the syntactic scope path as the keying source.
+    module_scope_by_name: dict[str, Any] = {}
+    try:
+        for scope in _all_module_scopes(compilation):
+            nm = _scope_path_of(scope).split(".")[-1] if _scope_path_of(scope) else ""
+            if nm and nm not in module_scope_by_name:
+                module_scope_by_name[nm] = scope
+    except Exception:
+        pass
 
-    # First pass: promote module + ports/params/nets, build name_index.
-    # Use a recursive walker with enter/exit so we can track which container
-    # a DeclaratorSyntax sits inside (parameter? data decl? port header?).
+    # Pass 1 — promote modules + ports/params/nets, build name_index with
+    # hierarchical keys. We track the enclosing module name as a string and
+    # use it as the scope path.
+    port_names_by_module: dict[str, set[str]] = {}
+
     state = {
         "idx": 0,
-        "module_gid": None,
+        "module_stack": [],          # list[(gid, module_name)]
         "in_param": 0,
         "in_data": 0,
         "in_port": 0,
     }
+
+    def _cur_module():
+        return state["module_stack"][-1] if state["module_stack"] else (None, "")
 
     def visit_pass1(node):
         idx = state["idx"]
@@ -263,38 +350,47 @@ def promote(graph: dict[str, Any], syntax_tree: Any, compilation: Any) -> None:
         c = _cls(node)
         gid = nodes_list[idx]["id"]
         pushed = None
+        popped_module = False
 
-        if c == "ModuleDeclarationSyntax" and state["module_gid"] is None:
-            state["module_gid"] = gid
+        if c == "ModuleDeclarationSyntax":
             mname = _module_name_of(node)
-            _mark(nodes_list[idx], role="module", name=mname)
+            state["module_stack"].append((gid, mname))
+            popped_module = True
+            _mark(nodes_list[idx], role="module", name=mname, path=mname)
             name_index["module:" + mname] = gid
-        elif c == "ImplicitAnsiPortSyntax" and state["module_gid"] is not None:
-            decl = next((ch for ch in node if _cls(ch) == "DeclaratorSyntax"), None)
-            ids = _identifier_tokens(decl) if decl is not None else []
-            if ids:
-                pname = ids[0].valueText
-                _mark(nodes_list[idx], role="port", name=pname)
-                _add_edge(graph, state["module_gid"], gid, "has_port")
-                name_index[pname] = gid
-                port_names.add(pname)
+            port_names_by_module.setdefault(mname, set())
+        elif c == "ImplicitAnsiPortSyntax":
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                decl = next((ch for ch in node if _cls(ch) == "DeclaratorSyntax"), None)
+                ids = _identifier_tokens(decl) if decl is not None else []
+                if ids:
+                    pname = ids[0].valueText
+                    ppath = f"{mname}.{pname}"
+                    _mark(nodes_list[idx], role="port", name=pname, path=ppath)
+                    _add_edge(graph, mod_gid, gid, "has_port")
+                    name_index[ppath] = gid
+                    port_names_by_module.setdefault(mname, set()).add(pname)
             pushed = "in_port"
         elif c == "ParameterDeclarationSyntax":
             pushed = "in_param"
         elif c == "DataDeclarationSyntax":
             pushed = "in_data"
-        elif c == "DeclaratorSyntax" and state["module_gid"] is not None:
-            ids = _identifier_tokens(node)
-            if ids and state["in_port"] == 0:
-                dname = ids[0].valueText
-                if state["in_param"] > 0:
-                    _mark(nodes_list[idx], role="param", name=dname)
-                    _add_edge(graph, state["module_gid"], gid, "has_param")
-                    name_index[dname] = gid
-                elif state["in_data"] > 0 and dname not in port_names:
-                    _mark(nodes_list[idx], role="net", name=dname)
-                    _add_edge(graph, state["module_gid"], gid, "has_net")
-                    name_index[dname] = gid
+        elif c == "DeclaratorSyntax":
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                ids = _identifier_tokens(node)
+                if ids and state["in_port"] == 0:
+                    dname = ids[0].valueText
+                    dpath = f"{mname}.{dname}"
+                    if state["in_param"] > 0:
+                        _mark(nodes_list[idx], role="param", name=dname, path=dpath)
+                        _add_edge(graph, mod_gid, gid, "has_param")
+                        name_index[dpath] = gid
+                    elif state["in_data"] > 0 and dname not in port_names_by_module.get(mname, set()):
+                        _mark(nodes_list[idx], role="net", name=dname, path=dpath)
+                        _add_edge(graph, mod_gid, gid, "has_net")
+                        name_index[dpath] = gid
 
         if pushed is not None:
             state[pushed] += 1
@@ -307,34 +403,48 @@ def promote(graph: dict[str, Any], syntax_tree: Any, compilation: Any) -> None:
                 visit_pass1(ch)
         if pushed is not None:
             state[pushed] -= 1
+        if popped_module:
+            state["module_stack"].pop()
 
     visit_pass1(syntax_tree.root)
-    _ = state["module_gid"]  # module_gid retained inside state
 
-    # Second pass — rules S2..S5 (need name_index complete).
-    state2 = {"idx": 0}
+    # Second pass — rules S2..S6 (need name_index complete).
+    state2 = {"idx": 0, "module_stack": []}
+
+    def _cur_module2():
+        return state2["module_stack"][-1] if state2["module_stack"] else (None, "")
 
     def visit_pass2(node):
         idx = state2["idx"]
         state2["idx"] += 1
         c = _cls(node)
         gid = nodes_list[idx]["id"]
+        popped = False
+        if c == "ModuleDeclarationSyntax":
+            mname = _module_name_of(node)
+            state2["module_stack"].append((gid, mname))
+            popped = True
+        mod_gid, mname = _cur_module2()
+        scope = module_scope_by_name.get(mname)
+        scope_path = mname
         if c == "ContinuousAssignSyntax":
-            _rule_s2(graph, node, gid, nodes_list[idx], scope, name_index, leaks)
+            _rule_s2(graph, node, gid, nodes_list[idx], scope, name_index, leaks, scope_path)
         elif c == "ProceduralBlockSyntax":
-            _rule_s3(graph, node, gid, nodes_list[idx], scope, name_index, leaks)
+            _rule_s3(graph, node, gid, nodes_list[idx], scope, name_index, leaks, scope_path)
         elif c == "IdentifierSelectNameSyntax":
-            _rule_s4(graph, node, gid, nodes_list[idx], scope, name_index, leaks)
+            _rule_s4(graph, node, gid, nodes_list[idx], scope, name_index, leaks, scope_path)
         elif c == "InvocationExpressionSyntax":
-            _rule_s5(graph, node, gid, nodes_list[idx], scope, name_index, leaks)
-        if _is_token(node):
-            return
-        try:
-            children = list(node)
-        except TypeError:
-            return
-        for ch in children:
-            visit_pass2(ch)
+            _rule_s5(graph, node, gid, nodes_list[idx], scope, name_index, leaks, scope_path)
+        # S6 (HierarchyInstantiationSyntax) is wired in sem-07.
+        if not _is_token(node):
+            try:
+                children = list(node)
+            except TypeError:
+                children = []
+            for ch in children:
+                visit_pass2(ch)
+        if popped:
+            state2["module_stack"].pop()
 
     visit_pass2(syntax_tree.root)
     graph["semantic_name_index"] = name_index
@@ -355,7 +465,7 @@ def _module_name_of(module_syn: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _rule_s2(graph, node, gid, gnode, scope, name_index, leaks):
+def _rule_s2(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):
     # ContinuousAssign wraps a SeparatedList of assignment expressions.
     # Find the first BinaryExpressionSyntax(AssignmentExpression) descendant.
     assign_expr = None
@@ -372,7 +482,7 @@ def _rule_s2(graph, node, gid, gnode, scope, name_index, leaks):
     _mark(gnode, role="continuous_assign", lhs=lhs_name)
     if lhs_name:
         tgt = _resolve(lhs_name, scope=scope, name_index=name_index, leaks=leaks,
-                       context=f"continuous_assign.lhs[{gid}]")
+                       context=f"continuous_assign.lhs[{gid}]", scope_path=scope_path)
         if tgt is not None:
             _add_edge(graph, gid, tgt, "drives")
     seen_reads: set[str] = set()
@@ -381,12 +491,12 @@ def _rule_s2(graph, node, gid, gnode, scope, name_index, leaks):
             continue
         seen_reads.add(rname)
         src = _resolve(rname, scope=scope, name_index=name_index, leaks=leaks,
-                       context=f"continuous_assign.rhs[{gid}]")
+                       context=f"continuous_assign.rhs[{gid}]", scope_path=scope_path)
         if src is not None:
             _add_edge(graph, gid, src, "reads")
 
 
-def _rule_s3(graph, node, gid, gnode, scope, name_index, leaks):
+def _rule_s3(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):
     kw = next((c for c in node if _is_token(c)), None)
     if kw is None or kw.valueText != "always_ff":
         return
@@ -419,7 +529,7 @@ def _rule_s3(graph, node, gid, gnode, scope, name_index, leaks):
             continue
         sig = ids[0].valueText
         tgt = _resolve(sig, scope=scope, name_index=name_index, leaks=leaks,
-                       context=f"always_ff.sensitive_to[{gid}]")
+                       context=f"always_ff.sensitive_to[{gid}]", scope_path=scope_path)
         if tgt is not None:
             _add_edge(graph, gid, tgt, "sensitive_to", edge=edge)
 
@@ -438,14 +548,14 @@ def _rule_s3(graph, node, gid, gnode, scope, name_index, leaks):
         lhs_name = _lhs_target_name(lhs)
         if lhs_name:
             tgt = _resolve(lhs_name, scope=scope, name_index=name_index, leaks=leaks,
-                           context=f"always_ff.drives[{gid}]")
+                           context=f"always_ff.drives[{gid}]", scope_path=scope_path)
             if tgt is not None and not _has_edge(graph, gid, tgt, "drives"):
                 _add_edge(graph, gid, tgt, "drives")
         for rname in _identifier_names_in(rhs):
             if rname == lhs_name:
                 continue
             src = _resolve(rname, scope=scope, name_index=name_index, leaks=leaks,
-                           context=f"always_ff.reads[{gid}]")
+                           context=f"always_ff.reads[{gid}]", scope_path=scope_path)
             if src is not None and not _has_edge(graph, gid, src, "reads"):
                 _add_edge(graph, gid, src, "reads")
 
@@ -455,7 +565,7 @@ def _rule_s3(graph, node, gid, gnode, scope, name_index, leaks):
         if c == "ConditionalPredicateSyntax":
             for rname in _identifier_names_in(d):
                 src = _resolve(rname, scope=scope, name_index=name_index, leaks=leaks,
-                               context=f"always_ff.reads.predicate[{gid}]")
+                               context=f"always_ff.reads.predicate[{gid}]", scope_path=scope_path)
                 if src is not None and not _has_edge(graph, gid, src, "reads"):
                     _add_edge(graph, gid, src, "reads")
         elif c == "CaseStatementSyntax":
@@ -464,24 +574,24 @@ def _rule_s3(graph, node, gid, gnode, scope, name_index, leaks):
                 continue
             for rname in _identifier_names_in(head):
                 src = _resolve(rname, scope=scope, name_index=name_index, leaks=leaks,
-                               context=f"always_ff.reads.case_head[{gid}]")
+                               context=f"always_ff.reads.case_head[{gid}]", scope_path=scope_path)
                 if src is not None and not _has_edge(graph, gid, src, "reads"):
                     _add_edge(graph, gid, src, "reads")
 
 
-def _rule_s4(graph, node, gid, gnode, scope, name_index, leaks):
+def _rule_s4(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):
     ids = _identifier_tokens(node)
     if not ids:
         return
     base = ids[0].valueText
     _mark(gnode, role="identifier_select", base=base)
     tgt = _resolve(base, scope=scope, name_index=name_index, leaks=leaks,
-                   context=f"identifier_select.base[{gid}]")
+                   context=f"identifier_select.base[{gid}]", scope_path=scope_path)
     if tgt is not None:
         _add_edge(graph, gid, tgt, "reads")
 
 
-def _rule_s5(graph, node, gid, gnode, scope, name_index, leaks):
+def _rule_s5(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):
     callee = next((c for c in node if not _is_token(c)), None)
     if callee is None or _cls(callee) != "SystemNameSyntax":
         return
@@ -503,7 +613,7 @@ def _rule_s5(graph, node, gid, gnode, scope, name_index, leaks):
             continue
         seen.add(rname)
         tgt = _resolve(rname, scope=scope, name_index=name_index, leaks=leaks,
-                       context=f"system_call.arg[{gid}]")
+                       context=f"system_call.arg[{gid}]", scope_path=scope_path)
         if tgt is not None:
             _add_edge(graph, gid, tgt, "reads")
 
@@ -511,6 +621,169 @@ def _rule_s5(graph, node, gid, gnode, scope, name_index, leaks):
 # ---------------------------------------------------------------------------
 # Public queries.
 # ---------------------------------------------------------------------------
+
+
+def _rule_s6(graph, node, gid, gnode, scope, name_index, leaks,
+             scope_path="", module_gid=None):
+    """S6: HierarchyInstantiationSyntax → instance + of_module + connects.
+
+    Promotes each hierarchical instance to an ``instance``-role node anchored
+    at ``<scope_path>.<inst_name>``. Edges:
+      * ``<scope_path>.<inst>``   --of_module-->  ``module:<type>``
+      * ``<scope_path>``          --instantiates-->  ``<scope_path>.<inst>``
+      * for each named port connection: ``<scope_path>.<connected_net>``
+        --connects-->  ``<scope_path>.<inst>.<port>``
+    """
+    # First non-token child is the module-type IdentifierName.
+    type_name = None
+    for ch in node:
+        if _is_token(ch):
+            continue
+        toks = _identifier_tokens(ch)
+        if toks:
+            type_name = toks[0].valueText
+            break
+    if type_name is None:
+        return
+    type_node_id = name_index.get("module:" + type_name)
+    # Find every HierarchicalInstanceSyntax under this declaration.
+    for d in _descendants(node):
+        if _cls(d) != "HierarchicalInstanceSyntax":
+            continue
+        # InstanceNameSyntax → first identifier token.
+        inst_name = None
+        for ch in d:
+            if _cls(ch) == "InstanceNameSyntax":
+                toks = _identifier_tokens(ch)
+                if toks:
+                    inst_name = toks[0].valueText
+                break
+        if inst_name is None:
+            continue
+        inst_path = f"{scope_path}.{inst_name}" if scope_path else inst_name
+        # Locate the corresponding graph node for this HierarchicalInstance.
+        # The promote() walker assigned IDs in DFS order matching nodes_list;
+        # we don't have it here, so re-discover by matching id-in-edges.
+        # Simpler: store on the HierarchyInstantiationSyntax node itself, and
+        # also create a virtual instance entry in the name_index.
+        # We anchor the instance node at the HierarchicalInstanceSyntax gid.
+        # Find gid by walking edges to find the dst whose ordinal child matches.
+        hi_gid = _gid_for_subtree(graph, gid, "HierarchicalInstanceSyntax",
+                                   target_inst=inst_name)
+        if hi_gid is None:
+            continue
+        # Mark the instance node.
+        idx = _node_index_by_id(graph, hi_gid)
+        if idx is None:
+            continue
+        _mark(graph["nodes"][idx], role="instance", name=inst_name,
+              path=inst_path, of_module=type_name)
+        name_index[inst_path] = hi_gid
+        # Edges: parent module --instantiates--> instance ; instance --of_module--> module
+        if module_gid is not None and not _has_edge(graph, module_gid, hi_gid, "instantiates"):
+            _add_edge(graph, module_gid, hi_gid, "instantiates")
+        if type_node_id is not None and not _has_edge(graph, hi_gid, type_node_id, "of_module"):
+            _add_edge(graph, hi_gid, type_node_id, "of_module")
+        # Port connections: NamedPortConnectionSyntax under this instance.
+        for npc in _descendants(d):
+            if _cls(npc) != "NamedPortConnectionSyntax":
+                continue
+            # Port: first identifier token after the '.'.
+            port_name = None
+            for ch in npc:
+                if _is_token(ch):
+                    continue
+                toks = _identifier_tokens(ch)
+                if toks:
+                    port_name = toks[0].valueText
+                    break
+            if port_name is None:
+                continue
+            port_path = f"{inst_path}.{port_name}"
+            # Resolve port to its declared port in the child module.
+            child_port_id = name_index.get(f"{type_name}.{port_name}")
+            if child_port_id is not None:
+                # Anchor the port-connection through a path key for queryability.
+                name_index[port_path] = child_port_id
+            # RHS expression: collect identifier tokens, take the first as the
+            # connected net name in the parent scope.
+            # The expression is the first non-token child after the port-name
+            # IdentifierName wrapper. Walk all descendant identifier tokens
+            # excluding the port-name itself.
+            rhs_names: list[str] = []
+            # Locate the parenthesized expression child (ParenthesizedExpression-
+            # like wrapper). For simplicity collect every identifier token in
+            # the connection that is not the port name.
+            seen_first_id = False
+            for tok in _identifier_tokens(npc):
+                if not seen_first_id:
+                    # first identifier in a NamedPortConnection is the port name
+                    seen_first_id = True
+                    continue
+                rhs_names.append(tok.valueText)
+            for rname in rhs_names:
+                # Resolve in parent scope.
+                src_id = name_index.get(f"{scope_path}.{rname}")
+                if src_id is None:
+                    leaks.append({
+                        "context": f"port_connection.rhs[{hi_gid}.{port_name}]",
+                        "name": rname,
+                        "reason": "no_promoted_anchor",
+                    })
+                    continue
+                dst_id = child_port_id if child_port_id is not None else hi_gid
+                if not _has_edge(graph, src_id, dst_id, "connects"):
+                    _add_edge(graph, src_id, dst_id, "connects",
+                              instance=inst_path, port=port_name)
+
+
+def _gid_for_subtree(graph, parent_gid, target_class, target_inst=None):
+    """Find a descendant graph-node id of ``parent_gid`` whose type matches
+    ``target_class``. If ``target_inst`` is given, prefer the descendant that
+    contains an Identifier token with that valueText (the InstanceName)."""
+    nodes_by_id = {n["id"]: n for n in graph["nodes"]}
+    children_by_src: dict[str, list[str]] = {}
+    for e in graph["edges"]:
+        if e.get("type") != "child":
+            continue
+        children_by_src.setdefault(e["src"], []).append(e["dst"])
+    # DFS within parent subtree
+    stack = [parent_gid]
+    matches: list[str] = []
+    while stack:
+        cur = stack.pop()
+        n = nodes_by_id.get(cur)
+        if n is None:
+            continue
+        if n["type"] == target_class:
+            matches.append(cur)
+        # children — order doesn't matter for matching but we sort by edge index
+        kids = children_by_src.get(cur, [])
+        stack.extend(reversed(kids))
+    if not matches:
+        return None
+    if target_inst is None:
+        return matches[0]
+    # Choose the match whose subtree contains an Identifier token with valueText==target_inst.
+    for m in matches:
+        # collect descendant tokens
+        sub_stack = [m]
+        while sub_stack:
+            x = sub_stack.pop()
+            xn = nodes_by_id.get(x)
+            if xn is None:
+                continue
+            if xn.get("is_token") and xn.get("payload", {}).get("valueText") == target_inst:
+                return m
+            sub_stack.extend(children_by_src.get(x, []))
+    return matches[0]
+
+
+def _node_index_by_id(graph, target_id):
+    for i, n in enumerate(graph["nodes"]):
+        if n["id"] == target_id:
+            return i
+    return None
 
 
 def queryable_nodes(graph: dict[str, Any]) -> Iterator[dict[str, Any]]:
@@ -538,7 +811,20 @@ def neighbors(
 
 
 def find_by_name(graph: dict[str, Any], name: str) -> dict[str, Any] | None:
-    nid = graph.get("semantic_name_index", {}).get(name)
+    """Look up a promoted node by hierarchical path or bare leaf name.
+
+    Accepts either a full path (``"fifo.count"``, ``"top.u_fifo"``) or a bare
+    leaf name (``"count"``). Bare-name lookup is satisfied only if exactly one
+    promoted entry matches — ambiguous bare-name queries return ``None``.
+    """
+    idx = graph.get("semantic_name_index", {})
+    nid = idx.get(name)
+    if nid is None:
+        # Bare-name fallback.
+        suffix = "." + name
+        candidates = [v for k, v in idx.items() if k == name or k.endswith(suffix)]
+        if len(candidates) == 1:
+            nid = candidates[0]
     if nid is None:
         return None
     by_id = {n["id"]: n for n in graph["nodes"]}
