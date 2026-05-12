@@ -1,0 +1,272 @@
+"""Structural invariants for the multi-file SV knowledge graph.
+
+These are properties of the graph **as a graph** — independent of any
+particular query. Each invariant would have caught the cross-tree merge bug
+where lifting per tree and merging dicts dropped ``of_module`` edges and
+collided on per-tree node ids.
+
+Run against the production multi-file path ``build_kg([FIFO, TOP])`` so the
+asserts only fire when the real production path is broken.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+HERE = Path(__file__).resolve().parent.parent
+FIFO = HERE / "fifo.sv"
+TOP = HERE / "top.sv"
+
+
+_CONTAINMENT_EDGES = {"has_port", "has_param", "has_net", "contains", "instantiates"}
+_SEMANTIC_EDGES = {
+    "drives", "reads", "sensitive_to",
+    "connects", "instantiates", "of_module",
+}
+_CONTAINED_ROLES = {"port", "param", "net", "instance"}
+
+
+@pytest.fixture(scope="module")
+def kg():
+    from scripts.build import build_kg
+
+    graph, trees, comp = build_kg([FIFO, TOP])
+    return graph, trees, comp
+
+
+@pytest.fixture(scope="module")
+def graph(kg):
+    return kg[0]
+
+
+def _queryable(graph):
+    from scripts.semantic import queryable_nodes
+
+    return list(queryable_nodes(graph))
+
+
+def _id_to_node(graph):
+    return {n["id"]: n for n in graph["nodes"]}
+
+
+def _role(n):
+    return n.get("semantic", {}).get("role")
+
+
+def _path(n):
+    return n.get("semantic", {}).get("path") or n.get("semantic", {}).get("name") or n["id"]
+
+
+# ---------------------------------------------------------------------------
+# 1. Containment connectivity.
+# ---------------------------------------------------------------------------
+
+
+def test_inv1_containment_connectivity(graph):
+    """Every contained queryable node (port/param/net/instance) is reachable
+    from at least one module node via has_port/has_param/has_net/contains.
+
+    Catches: a module's port/net appearing disconnected because the cross-file
+    merge dropped its containing module."""
+    modules = {n["id"] for n in _queryable(graph) if _role(n) == "module"}
+    assert modules, "no module nodes promoted"
+
+    # BFS from every module along containment edges.
+    reachable: set[str] = set(modules)
+    frontier = list(modules)
+    while frontier:
+        nxt = []
+        fset = set(frontier)
+        for e in graph["edges"]:
+            if e["type"] not in _CONTAINMENT_EDGES:
+                continue
+            if e["src"] in fset and e["dst"] not in reachable:
+                reachable.add(e["dst"])
+                nxt.append(e["dst"])
+        frontier = nxt
+
+    orphans = [
+        _path(n) for n in _queryable(graph)
+        if _role(n) in _CONTAINED_ROLES and n["id"] not in reachable
+    ]
+    assert not orphans, (
+        f"queryable nodes not reachable from any module via containment edges: {orphans}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 2. Instance closure.
+# ---------------------------------------------------------------------------
+
+
+def test_inv2_instance_closure(graph):
+    """Every queryable instance has exactly one outbound of_module edge AND
+    exactly one inbound instantiates edge.
+
+    Catches: the cross-file merge dropping top.u_fifo --of_module--> fifo."""
+    insts = [n for n in _queryable(graph) if _role(n) == "instance"]
+    assert insts, "no instance nodes in the multi-file graph"
+    bad = []
+    for inst in insts:
+        nid = inst["id"]
+        of_out = [e for e in graph["edges"] if e["type"] == "of_module" and e["src"] == nid]
+        inst_in = [e for e in graph["edges"] if e["type"] == "instantiates" and e["dst"] == nid]
+        if len(of_out) != 1 or len(inst_in) != 1:
+            bad.append(
+                f"{_path(inst)}: of_module(out)={len(of_out)}, instantiates(in)={len(inst_in)}"
+            )
+    assert not bad, "instance closure broken: " + "; ".join(bad)
+
+
+# ---------------------------------------------------------------------------
+# 3. Port containment.
+# ---------------------------------------------------------------------------
+
+
+def test_inv3_port_containment(graph):
+    """Every queryable port has exactly one inbound has_port edge from a module."""
+    by_id = _id_to_node(graph)
+    bad = []
+    for n in _queryable(graph):
+        if _role(n) != "port":
+            continue
+        incoming = [e for e in graph["edges"]
+                    if e["type"] == "has_port" and e["dst"] == n["id"]]
+        if len(incoming) != 1:
+            bad.append(f"{_path(n)}: has_port(in)={len(incoming)}")
+            continue
+        owner = by_id.get(incoming[0]["src"])
+        if owner is None or _role(owner) != "module":
+            bad.append(f"{_path(n)}: has_port src is not a module")
+    assert not bad, "port containment broken: " + "; ".join(bad)
+
+
+# ---------------------------------------------------------------------------
+# 4. Param containment.
+# ---------------------------------------------------------------------------
+
+
+def test_inv4_param_containment(graph):
+    """Every queryable param has exactly one inbound has_param edge from a module."""
+    by_id = _id_to_node(graph)
+    bad = []
+    for n in _queryable(graph):
+        if _role(n) != "param":
+            continue
+        incoming = [e for e in graph["edges"]
+                    if e["type"] == "has_param" and e["dst"] == n["id"]]
+        if len(incoming) != 1:
+            bad.append(f"{_path(n)}: has_param(in)={len(incoming)}")
+            continue
+        owner = by_id.get(incoming[0]["src"])
+        if owner is None or _role(owner) != "module":
+            bad.append(f"{_path(n)}: has_param src is not a module")
+    assert not bad, "param containment broken: " + "; ".join(bad)
+
+
+# ---------------------------------------------------------------------------
+# 5. Connects endpoints.
+# ---------------------------------------------------------------------------
+
+
+def test_inv5_connects_endpoints(graph):
+    """Every ``connects`` edge has both endpoints queryable; src is a parent
+    net/port and dst is a child port whose owning module differs from src's."""
+    by_id = _id_to_node(graph)
+    qids = {n["id"] for n in _queryable(graph)}
+    bad = []
+    for e in graph["edges"]:
+        if e["type"] != "connects":
+            continue
+        if e["src"] not in qids or e["dst"] not in qids:
+            bad.append(f"non-queryable endpoint: {e['src']} -> {e['dst']}")
+            continue
+        dst = by_id[e["dst"]]
+        if _role(dst) != "port":
+            bad.append(f"dst not a port: {_path(dst)} role={_role(dst)}")
+            continue
+        src = by_id[e["src"]]
+        # Owning module = first dotted component of the hierarchical path.
+        src_path = _path(src)
+        dst_path = _path(dst)
+        src_mod = src_path.split(".", 1)[0] if "." in src_path else src_path
+        dst_mod = dst_path.split(".", 1)[0] if "." in dst_path else dst_path
+        if src_mod == dst_mod:
+            bad.append(
+                f"connects within same module: {src_path} -> {dst_path} (both under {src_mod})"
+            )
+    assert not bad, "connects-endpoint invariant broken: " + "; ".join(bad)
+
+
+# ---------------------------------------------------------------------------
+# 6. Hierarchical-path consistency.
+# ---------------------------------------------------------------------------
+
+
+def test_inv6_hierarchical_path_consistency(graph):
+    """Every contained queryable node id's semantic.path starts with its
+    owning module name as the first dotted component (e.g. ``fifo.count``,
+    ``top.u_fifo``).
+
+    Catches: per-tree id collisions silently aliasing nodes from different
+    modules to the same path."""
+    by_id = _id_to_node(graph)
+    # Build owner module for each contained node.
+    bad = []
+    # For each containment edge, derive the owner.
+    owner: dict[str, str] = {}
+    for e in graph["edges"]:
+        if e["type"] not in _CONTAINMENT_EDGES:
+            continue
+        owner_node = by_id.get(e["src"])
+        if owner_node is None or _role(owner_node) != "module":
+            continue
+        owner[e["dst"]] = owner_node["semantic"]["name"]
+    # Also instance parents via 'instantiates' for the instance node itself.
+    for e in graph["edges"]:
+        if e["type"] != "instantiates":
+            continue
+        owner_node = by_id.get(e["src"])
+        if owner_node is None or _role(owner_node) != "module":
+            continue
+        owner.setdefault(e["dst"], owner_node["semantic"]["name"])
+
+    for n in _queryable(graph):
+        if _role(n) not in _CONTAINED_ROLES:
+            continue
+        path = n.get("semantic", {}).get("path")
+        if path is None:
+            bad.append(f"{n['id']}: missing semantic.path for role={_role(n)}")
+            continue
+        owner_mod = owner.get(n["id"])
+        if owner_mod is None:
+            bad.append(f"{path}: no owning module (no containment edge)")
+            continue
+        first = path.split(".", 1)[0]
+        if first != owner_mod:
+            bad.append(f"{path}: path prefix {first!r} != owner module {owner_mod!r}")
+    assert not bad, "hierarchical-path consistency broken: " + "; ".join(bad)
+
+
+# ---------------------------------------------------------------------------
+# 7. No orphan semantic edges.
+# ---------------------------------------------------------------------------
+
+
+def test_inv7_no_orphan_semantic_edges(graph):
+    """Every typed semantic edge's endpoints are queryable nodes.
+
+    Catches: cross-tree edges that point at node ids belonging to a different
+    tree's namespace (the literal lift-collision symptom)."""
+    qids = {n["id"] for n in _queryable(graph)}
+    bad = []
+    for e in graph["edges"]:
+        if e["type"] not in _SEMANTIC_EDGES:
+            continue
+        if e["src"] not in qids:
+            bad.append(f"{e['type']}: src {e['src']} not queryable")
+        if e["dst"] not in qids:
+            bad.append(f"{e['type']}: dst {e['dst']} not queryable")
+    assert not bad, "orphan semantic edges: " + "; ".join(bad[:10])
