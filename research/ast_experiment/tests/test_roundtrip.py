@@ -359,3 +359,10 @@ def test_iter017_instance_name(top_tree):
     reparsed, _ = _roundtrip(top_tree)
     _assert_class_roundtrip(top_tree.root, reparsed.root, "InstanceNameSyntax")
     _mark_covered({"InstanceNameSyntax"})
+
+
+def test_iter018_named_port_connection(top_tree):
+    """iter-018: NamedPortConnectionSyntax round-trips byte-equal."""
+    reparsed, _ = _roundtrip(top_tree)
+    _assert_class_roundtrip(top_tree.root, reparsed.root, "NamedPortConnectionSyntax")
+    _mark_covered({"NamedPortConnectionSyntax"})
