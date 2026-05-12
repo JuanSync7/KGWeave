@@ -370,6 +370,28 @@ def test_iter018_named_port_connection(top_tree):
     _mark_covered({"NamedPortConnectionSyntax"})
 
 
+def test_iter028_generate_region(top_tree):
+    """iter-028: generate-for syntax family round-trips byte-equal.
+
+    Covers GenerateRegionSyntax, LoopGenerateSyntax, GenerateBlockSyntax,
+    NamedBlockClauseSyntax (the ``: gen_fifos`` label clause), and
+    PostfixUnaryExpressionSyntax (the ``i++`` step expression).
+    """
+    reparsed, _ = _roundtrip(top_tree)
+    for cls in (
+        "GenerateRegionSyntax",
+        "LoopGenerateSyntax",
+        "GenerateBlockSyntax",
+        "NamedBlockClauseSyntax",
+        "PostfixUnaryExpressionSyntax",
+    ):
+        _assert_class_roundtrip(top_tree.root, reparsed.root, cls)
+    _mark_covered({
+        "GenerateRegionSyntax", "LoopGenerateSyntax", "GenerateBlockSyntax",
+        "NamedBlockClauseSyntax", "PostfixUnaryExpressionSyntax",
+    })
+
+
 def test_iter019_parameter_value_assignment(top_tree):
     """iter-019: ParameterValueAssignmentSyntax round-trips byte-equal."""
     reparsed, _ = _roundtrip(top_tree)

@@ -301,6 +301,8 @@ class TestGroupG:
         top = find_by_name(g, "top")
         insts = neighbors(g, top["id"], edge_type="instantiates", direction="out")
         paths = [i["semantic"]["path"] for i in insts]
+        # Direct named instances under top; generate-block fifos are owned by
+        # their generate_block node, not by top itself.
         assert set(paths) == {"top.u_fifo", "top.u_fifo_a", "top.u_fifo_b", "top.u_if"}
 
     def test_G2_u_fifo_is_of_module_fifo(self, gbundle):

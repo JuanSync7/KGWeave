@@ -25,6 +25,7 @@ TOP = HERE / "top.sv"
 _CONTAINMENT_EDGES = {
     "has_port", "has_param", "has_net", "contains", "instantiates",
     "has_typedef", "has_enum_value", "has_modport", "has_function",
+    "has_generate", "contains_block",
 }
 _SEMANTIC_EDGES = {
     "drives", "reads", "sensitive_to",
@@ -32,7 +33,7 @@ _SEMANTIC_EDGES = {
 }
 _CONTAINED_ROLES = {
     "port", "param", "net", "instance", "typedef", "enum_value",
-    "modport", "function",
+    "modport", "function", "generate_loop", "generate_block",
 }
 # Roles whose `name` is treated as an owning namespace (top-level container).
 _OWNER_ROLES = {"module", "package", "interface"}
@@ -254,6 +255,17 @@ def test_inv6_hierarchical_path_consistency(graph):
         td_owner = owner.get(td_node["id"])
         if td_owner is not None:
             owner.setdefault(e["dst"], td_owner)
+    # Generated instances flow ownership through generate_loop → generate_block
+    # → instance. Walk the chain until every contained node has the original
+    # module owner stamped.
+    for _ in range(4):
+        for e in graph["edges"]:
+            if e["type"] not in _CONTAINMENT_EDGES:
+                continue
+            src_owner = owner.get(e["src"])
+            if src_owner is None:
+                continue
+            owner.setdefault(e["dst"], src_owner)
 
     for n in _queryable(graph):
         if _role(n) not in _CONTAINED_ROLES:

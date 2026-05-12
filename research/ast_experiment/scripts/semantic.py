@@ -566,7 +566,8 @@ def promote(
         return
 
     # Second pass — rules S2..S6 (need name_index complete).
-    state2 = {"idx": 0, "module_stack": [], "in_function": 0}
+    state2 = {"idx": 0, "module_stack": [], "in_function": 0,
+              "in_generate": 0}
 
     def _cur_module2():
         return state2["module_stack"][-1] if state2["module_stack"] else (None, "")
@@ -578,6 +579,7 @@ def promote(
         gid = nodes_list[node_offset + idx]["id"]
         popped = False
         entered_fn = False
+        entered_gen = False
         if c == "ModuleDeclarationSyntax":
             mname = _module_name_of(node)
             state2["module_stack"].append((gid, mname))
@@ -585,6 +587,12 @@ def promote(
         if c == "FunctionDeclarationSyntax":
             state2["in_function"] += 1
             entered_fn = True
+        if c == "LoopGenerateSyntax":
+            # We dispatch S12 BELOW (the elif chain) before bumping the depth;
+            # only the children of the loop must be flagged as in-generate so
+            # the syntactic HierarchyInstantiationSyntax under the loop is
+            # ignored by S6.
+            entered_gen = True
         mod_gid, mname = _cur_module2()
         scope = module_scope_by_name.get(mname)
         scope_path = mname
@@ -599,9 +607,14 @@ def promote(
                 _rule_s4(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks, scope_path)
             elif c == "InvocationExpressionSyntax":
                 _rule_s5(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks, scope_path)
-            elif c == "HierarchyInstantiationSyntax":
+            elif c == "HierarchyInstantiationSyntax" and state2["in_generate"] == 0:
                 _rule_s6(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks,
                          scope_path, mod_gid)
+            elif c == "LoopGenerateSyntax":
+                _rule_s12(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks,
+                          scope_path, mod_gid)
+        if entered_gen:
+            state2["in_generate"] += 1
         if not _is_token(node):
             try:
                 children = list(node)
@@ -609,6 +622,8 @@ def promote(
                 children = []
             for ch in children:
                 visit_pass2(ch)
+        if entered_gen:
+            state2["in_generate"] -= 1
         if entered_fn:
             state2["in_function"] -= 1
         if popped:
@@ -852,6 +867,116 @@ def _rule_s3(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):
                                context=f"{role}.reads.case_head[{gid}]", scope_path=scope_path)
                 if src is not None and not _has_edge(graph, gid, src, "reads"):
                     _add_edge(graph, gid, src, "reads")
+
+
+def _rule_s12(graph, node, gid, gnode, scope, name_index, leaks,
+              scope_path="", module_gid=None):
+    """S12: LoopGenerateSyntax + elaborated GenerateBlockSyntax instances.
+
+    Promotes the LoopGenerateSyntax as a queryable ``generate_loop`` node and
+    asks the elaborated module scope for the matching ``GenerateBlockArraySymbol``
+    (matched by label). Each entry of the array becomes a synthetic
+    ``generate_block`` node carrying the elaborated hierarchical path; every
+    InstanceSymbol under that block is promoted as a synthetic instance node
+    and wired with ``of_module`` / ``instantiates`` edges so
+    ``instances_of('fifo')`` lists the elaborated copies alongside the
+    syntactically-named instances.
+    """
+    # Find the label inside the LoopGenerateSyntax's GenerateBlockSyntax.
+    label = None
+    for d in _descendants(node):
+        if _cls(d) != "GenerateBlockSyntax":
+            continue
+        # NamedBlockClauseSyntax holds ``: <label>``; otherwise the block has
+        # no label and the elaborated array's name is auto-synthesized.
+        saw_colon = False
+        for tok2 in _descendants(d):
+            if _is_token(tok2) and _token_kind_name(tok2) == "Colon":
+                saw_colon = True
+                continue
+            if saw_colon and _is_token(tok2) and _token_kind_name(tok2) == "Identifier":
+                label = tok2.valueText
+                break
+        break
+    if scope is None or label is None:
+        # Best-effort path so inv6 stays clean even without elaboration data.
+        anon_path = f"{scope_path}.<unlabeled>" if scope_path else "<unlabeled>"
+        _mark(gnode, role="generate_loop", name=label or "<unlabeled>",
+              path=anon_path, label=label)
+        return
+    gen_array = None
+    try:
+        for sym in scope:
+            if (type(sym).__name__ == "GenerateBlockArraySymbol"
+                    and getattr(sym, "name", "") == label):
+                gen_array = sym
+                break
+    except Exception:
+        gen_array = None
+    if gen_array is None:
+        loop_path = f"{scope_path}.{label}" if scope_path else label
+        _mark(gnode, role="generate_loop", name=label, path=loop_path, label=label)
+        return
+    try:
+        entries = list(gen_array.entries)
+    except Exception:
+        entries = []
+    loop_path = f"{scope_path}.{label}" if scope_path else label
+    _mark(gnode, role="generate_loop", name=label, path=loop_path,
+          label=label, iter_count=len(entries))
+    name_index[loop_path] = gid
+    # Containment edge from the enclosing module to this generate_loop so
+    # inv1 (containment BFS) reaches the loop + every block + every generated
+    # instance.
+    if module_gid is not None and not _has_edge(graph, module_gid, gid, "has_generate"):
+        _add_edge(graph, module_gid, gid, "has_generate")
+    nodes_list_local = graph["nodes"]
+    for i, blk in enumerate(entries):
+        blk_path = getattr(blk, "hierarchicalPath", "") or f"{scope_path}.{label}[{i}]"
+        if blk_path.startswith("$root."):
+            blk_path = blk_path[len("$root."):]
+        blk_id = f"gen:{blk_path}"
+        nodes_list_local.append({
+            "id": blk_id,
+            "type": "GenerateBlockSyntax",
+            "kind": "GenerateBlock",
+            "is_token": False,
+            "payload": {"synthetic": True, "iteration": i},
+            "queryable": True,
+            "semantic": {"role": "generate_block",
+                         "name": f"{label}[{i}]",
+                         "path": blk_path},
+        })
+        # Tie the synthetic block under the syntactic generate_loop node so
+        # invariants can walk a containment chain ``module → loop → block``.
+        _add_edge(graph, gid, blk_id, "contains_block")
+        name_index[blk_path] = blk_id
+        for sub in blk:
+            if type(sub).__name__ != "InstanceSymbol":
+                continue
+            inst_name = getattr(sub, "name", "")
+            inst_path = getattr(sub, "hierarchicalPath", "") or f"{blk_path}.{inst_name}"
+            if inst_path.startswith("$root."):
+                inst_path = inst_path[len("$root."):]
+            def_name = sub.body.name if getattr(sub, "body", None) else ""
+            inst_id = f"gen:{inst_path}"
+            nodes_list_local.append({
+                "id": inst_id,
+                "type": "HierarchicalInstanceSyntax",
+                "kind": "HierarchicalInstance",
+                "is_token": False,
+                "payload": {"synthetic": True},
+                "queryable": True,
+                "semantic": {"role": "instance", "name": inst_name,
+                             "path": inst_path, "of_module": def_name},
+            })
+            name_index[inst_path] = inst_id
+            _add_edge(graph, blk_id, inst_id, "instantiates")
+            def_id = (name_index.get("module:" + def_name)
+                      or name_index.get("interface:" + def_name)
+                      or name_index.get(def_name))
+            if def_id is not None:
+                _add_edge(graph, inst_id, def_id, "of_module")
 
 
 def _rule_s4(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):

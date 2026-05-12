@@ -13,14 +13,14 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 131 | 17 | 15 | 23 | 93 |
-| CONTAINER | 100 | 14 | 0 | 0 | 0 |
-| BLOB | 208 | 15 | 0 | 0 | 0 |
+| PROMOTE | 135 | 29 | 15 | 23 | 97 |
+| CONTAINER | 88 | 15 | 0 | 0 | 0 |
+| BLOB | 213 | 16 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
-| OUT-OF-SCOPE | 55 | 0 | 0 | 0 | 0 |
-| **Total** | **536** | **46** | | | |
+| OUT-OF-SCOPE | 58 | 0 | 0 | 0 | 0 |
+| **Total** | **536** | **60** | | | |
 
-## PROMOTE (131 items)
+## PROMOTE (135 items)
 | SyntaxKind | Struct | Semantic | Owner |
 |--|--|--|--|
 | `AlwaysBlock` | ⬜ | ⬜ | future |
@@ -59,13 +59,16 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `CoverageBins` | ⬜ | ⬜ | future |
 | `CovergroupDeclaration` | ⬜ | ⬜ | future |
 | `Coverpoint` | ⬜ | ⬜ | future |
+| `DPIExport` | ⬜ | ⬜ | future |
+| `DPIImport` | ⬜ | ⬜ | future |
 | `Declarator` | ✅ | ✅ | S1 |
 | `DefParam` | ⬜ | ⬜ | future |
 | `DefParamAssignment` | ⬜ | ⬜ | future |
 | `DefaultClockingReference` | ⬜ | ⬜ | future |
 | `DefaultDisableDeclaration` | ⬜ | ⬜ | future |
+| `DefaultFunctionPort` | ⬜ | ⬜ | future |
 | `DeferredAssertion` | ⬜ | ⬜ | future |
-| `EnumType` | ⬜ | ⏳ | S9c |
+| `EnumType` | ✅ | ⏳ | S9c |
 | `ExpectPropertyStatement` | ⬜ | ⬜ | future |
 | `ExplicitAnsiPort` | ⬜ | ⬜ | future |
 | `ExplicitNonAnsiPort` | ⬜ | ⬜ | future |
@@ -76,10 +79,10 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `FinalBlock` | ⬜ | ⬜ | future |
 | `ForwardTypeRestriction` | ⬜ | ⬜ | future |
 | `ForwardTypedefDeclaration` | ⬜ | ⬜ | future |
-| `FunctionDeclaration` | ⬜ | ⏳ | S10 |
-| `FunctionPort` | ⬜ | ⬜ | future |
-| `FunctionPortList` | ⬜ | ⬜ | future |
-| `FunctionPrototype` | ⬜ | ⬜ | future |
+| `FunctionDeclaration` | ✅ | ⏳ | S10 |
+| `FunctionPort` | ✅ | ⬜ | future |
+| `FunctionPortList` | ✅ | ⬜ | future |
+| `FunctionPrototype` | ✅ | ⬜ | future |
 | `GenerateBlock` | ⬜ | ⏳ | S12b |
 | `GenerateRegion` | ⬜ | ⏳ | S12c |
 | `GenvarDeclaration` | ⬜ | ⬜ | future |
@@ -106,11 +109,11 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `LoopGenerate` | ⬜ | ⏳ | S12a |
 | `MemberAccessExpression` | ⬜ | ⬜ | future |
 | `ModportClockingPort` | ⬜ | ⏳ | S11b |
-| `ModportDeclaration` | ⬜ | ⏳ | S11b |
+| `ModportDeclaration` | ✅ | ⏳ | S11b |
 | `ModportExplicitPort` | ⬜ | ⏳ | S11b |
-| `ModportItem` | ⬜ | ⏳ | S11b |
-| `ModportNamedPort` | ⬜ | ⏳ | S11b |
-| `ModportSimplePortList` | ⬜ | ⏳ | S11b |
+| `ModportItem` | ✅ | ⏳ | S11b |
+| `ModportNamedPort` | ✅ | ⏳ | S11b |
+| `ModportSimplePortList` | ✅ | ⏳ | S11b |
 | `ModportSubroutinePort` | ⬜ | ⏳ | S11b |
 | `ModportSubroutinePortList` | ⬜ | ⏳ | S11b |
 | `ModuleDeclaration` | ✅ | ✅ | S1 |
@@ -127,13 +130,14 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `PackageExportAllDeclaration` | ⬜ | ⬜ | future |
 | `PackageExportDeclaration` | ⬜ | ⬜ | future |
 | `PackageHeader` | ⬜ | ⬜ | future |
-| `PackageImportDeclaration` | ⬜ | ⬜ | future |
-| `PackageImportItem` | ⬜ | ⬜ | future |
+| `PackageImportDeclaration` | ✅ | ⬜ | future |
+| `PackageImportItem` | ✅ | ⬜ | future |
 | `ParameterDeclaration` | ✅ | ✅ | S1 |
 | `ParameterValueAssignment` | ✅ | ⏳ | S7 |
 | `PortConcatenation` | ⬜ | ⬜ | future |
 | `PortDeclaration` | ⬜ | ⬜ | future |
 | `PortReference` | ⬜ | ⬜ | future |
+| `PrimitiveInstantiation` | ⬜ | ⬜ | future |
 | `ProceduralAssignStatement` | ⬜ | ⬜ | future |
 | `ProceduralDeassignStatement` | ⬜ | ⬜ | future |
 | `ProceduralForceStatement` | ⬜ | ⬜ | future |
@@ -149,13 +153,13 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `TaskDeclaration` | ⬜ | ⏳ | S10 |
 | `TimeUnitsDeclaration` | ⬜ | ⬜ | future |
 | `TypeParameterDeclaration` | ⬜ | ⬜ | future |
-| `TypedefDeclaration` | ⬜ | ⏳ | S9b |
+| `TypedefDeclaration` | ✅ | ⏳ | S9b |
 | `UnionType` | ⬜ | ⬜ | future |
 | `UserDefinedNetDeclaration` | ⬜ | ⬜ | future |
 | `VariablePortHeader` | ✅ | ✅ | S1 |
 | `VirtualInterfaceType` | ⬜ | ⬜ | future |
 
-## CONTAINER (100 items)
+## CONTAINER (88 items)
 | SyntaxKind | Struct | Semantic | Owner |
 |--|--|--|--|
 | `ActionBlock` | ⬜ | — | structural lift only |
@@ -169,9 +173,6 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `AssignmentPatternItem` | ⬜ | — | structural lift only |
 | `AttributeInstance` | ⬜ | — | structural lift only |
 | `AttributeSpec` | ⬜ | — | structural lift only |
-| `BinSelectWithFilterExpr` | ⬜ | — | structural lift only |
-| `BinsSelectConditionExpr` | ⬜ | — | structural lift only |
-| `BinsSelection` | ⬜ | — | structural lift only |
 | `BitSelect` | ✅ | — | structural lift only |
 | `CaseStatement` | ✅ | — | structural lift only |
 | `CompilationUnit` | ⬜ | — | structural lift only |
@@ -179,12 +180,8 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ConditionalStatement` | ✅ | — | structural lift only |
 | `CoverageBinsArraySize` | ⬜ | — | structural lift only |
 | `CycleDelay` | ⬜ | — | structural lift only |
-| `DPIExport` | ⬜ | — | structural lift only |
-| `DPIImport` | ⬜ | — | structural lift only |
 | `DataDeclaration` | ✅ | — | structural lift only |
 | `DefaultCaseItem` | ✅ | — | structural lift only |
-| `DefaultConfigRule` | ⬜ | — | structural lift only |
-| `DefaultFunctionPort` | ⬜ | — | structural lift only |
 | `DefaultPropertyCaseItem` | ⬜ | — | structural lift only |
 | `DefaultRsCaseItem` | ⬜ | — | structural lift only |
 | `DefaultSkewItem` | ⬜ | — | structural lift only |
@@ -205,14 +202,12 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `EventControl` | ⬜ | — | structural lift only |
 | `ExpressionStatement` | ✅ | — | structural lift only |
 | `ExpressionTimingCheckArg` | ⬜ | — | structural lift only |
-| `FilePathSpec` | ⬜ | — | structural lift only |
 | `ForLoopStatement` | ⬜ | — | structural lift only |
 | `ForVariableDeclaration` | ⬜ | — | structural lift only |
 | `ForeachLoopList` | ⬜ | — | structural lift only |
 | `ForeachLoopStatement` | ⬜ | — | structural lift only |
 | `ForeverStatement` | ⬜ | — | structural lift only |
 | `ImplicitEventControl` | ⬜ | — | structural lift only |
-| `InstanceConfigRule` | ⬜ | — | structural lift only |
 | `JumpStatement` | ⬜ | — | structural lift only |
 | `LocalScope` | ⬜ | — | structural lift only |
 | `LoopStatement` | ⬜ | — | structural lift only |
@@ -226,12 +221,10 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `OrderedArgument` | ✅ | — | structural lift only |
 | `OrderedStructurePatternMember` | ⬜ | — | structural lift only |
 | `ParallelBlockStatement` | ⬜ | — | structural lift only |
-| `ParameterDeclarationStatement` | ⬜ | — | structural lift only |
+| `ParameterDeclarationStatement` | ✅ | — | structural lift only |
 | `ParameterPortList` | ✅ | — | structural lift only |
 | `ParenExpressionList` | ⬜ | — | structural lift only |
 | `PatternCaseItem` | ⬜ | — | structural lift only |
-| `PrimitiveInstantiation` | ⬜ | — | structural lift only |
-| `Production` | ⬜ | — | structural lift only |
 | `RangeList` | ⬜ | — | structural lift only |
 | `RepeatedEventControl` | ⬜ | — | structural lift only |
 | `ReturnStatement` | ⬜ | — | structural lift only |
@@ -257,9 +250,8 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `WaitStatement` | ⬜ | — | structural lift only |
 | `WildcardPortConnection` | ⬜ | — | structural lift only |
 | `WildcardPortList` | ⬜ | — | structural lift only |
-| `WithFunctionSample` | ⬜ | — | structural lift only |
 
-## BLOB (208 items)
+## BLOB (213 items)
 | SyntaxKind | Struct | Semantic | Owner |
 |--|--|--|--|
 | `AcceptOnPropertyExpr` | ⬜ | — | structural lift only |
@@ -276,6 +268,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `AssignmentExpression` | ⬜ | — | structural lift only |
 | `AssignmentPatternExpression` | ⬜ | — | structural lift only |
 | `BadExpression` | ⬜ | — | structural lift only |
+| `BinSelectWithFilterExpr` | ⬜ | — | structural lift only |
 | `BinaryAndExpression` | ⬜ | — | structural lift only |
 | `BinaryBinsSelectExpr` | ⬜ | — | structural lift only |
 | `BinaryBlockEventExpression` | ⬜ | — | structural lift only |
@@ -283,6 +276,8 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `BinaryOrExpression` | ⬜ | — | structural lift only |
 | `BinaryXnorExpression` | ⬜ | — | structural lift only |
 | `BinaryXorExpression` | ⬜ | — | structural lift only |
+| `BinsSelectConditionExpr` | ⬜ | — | structural lift only |
+| `BinsSelection` | ⬜ | — | structural lift only |
 | `BitType` | ⬜ | — | structural lift only |
 | `BlockCoverageEvent` | ⬜ | — | structural lift only |
 | `ByteType` | ⬜ | — | structural lift only |
@@ -332,6 +327,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ExpressionCoverageBinInitializer` | ⬜ | — | structural lift only |
 | `ExpressionOrDist` | ⬜ | — | structural lift only |
 | `ExpressionPattern` | ⬜ | — | structural lift only |
+| `FilePathSpec` | ⬜ | — | structural lift only |
 | `FirstMatchSequenceExpr` | ⬜ | — | structural lift only |
 | `FollowedByPropertyExpr` | ⬜ | — | structural lift only |
 | `GreaterThanEqualExpression` | ⬜ | — | structural lift only |
@@ -372,7 +368,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `MultiplyAssignmentExpression` | ⬜ | — | structural lift only |
 | `MultiplyExpression` | ⬜ | — | structural lift only |
 | `NamedBlockClause` | ⬜ | — | structural lift only |
-| `NamedType` | ⬜ | — | structural lift only |
+| `NamedType` | ✅ | — | structural lift only |
 | `NewArrayExpression` | ⬜ | — | structural lift only |
 | `NewClassExpression` | ⬜ | — | structural lift only |
 | `NonblockingAssignmentExpression` | ⬜ | — | structural lift only |
@@ -468,6 +464,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `WildcardPattern` | ⬜ | — | structural lift only |
 | `WithClause` | ⬜ | — | structural lift only |
 | `WithFunctionClause` | ⬜ | — | structural lift only |
+| `WithFunctionSample` | ⬜ | — | structural lift only |
 | `WithinSequenceExpr` | ⬜ | — | structural lift only |
 | `XorAssignmentExpression` | ⬜ | — | structural lift only |
 
@@ -517,7 +514,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `UndefDirective` | ⬜ | — | preprocessor (no elab) |
 | `UndefineAllDirective` | ⬜ | — | preprocessor (no elab) |
 
-## OUT-OF-SCOPE (55 items)
+## OUT-OF-SCOPE (58 items)
 | SyntaxKind | Struct | Semantic | Owner |
 |--|--|--|--|
 | `AnsiUdpPortList` | ⬜ | — | out-of-scope |
@@ -530,6 +527,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ConfigInstanceIdentifier` | ⬜ | — | out-of-scope |
 | `ConfigLiblist` | ⬜ | — | out-of-scope |
 | `ConfigUseClause` | ⬜ | — | out-of-scope |
+| `DefaultConfigRule` | ⬜ | — | out-of-scope |
 | `Delay3` | ⬜ | — | out-of-scope |
 | `DividerClause` | ⬜ | — | out-of-scope |
 | `DriveStrength` | ⬜ | — | out-of-scope |
@@ -538,6 +536,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `EdgeSensitivePathSuffix` | ⬜ | — | out-of-scope |
 | `ElabSystemTask` | ⬜ | — | out-of-scope |
 | `IfNonePathDeclaration` | ⬜ | — | out-of-scope |
+| `InstanceConfigRule` | ⬜ | — | out-of-scope |
 | `LibraryDeclaration` | ⬜ | — | out-of-scope |
 | `LibraryIncDirClause` | ⬜ | — | out-of-scope |
 | `LibraryIncludeStatement` | ⬜ | — | out-of-scope |
@@ -546,6 +545,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `OneStepDelay` | ⬜ | — | out-of-scope |
 | `PathDeclaration` | ⬜ | — | out-of-scope |
 | `PathDescription` | ⬜ | — | out-of-scope |
+| `Production` | ⬜ | — | out-of-scope |
 | `PullStrength` | ⬜ | — | out-of-scope |
 | `PulseStyleDeclaration` | ⬜ | — | out-of-scope |
 | `RandCaseItem` | ⬜ | — | out-of-scope |

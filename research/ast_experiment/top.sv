@@ -1,4 +1,6 @@
-module top (
+module top #(
+    parameter int NUM_FIFOS = 2
+) (
     input  logic        clk,
     input  logic        rst_n,
     input  logic        push,
@@ -58,5 +60,21 @@ module top (
         .full  (full_b),
         .empty (empty_b)
     );
+
+    generate
+        for (genvar i = 0; i < NUM_FIFOS; i++) begin: gen_fifos
+            fifo u_fifo_gen (
+                .clk   (clk),
+                .rst_n (rst_n),
+                .push  (push),
+                .pop   (pop),
+                .din   (din),
+                .dout  (),
+                .full  (),
+                .empty (),
+                .status()
+            );
+        end
+    endgenerate
 
 endmodule

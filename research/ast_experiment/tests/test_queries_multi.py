@@ -69,6 +69,8 @@ def test_instantiates_of_top(multi_bundle):
     assert top is not None and top["semantic"]["role"] == "module"
     insts = neighbors(graph, top["id"], edge_type="instantiates", direction="out")
     paths = [i["semantic"]["path"] for i in insts]
+    # The syntactic instances under top — generate-block instances are
+    # contained under their generate_block, not directly under the module.
     assert set(paths) == {"top.u_fifo", "top.u_fifo_a", "top.u_fifo_b", "top.u_if"}
 
 
@@ -137,7 +139,14 @@ def test_tool_instances_of(multi_bundle):
     _tree, _comp, graph = multi_bundle
     from scripts.semantic import instances_of
 
-    assert instances_of(graph, "fifo") == ["top.u_fifo", "top.u_fifo_a", "top.u_fifo_b"]
+    # Includes both named instances AND the elaborated generate-for entries.
+    assert instances_of(graph, "fifo") == [
+        "top.gen_fifos[0].u_fifo_gen",
+        "top.gen_fifos[1].u_fifo_gen",
+        "top.u_fifo",
+        "top.u_fifo_a",
+        "top.u_fifo_b",
+    ]
     assert instances_of(graph, "nonexistent") == []
 
 
@@ -250,6 +259,32 @@ def test_graph_query_connects_edge_payload_filter(multi_bundle):
         "return": "path",
     })
     assert out == ["top.clk"]
+
+
+def test_s12_generate_for_elaborated_instances(multi_bundle):
+    """S12: LoopGenerateSyntax + elaborated GenerateBlockSyntax instances.
+
+    * top.gen_fifos is queryable as a generate_loop with iter_count == 2.
+    * Each elaborated iteration becomes a generate_block node with its full
+      hierarchical path (top.gen_fifos[0], top.gen_fifos[1]).
+    * Each block instantiates u_fifo_gen which has an of_module edge to fifo.
+    """
+    _tree, _comp, graph = multi_bundle
+    from scripts.semantic import find_by_name, instances_of, neighbors
+
+    loop = find_by_name(graph, "top.gen_fifos")
+    assert loop is not None and loop["semantic"]["role"] == "generate_loop"
+    assert loop["semantic"]["iter_count"] == 2
+
+    # The two generate_block children carry the elaborated hierarchical paths.
+    blocks = neighbors(graph, loop["id"], edge_type="contains_block", direction="out")
+    paths = sorted(b["semantic"]["path"] for b in blocks)
+    assert paths == ["top.gen_fifos[0]", "top.gen_fifos[1]"]
+
+    # And both generated u_fifo_gen instances participate in instances_of.
+    fifo_inst_paths = instances_of(graph, "fifo")
+    assert "top.gen_fifos[0].u_fifo_gen" in fifo_inst_paths
+    assert "top.gen_fifos[1].u_fifo_gen" in fifo_inst_paths
 
 
 def test_s11_modports_of_interface(multi_bundle):

@@ -213,10 +213,33 @@ def classify(kind: str) -> str:
     if kind.endswith("Name") or kind.endswith("Reference"):
         return "BLOB"
     # Silent CONTAINER catch-all removed: anything reaching here is a kind
-    # we never classified explicitly. Surface it so a new pyslang release
-    # can't quietly land mis-bucketed.
-    print(f"WARN: unclassified SyntaxKind fell to CONTAINER default: {kind}", file=sys.stderr)
+    # we never classified explicitly. Surface unknown kinds once each so a
+    # future pyslang release can't quietly land mis-bucketed; the reviewer-
+    # vetted CONTAINER-default kinds are whitelisted in CONTAINER_DEFAULT_OK.
+    if kind not in CONTAINER_DEFAULT_OK and kind not in _warned:
+        print(f"WARN: unclassified SyntaxKind fell to CONTAINER default: {kind}", file=sys.stderr)
+        _warned.add(kind)
     return "CONTAINER"
+
+
+# Reviewer-vetted kinds that legitimately default to CONTAINER (selects,
+# delay/event controls, range expressions, handles).
+CONTAINER_DEFAULT_OK = {
+    "BitSelect", "ElementSelect",
+    "ConditionalPredicate",
+    "CoverageBinsArraySize",
+    "CycleDelay", "DelayControl",
+    "DelayedSequenceElement",
+    "DescendingRangeSelect", "SimpleRangeSelect",
+    "DisableIff",
+    "EmptyNonAnsiPort", "EmptyTimingCheckArg", "ExpressionTimingCheckArg",
+    "EventControl", "ImplicitEventControl", "RepeatedEventControl",
+    "StreamExpressionWithRange",
+    "SuperHandle", "ThisHandle",
+    "ArrayAndMethod", "ArrayOrMethod", "ArrayUniqueMethod", "ArrayXorMethod",
+    "AscendingRangeSelect",
+}
+_warned: set[str] = set()
 
 
 def status_marks(kind: str, covered: set[str]) -> tuple[str, str, str]:
