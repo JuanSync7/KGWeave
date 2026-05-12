@@ -250,6 +250,20 @@ def test_graph_query_connects_edge_payload_filter(multi_bundle):
     assert out == ["top.clk"]
 
 
+def test_s7_param_overrides_per_instance(multi_bundle):
+    """S7: param_overrides(instance_path) returns the resolved override map.
+
+    Walks `param_override` edges out of the instance node, each carrying a
+    `name` (child param) and `value` (textual resolved expression).
+    """
+    _tree, _comp, graph = multi_bundle
+    from scripts.semantic import param_overrides
+
+    assert param_overrides(graph, "top.u_fifo") == {}
+    assert param_overrides(graph, "top.u_fifo_a") == {"DEPTH": "16", "WIDTH": "32"}
+    assert param_overrides(graph, "top.u_fifo_b") == {"DEPTH": "8", "WIDTH": "8"}
+
+
 def test_s1_fires_per_module(multi_bundle):
     """S1 must fire on BOTH modules — every module's ports/params/nets are
     promoted with hierarchical paths."""

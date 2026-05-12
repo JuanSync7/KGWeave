@@ -39,3 +39,5 @@ MIG01	migrate	203e27a	migrate test_queries_multi fixture + render_kgweave to bui
 corpus-01	corpus	pending	expand top.sv with two parameter-overridden fifo instances u_fifo_a/u_fifo_b; widen top ports for disjoint signal groups	2	pass	new constructs ParameterValueAssignmentSyntax + NamedParamAssignmentSyntax appear; existing instantiates_of/instances_of tests updated to expect 3 instances
 019	struct	pending	cover ParameterValueAssignmentSyntax round-trip on top.sv	1	pass	per-class assertion green; class-generic emit handles new construct unchanged
 020	struct	pending	cover NamedParamAssignmentSyntax round-trip on top.sv	0	pass	combined structural score back to 0
+S08	sem	pending	S7 ParameterValueAssignmentSyntax promotion: param_override edge from instance to child module's param with resolved value in payload	0	pass	param_overrides('top.u_fifo_a')={DEPTH:16,WIDTH:32}; ('top.u_fifo_b')={DEPTH:8,WIDTH:8}; ('top.u_fifo')={}
+INV08	invariants	pending	8th invariant: every param_override target is a param node on the instance's of_module side	0	pass	test_inv8_param_override_target_is_param green

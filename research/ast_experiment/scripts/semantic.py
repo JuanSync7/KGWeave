@@ -20,6 +20,9 @@ S2. ContinuousAssignSyntax → ``drives``(LHS), ``reads``(RHS identifiers).
 S3. ProceduralBlockSyntax(always_ff) → ``sensitive_to``/``drives``/``reads``.
 S4. IdentifierSelectNameSyntax → ``reads``(base symbol).
 S5. SystemNameSyntax(``$clog2``) → ``reads``(argument identifiers).
+S7. ParameterValueAssignmentSyntax → ``param_override`` edges from the
+    instance node to the child module's ``param`` nodes, with the textual
+    resolved expression in the edge payload.
 """
 
 from __future__ import annotations
@@ -311,6 +314,35 @@ def _lhs_target_name(lhs: Any) -> str | None:
         return None
     toks = _identifier_tokens(lhs)
     return toks[0].valueText if toks else None
+
+
+def _expression_text(node: Any) -> str:
+    """Concatenate every Token.rawText under ``node`` in DFS order.
+
+    Used to project the textual value of a parameter-override expression
+    without relying on source-string slicing or regex. Leading trivia is
+    suppressed on the very first token so the result is left-trimmed.
+    """
+    parts: list[str] = []
+    first = [True]
+
+    def go(n: Any) -> None:
+        if _is_token(n):
+            if not first[0]:
+                for tr in n.trivia:
+                    parts.append(tr.getRawText())
+            first[0] = False
+            parts.append(n.rawText)
+            return
+        try:
+            kids = list(n)
+        except TypeError:
+            kids = []
+        for c in kids:
+            go(c)
+
+    go(node)
+    return "".join(parts).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -693,6 +725,48 @@ def _rule_s6(graph, node, gid, gnode, scope, name_index, leaks,
     if type_name is None:
         return
     type_node_id = name_index.get("module:" + type_name)
+    # S7: extract ParameterValueAssignmentSyntax (param override block), if any.
+    # The block is a direct child of the HierarchyInstantiationSyntax and
+    # applies to every HierarchicalInstance under this declaration.
+    overrides: list[tuple[str, str]] = []  # ordered list of (param_name, value_text)
+    pva = next((c for c in node if _cls(c) == "ParameterValueAssignmentSyntax"), None)
+    if pva is not None:
+        # Named overrides: NamedParamAssignmentSyntax(.NAME(EXPR)) descendants.
+        named_seen = False
+        for npa in _descendants(pva):
+            if _cls(npa) != "NamedParamAssignmentSyntax":
+                continue
+            named_seen = True
+            children = list(npa)
+            pname = None
+            expr_text = None
+            saw_dot = False
+            saw_open = False
+            for ch in children:
+                if _is_token(ch) and _token_kind_name(ch) == "Dot":
+                    saw_dot = True
+                    continue
+                if saw_dot and pname is None and _is_token(ch) and _token_kind_name(ch) == "Identifier":
+                    pname = ch.valueText
+                    continue
+                if _is_token(ch) and _token_kind_name(ch) == "OpenParenthesis":
+                    saw_open = True
+                    continue
+                if saw_open and not _is_token(ch):
+                    # First non-token child after '(' is the expression.
+                    try:
+                        sub_kids = list(ch)
+                    except TypeError:
+                        sub_kids = []
+                    if sub_kids or _identifier_tokens(ch):
+                        expr_text = _expression_text(ch)
+                        break
+            if pname is not None and expr_text is not None:
+                overrides.append((pname, expr_text))
+        # Positional overrides (OrderedParamAssignmentSyntax) — defer until a
+        # corpus exercises them; current corpus uses only named overrides.
+        if not named_seen:
+            pass
     # Find every HierarchicalInstanceSyntax under this declaration.
     for d in _descendants(node):
         if _cls(d) != "HierarchicalInstanceSyntax":
@@ -731,6 +805,21 @@ def _rule_s6(graph, node, gid, gnode, scope, name_index, leaks,
             _add_edge(graph, module_gid, hi_gid, "instantiates")
         if type_node_id is not None and not _has_edge(graph, hi_gid, type_node_id, "of_module"):
             _add_edge(graph, hi_gid, type_node_id, "of_module")
+        # S7: param_override edges from the instance node to the child module's
+        # param nodes. The override block applies identically to every instance
+        # in this HierarchyInstantiationSyntax declaration.
+        for pname, pvalue in overrides:
+            child_param_id = name_index.get(f"{type_name}.{pname}")
+            if child_param_id is None:
+                leaks.append({
+                    "context": f"param_override[{inst_path}]",
+                    "name": pname,
+                    "reason": "no_child_param_anchor",
+                })
+                continue
+            if not _has_edge(graph, hi_gid, child_param_id, "param_override"):
+                _add_edge(graph, hi_gid, child_param_id, "param_override",
+                          instance=inst_path, name=pname, value=pvalue)
         # Port connections: NamedPortConnectionSyntax under this instance.
         for npc in _descendants(d):
             if _cls(npc) != "NamedPortConnectionSyntax":
@@ -1052,6 +1141,28 @@ def port_connections(graph: dict[str, Any], instance_path: str) -> list[dict[str
             continue
         src_path = src.get("semantic", {}).get("path") or src.get("semantic", {}).get("name")
         out.append({"port": e["payload"].get("port"), "src_path": src_path})
+    return out
+
+
+def param_overrides(graph: dict[str, Any], instance_path: str) -> dict[str, str]:
+    """Return the resolved param-override map for an instance.
+
+    Walks outgoing ``param_override`` edges from the instance node, projecting
+    each edge's payload as ``{name: value}``. Returns an empty dict for
+    instances with no overrides. Pure typed-edge projection — no syntax
+    re-walking, no regex.
+    """
+    inst = find_by_name(graph, instance_path)
+    if inst is None:
+        return {}
+    out: dict[str, str] = {}
+    for e in graph["edges"]:
+        if e["type"] != "param_override" or e["src"] != inst["id"]:
+            continue
+        name = e["payload"].get("name")
+        value = e["payload"].get("value")
+        if name is not None:
+            out[name] = value
     return out
 
 

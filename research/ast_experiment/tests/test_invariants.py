@@ -270,3 +270,34 @@ def test_inv7_no_orphan_semantic_edges(graph):
         if e["dst"] not in qids:
             bad.append(f"{e['type']}: dst {e['dst']} not queryable")
     assert not bad, "orphan semantic edges: " + "; ".join(bad[:10])
+
+
+# ---------------------------------------------------------------------------
+# 8. Param-override target is a param on the instance's of_module side.
+# ---------------------------------------------------------------------------
+
+
+def test_inv8_param_override_target_is_param(graph):
+    """Every ``param_override`` edge runs from an instance node to a ``param``
+    node owned by the instance's ``of_module``. Catches: overrides resolved
+    against the wrong module, or routed to a non-param node."""
+    by_id = _id_to_node(graph)
+    bad = []
+    for e in graph["edges"]:
+        if e["type"] != "param_override":
+            continue
+        src = by_id.get(e["src"])
+        dst = by_id.get(e["dst"])
+        if src is None or _role(src) != "instance":
+            bad.append(f"src not instance: {e['src']}")
+            continue
+        if dst is None or _role(dst) != "param":
+            bad.append(f"dst not param: {e['dst']} role={_role(dst) if dst else None}")
+            continue
+        of_mod = src["semantic"].get("of_module")
+        dst_path = _path(dst)
+        if not dst_path.startswith(of_mod + "."):
+            bad.append(
+                f"{_path(src)} --param_override--> {dst_path} (expected prefix {of_mod!r})"
+            )
+    assert not bad, "param-override target invariant broken: " + "; ".join(bad)
