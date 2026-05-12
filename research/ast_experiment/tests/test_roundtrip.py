@@ -352,3 +352,10 @@ def test_iter016_hierarchical_instance(top_tree):
     reparsed, _ = _roundtrip(top_tree)
     _assert_class_roundtrip(top_tree.root, reparsed.root, "HierarchicalInstanceSyntax")
     _mark_covered({"HierarchicalInstanceSyntax"})
+
+
+def test_iter017_instance_name(top_tree):
+    """iter-017: InstanceNameSyntax round-trips byte-equal."""
+    reparsed, _ = _roundtrip(top_tree)
+    _assert_class_roundtrip(top_tree.root, reparsed.root, "InstanceNameSyntax")
+    _mark_covered({"InstanceNameSyntax"})

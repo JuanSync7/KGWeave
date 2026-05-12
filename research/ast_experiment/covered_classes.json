@@ -24,6 +24,7 @@
   "IdentifierNameSyntax",
   "IdentifierSelectNameSyntax",
   "ImplicitAnsiPortSyntax",
+  "InstanceNameSyntax",
   "IntegerTypeSyntax",
   "IntegerVectorExpressionSyntax",
   "InvocationExpressionSyntax",
