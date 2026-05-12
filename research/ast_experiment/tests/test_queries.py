@@ -127,7 +127,6 @@ def test_s4_identifier_select_reads_base(fixture_bundle):
             assert any(t["semantic"].get("name") == "mem" for t in tgt)
 
 
-@pytest.mark.skip(reason="enabled in sem-05")
 def test_s5_system_call_clog2_reads_depth(fixture_bundle):
     """S5: every `$clog2(DEPTH)` call is promoted and `reads` DEPTH."""
     _tree, _comp, graph = fixture_bundle
