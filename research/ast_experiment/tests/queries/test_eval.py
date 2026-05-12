@@ -13,7 +13,7 @@ from pathlib import Path
 import pyslang
 import pytest
 
-HERE = Path(__file__).resolve().parent.parent
+HERE = Path(__file__).resolve().parent.parent.parent
 PKG = HERE / "fifo_pkg.sv"
 IFACE = HERE / "fifo_if.sv"
 FIFO = HERE / "fifo.sv"
