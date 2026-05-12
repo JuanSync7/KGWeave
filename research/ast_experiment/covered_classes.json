@@ -19,6 +19,7 @@
   "EqualsValueClauseSyntax",
   "EventControlWithExpressionSyntax",
   "ExpressionStatementSyntax",
+  "HierarchicalInstanceSyntax",
   "HierarchyInstantiationSyntax",
   "IdentifierNameSyntax",
   "IdentifierSelectNameSyntax",
