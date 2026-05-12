@@ -203,6 +203,26 @@ def test_procedural_and_timing(original_tree):
     })
 
 
+def test_conditional_family(original_tree):
+    """iter-008: block statement + conditional statement + else clause + predicate + pattern."""
+    reparsed, _ = _roundtrip(original_tree)
+    for cls in (
+        "BlockStatementSyntax",
+        "ConditionalStatementSyntax",
+        "ElseClauseSyntax",
+        "ConditionalPredicateSyntax",
+        "ConditionalPatternSyntax",
+    ):
+        _assert_class_roundtrip(original_tree.root, reparsed.root, cls)
+    _mark_covered({
+        "BlockStatementSyntax",
+        "ConditionalStatementSyntax",
+        "ElseClauseSyntax",
+        "ConditionalPredicateSyntax",
+        "ConditionalPatternSyntax",
+    })
+
+
 def test_full_token_text_stream(original_tree):
     """Strongest oracle: every Token's rawText survives the round-trip in DFS
     order (modulo trivia after the final token, which pyslang drops upstream)."""

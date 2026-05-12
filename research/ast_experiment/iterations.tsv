@@ -7,3 +7,4 @@ iteration	layer	commit	hypothesis	score	status	summary
 005	struct	pending	data decl + variable dim + range dim specifier round-trip	35	pass	covered DataDeclaration/VariableDimension/RangeDimensionSpecifier
 006	struct	pending	continuous assign + expression statement round-trip	33	pass	covered ContinuousAssign/ExpressionStatement
 007	struct	pending	procedural block + timing control + event expression family round-trip	27	pass	covered ProceduralBlock/TimingControlStatement/EventControlWithExpression/Binary+Signal+ParenEvent
+008	struct	pending	block stmt + conditional stmt + else clause + predicate + pattern round-trip	22	pass	covered BlockStatement/ConditionalStatement/ElseClause/ConditionalPredicate/ConditionalPattern
