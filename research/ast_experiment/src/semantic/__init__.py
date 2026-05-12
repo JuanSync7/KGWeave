@@ -16,6 +16,32 @@ Re-exports (preserved from the old monolithic `scripts/semantic.py`)::
 
 from __future__ import annotations
 
-# Re-exports are populated as the migration progresses (split-01..split-07).
-# Until then, the monolithic shim at scripts/semantic.py remains the source
-# of truth for query-layer behaviour.
+from .queries import (
+    neighbors,
+    find_by_name,
+    find_drivers,
+    cone_of_influence,
+    forward_cone,
+    reads_of,
+    port_connections,
+    instances_of,
+    param_overrides,
+    modports_of,
+    package_of,
+    sensitivity_of,
+    width_of,
+    default_value_of,
+    graph_query,
+    queryable_nodes,
+)
+
+__all__ = [
+    "neighbors", "find_by_name",
+    "find_drivers", "cone_of_influence", "forward_cone", "reads_of",
+    "port_connections", "instances_of", "param_overrides",
+    "modports_of", "package_of",
+    "sensitivity_of",
+    "width_of", "default_value_of",
+    "graph_query", "queryable_nodes",
+    # promote is added in split-04 when dispatch.py lands.
+]
