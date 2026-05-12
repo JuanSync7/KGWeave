@@ -251,6 +251,38 @@ def test_graph_query_connects_edge_payload_filter(multi_bundle):
     assert out == ["top.clk"]
 
 
+def test_s10_function_calls_and_cone(multi_bundle):
+    """S10: function promotion + calls edge from always blocks.
+
+    * fifo.next_ptr is queryable with role=function (has_function edge from fifo).
+    * The always_ff in fifo emits a ``calls`` edge to fifo.next_ptr.
+    * cone_of_influence('fifo.wr_ptr') still bridges through the function call
+      to the original drivers (push, full).
+    """
+    _tree, _comp, graph = multi_bundle
+    from scripts.semantic import find_by_name, neighbors, cone_of_influence
+
+    fn = find_by_name(graph, "fifo.next_ptr")
+    assert fn is not None and fn["semantic"]["role"] == "function"
+
+    # has_function from fifo module.
+    fifo = find_by_name(graph, "fifo")
+    fns = neighbors(graph, fifo["id"], edge_type="has_function", direction="out")
+    assert any(f["semantic"]["name"] == "next_ptr" for f in fns)
+
+    # `calls` edges: always_ff calls next_ptr.
+    callers = neighbors(graph, fn["id"], edge_type="calls", direction="in")
+    assert any(c.get("semantic", {}).get("role") == "always_ff" for c in callers)
+
+    # cone_of_influence still propagates through wr_ptr (function-internal
+    # read is suppressed, but the always_ff still drives wr_ptr).
+    seen = cone_of_influence(graph, "fifo.wr_ptr")
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    paths = {by_id[i].get("semantic", {}).get("path") for i in seen}
+    assert "fifo.push" in paths
+    assert "fifo.full" in paths
+
+
 def test_s9_package_of_typedef(multi_bundle):
     """S9: typedef + enum-value promotion under a package.
 

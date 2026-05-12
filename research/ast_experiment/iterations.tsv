@@ -50,3 +50,6 @@ S10	sem	pending	S9 PackageDeclaration → role=package; TypedefDeclarationSyntax
 023	struct	pending	cover ParameterDeclarationStatementSyntax round-trip on fifo_pkg.sv	3	pass	per-class assertion green
 024	struct	pending	cover PackageImportDeclarationSyntax + PackageImportItemSyntax round-trip on fifo.sv	1	pass	per-class assertion green
 025	struct	pending	cover NamedTypeSyntax round-trip on fifo.sv (fifo_status_e port type)	0	pass	score back to 0; covered=60/60
+corpus-04	corpus	pending	add automatic function next_ptr to fifo.sv; wr_ptr/rd_ptr increments now go through next_ptr(); covers FunctionDeclarationSyntax/FunctionPrototypeSyntax/FunctionPortListSyntax/FunctionPortSyntax	4	pass	score=4 with the four new function-related classes
+S11	sem	pending	S10 FunctionDeclarationSyntax: role=function with has_function edge; function-body excluded from S2..S6 to avoid leaks; always_ff/comb emits calls edge to invoked functions and skips reads for the function name	0	pass	calls('fifo.next_ptr') reaches always_ff; cone_of_influence('fifo.wr_ptr') still reaches push+full
+026	struct	pending	cover FunctionDeclarationSyntax + FunctionPrototypeSyntax + FunctionPortListSyntax + FunctionPortSyntax round-trip on fifo.sv	0	pass	per-class assertions green; score back to 0; covered=64/64

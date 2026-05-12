@@ -438,6 +438,25 @@ def test_iter024_package_import(fifo_tree_post_import):
     _mark_covered({"PackageImportDeclarationSyntax", "PackageImportItemSyntax"})
 
 
+def test_iter026_function_declaration(fifo_tree_post_import):
+    """iter-026: FunctionDeclarationSyntax + FunctionPrototypeSyntax +
+    FunctionPortListSyntax + FunctionPortSyntax round-trip byte-equal."""
+    reparsed, _ = _roundtrip(fifo_tree_post_import)
+    for cls in (
+        "FunctionDeclarationSyntax",
+        "FunctionPrototypeSyntax",
+        "FunctionPortListSyntax",
+        "FunctionPortSyntax",
+    ):
+        _assert_class_roundtrip(fifo_tree_post_import.root, reparsed.root, cls)
+    _mark_covered({
+        "FunctionDeclarationSyntax",
+        "FunctionPrototypeSyntax",
+        "FunctionPortListSyntax",
+        "FunctionPortSyntax",
+    })
+
+
 def test_iter025_named_type(fifo_tree_post_import):
     """iter-025: NamedTypeSyntax round-trips byte-equal (fifo_status_e port type)."""
     reparsed, _ = _roundtrip(fifo_tree_post_import)

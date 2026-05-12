@@ -20,6 +20,10 @@ module fifo
     logic [$clog2(DEPTH):0] rd_ptr;
     logic [$clog2(DEPTH):0] count;
 
+    function automatic logic [$clog2(DEPTH):0] next_ptr(logic [$clog2(DEPTH):0] p);
+        next_ptr = p + 1'b1;
+    endfunction
+
     assign full  = (count == DEPTH);
     assign empty = (count == 0);
     assign dout  = mem[rd_ptr[$clog2(DEPTH)-1:0]];
@@ -32,10 +36,10 @@ module fifo
         end else begin
             if (push && !full) begin
                 mem[wr_ptr[$clog2(DEPTH)-1:0]] <= din;
-                wr_ptr <= wr_ptr + 1'b1;
+                wr_ptr <= next_ptr(wr_ptr);
             end
             if (pop && !empty) begin
-                rd_ptr <= rd_ptr + 1'b1;
+                rd_ptr <= next_ptr(rd_ptr);
             end
             case ({push && !full, pop && !empty})
                 2'b10: count <= count + 1'b1;

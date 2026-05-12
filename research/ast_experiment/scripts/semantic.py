@@ -407,6 +407,7 @@ def promote(
         "in_data": 0,
         "in_port": 0,
         "in_typedef": 0,
+        "in_function": 0,
     }
 
     def _cur_module():
@@ -436,6 +437,17 @@ def promote(
             # ``find_by_name('top')`` / ``find_by_name('fifo_pkg')`` resolve.
             name_index[mname] = gid
             port_names_by_module.setdefault(mname, set())
+        elif c == "FunctionDeclarationSyntax":
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                fname = _function_name_of(node)
+                if fname:
+                    fpath = f"{mname}.{fname}"
+                    _mark(nodes_list[node_offset + idx], role="function",
+                          name=fname, path=fpath)
+                    _add_edge(graph, mod_gid, gid, "has_function")
+                    name_index[fpath] = gid
+            pushed = "in_function"
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:
@@ -481,11 +493,13 @@ def promote(
                         _add_edge(graph, td_gid, gid, "has_enum_value",
                                   name=dname, typedef=tpath)
                         name_index[epath] = gid
-                    elif state["in_param"] > 0:
+                    elif state["in_param"] > 0 and state["in_function"] == 0:
                         _mark(nodes_list[node_offset + idx], role="param", name=dname, path=dpath)
                         _add_edge(graph, mod_gid, gid, "has_param")
                         name_index[dpath] = gid
-                    elif state["in_data"] > 0 and dname not in port_names_by_module.get(mname, set()):
+                    elif (state["in_data"] > 0
+                          and state["in_function"] == 0
+                          and dname not in port_names_by_module.get(mname, set())):
                         _mark(nodes_list[node_offset + idx], role="net", name=dname, path=dpath)
                         _add_edge(graph, mod_gid, gid, "has_net")
                         name_index[dpath] = gid
@@ -512,7 +526,7 @@ def promote(
         return
 
     # Second pass — rules S2..S6 (need name_index complete).
-    state2 = {"idx": 0, "module_stack": []}
+    state2 = {"idx": 0, "module_stack": [], "in_function": 0}
 
     def _cur_module2():
         return state2["module_stack"][-1] if state2["module_stack"] else (None, "")
@@ -523,24 +537,31 @@ def promote(
         c = _cls(node)
         gid = nodes_list[node_offset + idx]["id"]
         popped = False
+        entered_fn = False
         if c == "ModuleDeclarationSyntax":
             mname = _module_name_of(node)
             state2["module_stack"].append((gid, mname))
             popped = True
+        if c == "FunctionDeclarationSyntax":
+            state2["in_function"] += 1
+            entered_fn = True
         mod_gid, mname = _cur_module2()
         scope = module_scope_by_name.get(mname)
         scope_path = mname
-        if c == "ContinuousAssignSyntax":
-            _rule_s2(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks, scope_path)
-        elif c == "ProceduralBlockSyntax":
-            _rule_s3(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks, scope_path)
-        elif c == "IdentifierSelectNameSyntax":
-            _rule_s4(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks, scope_path)
-        elif c == "InvocationExpressionSyntax":
-            _rule_s5(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks, scope_path)
-        elif c == "HierarchyInstantiationSyntax":
-            _rule_s6(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks,
-                     scope_path, mod_gid)
+        # Inside a function body, suppress S2..S5/S6 — the function's local
+        # symbols are not promoted, so reads/drives there would leak.
+        if state2["in_function"] == 0:
+            if c == "ContinuousAssignSyntax":
+                _rule_s2(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks, scope_path)
+            elif c == "ProceduralBlockSyntax":
+                _rule_s3(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks, scope_path)
+            elif c == "IdentifierSelectNameSyntax":
+                _rule_s4(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks, scope_path)
+            elif c == "InvocationExpressionSyntax":
+                _rule_s5(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks, scope_path)
+            elif c == "HierarchyInstantiationSyntax":
+                _rule_s6(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks,
+                         scope_path, mod_gid)
         if not _is_token(node):
             try:
                 children = list(node)
@@ -548,11 +569,40 @@ def promote(
                 children = []
             for ch in children:
                 visit_pass2(ch)
+        if entered_fn:
+            state2["in_function"] -= 1
         if popped:
             state2["module_stack"].pop()
 
     visit_pass2(syntax_tree.root)
     graph["semantic_name_index"] = name_index
+
+
+def _function_name_of(fn_syn: Any) -> str:
+    """Return the function name token from a FunctionDeclarationSyntax.
+
+    The name lives inside the FunctionPrototypeSyntax child. We pick the
+    first Identifier token that follows the FunctionKeyword token.
+    """
+    proto = next((c for c in fn_syn if _cls(c) == "FunctionPrototypeSyntax"), None)
+    if proto is None:
+        return ""
+    saw_keyword = False
+    for tok in _identifier_tokens(proto):
+        # Identifier tokens are the only ones returned by _identifier_tokens;
+        # there is at least one (return-type identifier or function name).
+        # The function name is the LAST identifier outside the FunctionPortList
+        # subtree. Simpler: walk direct tokens AND skip those inside FunctionPortListSyntax.
+        pass
+    # Walk the prototype manually: the function name is the last Identifier
+    # token encountered BEFORE any FunctionPortListSyntax.
+    last_id = ""
+    for d in _descendants(proto):
+        if _cls(d) == "FunctionPortListSyntax":
+            break
+        if _is_token(d) and _token_kind_name(d) == "Identifier":
+            last_id = d.valueText
+    return last_id
 
 
 def _typedef_name_of(td_syn: Any) -> str:
@@ -641,6 +691,47 @@ def _rule_s3(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):
         return
     _mark(gnode, role=role)
 
+    # Pre-pass: detect function invocations in this block. For each
+    # InvocationExpressionSyntax whose callee identifier resolves to a
+    # ``function``-role node in name_index (same module scope), emit a
+    # ``calls`` edge and remember the function's bare name so the reads-pass
+    # does not emit a stray ``reads`` edge for it.
+    function_call_names: set[str] = set()
+    # `node` is the ProceduralBlockSyntax — defer descendants walk to a local fn.
+    def _descendants_local(n):
+        yield n
+        if _is_token(n):
+            return
+        try:
+            kids = list(n)
+        except TypeError:
+            return
+        for c in kids:
+            yield from _descendants_local(c)
+
+    for d in _descendants_local(node):
+        if _cls(d) != "InvocationExpressionSyntax":
+            continue
+        callee = next((c for c in d if not _is_token(c)), None)
+        if callee is None or _cls(callee) != "IdentifierNameSyntax":
+            continue
+        toks = _identifier_tokens(callee)
+        if not toks:
+            continue
+        fn_name = toks[0].valueText
+        # Resolve to a function-role node in the current module scope.
+        fpath = f"{scope_path}.{fn_name}" if scope_path else fn_name
+        fn_id = name_index.get(fpath)
+        if fn_id is None:
+            continue
+        # Lookup the node to confirm role=function.
+        fn_node = next((nn for nn in graph["nodes"] if nn["id"] == fn_id), None)
+        if fn_node is None or fn_node.get("semantic", {}).get("role") != "function":
+            continue
+        if not _has_edge(graph, gid, fn_id, "calls"):
+            _add_edge(graph, gid, fn_id, "calls")
+        function_call_names.add(fn_name)
+
     # Helper: collect all descendant syntax nodes in a list (DFS), so we can
     # introspect them without re-walking from the outer DFS.
     def descendants(n):
@@ -692,7 +783,7 @@ def _rule_s3(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):
             if tgt is not None and not _has_edge(graph, gid, tgt, "drives"):
                 _add_edge(graph, gid, tgt, "drives")
         for rname in _identifier_names_in(rhs):
-            if rname == lhs_name:
+            if rname == lhs_name or rname in function_call_names:
                 continue
             src = _resolve(rname, scope=scope, name_index=name_index, leaks=leaks,
                            context=f"{role}.reads[{gid}]", scope_path=scope_path)
@@ -704,6 +795,8 @@ def _rule_s3(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):
         c = _cls(d)
         if c == "ConditionalPredicateSyntax":
             for rname in _identifier_names_in(d):
+                if rname in function_call_names:
+                    continue
                 src = _resolve(rname, scope=scope, name_index=name_index, leaks=leaks,
                                context=f"{role}.reads.predicate[{gid}]", scope_path=scope_path)
                 if src is not None and not _has_edge(graph, gid, src, "reads"):
@@ -713,6 +806,8 @@ def _rule_s3(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):
             if head is None:
                 continue
             for rname in _identifier_names_in(head):
+                if rname in function_call_names:
+                    continue
                 src = _resolve(rname, scope=scope, name_index=name_index, leaks=leaks,
                                context=f"{role}.reads.case_head[{gid}]", scope_path=scope_path)
                 if src is not None and not _has_edge(graph, gid, src, "reads"):
