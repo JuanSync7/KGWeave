@@ -157,6 +157,22 @@ def test_param_decl_family(original_tree):
     })
 
 
+def test_data_decl_family(original_tree):
+    """iter-005: data declaration + variable dim + range dim specifier."""
+    reparsed, _ = _roundtrip(original_tree)
+    for cls in (
+        "DataDeclarationSyntax",
+        "VariableDimensionSyntax",
+        "RangeDimensionSpecifierSyntax",
+    ):
+        _assert_class_roundtrip(original_tree.root, reparsed.root, cls)
+    _mark_covered({
+        "DataDeclarationSyntax",
+        "VariableDimensionSyntax",
+        "RangeDimensionSpecifierSyntax",
+    })
+
+
 def test_full_token_text_stream(original_tree):
     """Strongest oracle: every Token's rawText survives the round-trip in DFS
     order (modulo trivia after the final token, which pyslang drops upstream)."""

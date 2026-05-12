@@ -1,5 +1,6 @@
 [
   "AnsiPortListSyntax",
+  "DataDeclarationSyntax",
   "DeclaratorSyntax",
   "EqualsValueClauseSyntax",
   "ImplicitAnsiPortSyntax",
@@ -8,5 +9,7 @@
   "ModuleHeaderSyntax",
   "ParameterDeclarationSyntax",
   "ParameterPortListSyntax",
+  "RangeDimensionSpecifierSyntax",
+  "VariableDimensionSyntax",
   "VariablePortHeaderSyntax"
 ]
