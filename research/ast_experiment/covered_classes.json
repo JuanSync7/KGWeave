@@ -1,3 +1,6 @@
 [
-  "ModuleDeclarationSyntax"
+  "AnsiPortListSyntax",
+  "ModuleDeclarationSyntax",
+  "ModuleHeaderSyntax",
+  "ParameterPortListSyntax"
 ]

@@ -61,10 +61,80 @@ def _roundtrip(tree):
     return reparsed, emitted_text
 
 
+def _token_text_stream(node, out=None):
+    """Concatenation of every Token rawText (and leading trivia text) reachable
+    from `node`, in DFS order. Strong oracle: byte-equal at the token level."""
+    if out is None:
+        out = []
+    if type(node).__name__ == "Token":
+        for tr in node.trivia:
+            out.append(tr.getRawText())
+        out.append(node.rawText)
+        return out
+    try:
+        for c in node:
+            _token_text_stream(c, out)
+    except TypeError:
+        pass
+    return out
+
+
+def _subtrees_of_class(root, class_name):
+    """All subtree roots whose Python class is `class_name`, in DFS order."""
+    found = []
+
+    def walk(n):
+        if type(n).__name__ == class_name:
+            found.append(n)
+        try:
+            for c in n:
+                walk(c)
+        except TypeError:
+            pass
+
+    walk(root)
+    return found
+
+
+def _assert_class_roundtrip(original_root, reparsed_root, class_name):
+    """For every subtree rooted at `class_name`, the token-text stream is
+    preserved byte-for-byte through the round-trip (positional match)."""
+    orig_subs = _subtrees_of_class(original_root, class_name)
+    rt_subs = _subtrees_of_class(reparsed_root, class_name)
+    assert len(orig_subs) == len(rt_subs), (
+        f"{class_name}: subtree count {len(orig_subs)} != {len(rt_subs)}"
+    )
+    for i, (o, r) in enumerate(zip(orig_subs, rt_subs)):
+        os_ = "".join(_token_text_stream(o))
+        rs_ = "".join(_token_text_stream(r))
+        assert os_ == rs_, (
+            f"{class_name}[{i}] token text diverges:\nORIG: {os_!r}\nRT:   {rs_!r}"
+        )
+
+
 def test_module_roundtrip_class_stream(original_tree):
     """ModuleDeclarationSyntax: round-tripped tree has same AST class stream."""
     reparsed, _ = _roundtrip(original_tree)
     orig = _class_stream(original_tree.root)
     rt = _class_stream(reparsed.root)
     assert orig == rt, "AST class streams diverge after round-trip"
+    _assert_class_roundtrip(original_tree.root, reparsed.root, "ModuleDeclarationSyntax")
     _mark_covered({"ModuleDeclarationSyntax"})
+
+
+def test_module_header_and_port_lists(original_tree):
+    """iter-002: ModuleHeaderSyntax + ParameterPortListSyntax + AnsiPortListSyntax
+    each round-trip with byte-equal token-text streams."""
+    reparsed, _ = _roundtrip(original_tree)
+    for cls in ("ModuleHeaderSyntax", "ParameterPortListSyntax", "AnsiPortListSyntax"):
+        _assert_class_roundtrip(original_tree.root, reparsed.root, cls)
+    _mark_covered({"ModuleHeaderSyntax", "ParameterPortListSyntax", "AnsiPortListSyntax"})
+
+
+def test_full_token_text_stream(original_tree):
+    """Strongest oracle: every Token's rawText survives the round-trip in DFS
+    order (modulo trivia after the final token, which pyslang drops upstream)."""
+    reparsed, _ = _roundtrip(original_tree)
+    orig = _token_text_stream(original_tree.root)
+    rt = _token_text_stream(reparsed.root)
+    assert orig == rt, "Token text streams diverge"

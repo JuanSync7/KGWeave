@@ -1,3 +1,4 @@
 iteration	commit	hypothesis	score	status	summary
 000	—	—	48	scaffold	PROGRAM.md, fifo.sv, inventory.py, score.py, test_roundtrip.py (baseline xfail) created
 001	pending	universal structural lift/unlift (class+kind+tokens+trivia) gives lossless class-stream round-trip	47	pass	scripts/lift.py + scripts/unlift.py + conftest.py; xfail removed; ModuleDeclarationSyntax covered
+002	pending	module header + param port list + ANSI port list round-trip via per-class token-text fingerprint	44	pass	added _assert_class_roundtrip helper + token-text-stream oracle; covered ModuleHeader/ParameterPortList/AnsiPortList
