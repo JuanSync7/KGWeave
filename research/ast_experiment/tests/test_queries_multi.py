@@ -31,7 +31,7 @@ def multi_bundle():
     # and promoted into one shared graph. The pre-build_kg fixture used a
     # string-concat hack that bypassed the real multi-file code path and
     # masked the cross-tree merge bug.
-    from scripts.build import build_kg
+    from research.ast_experiment.src.build import build_kg
 
     graph, trees, comp = build_kg([PKG, IFACE, FIFO, BIND, TOP])
     # Pick the first tree as the "round-trip representative" — round-trip
@@ -53,7 +53,7 @@ def test_multi_roundtrip_after_promote(multi_bundle):
     path stores per-tree roots in ``graph['order']`` so individual files can
     still be re-emitted independently."""
     tree, _comp, graph = multi_bundle
-    from scripts.unlift import unlift, emit  # noqa: PLC0415
+    from research.ast_experiment.src.unlift import unlift, emit  # noqa: PLC0415
     from test_roundtrip import _token_text_stream  # noqa: PLC0415
 
     emitted = emit(graph)

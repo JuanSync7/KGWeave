@@ -62,8 +62,8 @@ def test_parse_baseline(original_tree):
 
 
 def _roundtrip(tree):
-    from scripts.lift import lift  # noqa: I001
-    from scripts.unlift import emit
+    from research.ast_experiment.src.lift import lift  # noqa: I001
+    from research.ast_experiment.src.unlift import emit
 
     graph = lift(tree)
     emitted_text = emit(graph)

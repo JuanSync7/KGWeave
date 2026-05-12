@@ -43,7 +43,7 @@ _OWNER_ROLES = {"module", "package", "interface"}
 
 @pytest.fixture(scope="module")
 def kg():
-    from scripts.build import build_kg
+    from research.ast_experiment.src.build import build_kg
 
     graph, trees, comp = build_kg([PKG, IFACE, FIFO, BIND, TOP, TB])
     return graph, trees, comp

@@ -22,7 +22,7 @@ TOP = HERE / "top.sv"
 
 @pytest.fixture(scope="module")
 def gbundle():
-    from scripts.build import build_kg
+    from research.ast_experiment.src.build import build_kg
 
     graph, trees, comp = build_kg([PKG, IFACE, FIFO, TOP])
     return trees[0], comp, graph
@@ -453,7 +453,7 @@ class TestGroupJ:
     def test_J2_roundtrip_after_promote(self, gbundle):
         """J2: emit → reparse → token stream equals the original."""
         tree, _c, g = gbundle
-        from scripts.unlift import emit
+        from research.ast_experiment.src.unlift import emit
         from test_roundtrip import _token_text_stream  # noqa: PLC0415
         emitted = emit(g)
         reparsed = pyslang.SyntaxTree.fromText(emitted)

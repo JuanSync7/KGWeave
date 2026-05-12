@@ -23,7 +23,7 @@ def fixture_bundle():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from scripts.lift import lift
+    from research.ast_experiment.src.lift import lift
     from scripts.semantic import promote
 
     graph = lift(tree)
@@ -40,7 +40,7 @@ def _queryable_by_role(graph, role):
 def test_roundtrip_after_promote(fixture_bundle):
     """Promotion must not mutate token payloads — emit() still reproduces source."""
     tree, _comp, graph = fixture_bundle
-    from scripts.unlift import emit
+    from research.ast_experiment.src.unlift import emit
 
     emitted = emit(graph)
     reparsed = pyslang.SyntaxTree.fromText(emitted)
