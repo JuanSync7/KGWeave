@@ -48,23 +48,20 @@ PROMOTE_NOW = {
     "HierarchicalInstance": "S6",
     "InstanceName": "S6",
     "NamedPortConnection": "S6",
-}
-
-PROMOTE_IN_FLIGHT = {
-    # Phase 1
+    # S7 — ParameterValueAssignment → param_override (Phase 1 — shipped)
     "ParameterValueAssignment": "S7",
     "NamedParamAssignment": "S7",
     "OrderedParamAssignment": "S7",
-    # Phase 2
+    # S8 — AlwaysComb → drives/reads (no sensitive_to) (Phase 2 — shipped)
     "AlwaysCombBlock": "S8",
-    # Phase 3
+    # S9 — Package/typedef/enum (Phase 3 — shipped)
     "PackageDeclaration": "S9a",
     "TypedefDeclaration": "S9b",
     "EnumType": "S9c",
-    # Phase 4
+    # S10 — Function/task + calls (Phase 4 — shipped)
     "FunctionDeclaration": "S10",
     "TaskDeclaration": "S10",
-    # Phase 5
+    # S11 — Interface/modport (Phase 5 — shipped)
     "InterfaceDeclaration": "S11a",
     "ModportDeclaration": "S11b",
     "ModportItem": "S11b",
@@ -74,14 +71,18 @@ PROMOTE_IN_FLIGHT = {
     "ModportSubroutinePort": "S11b",
     "ModportSimplePortList": "S11b",
     "ModportSubroutinePortList": "S11b",
-    # Phase 6
+    # S12 — Generate (Phase 6 — shipped)
     "LoopGenerate": "S12a",
     "GenerateBlock": "S12b",
     "IfGenerate": "S12c",
     "CaseGenerate": "S12c",
     "GenerateRegion": "S12c",
-    # Phase 7 = corpus only, no new rule
+    # S13 — Bind directive (Phase 7 — shipped)
+    "BindDirective": "S13",
 }
+
+# All current in-flight work has shipped. Reserve for the next wave of S-rules.
+PROMOTE_IN_FLIGHT: dict[str, str] = {}
 
 # --- Classification heuristics --------------------------------------------------------
 # Anything explicitly promoted → PROMOTE.
@@ -176,7 +177,7 @@ PROMOTE_FUTURE = {
     "PackageImportDeclaration", "PackageImportItem",
     "PackageExportDeclaration", "PackageExportAllDeclaration",
     # Misc
-    "BindDirective", "BindTargetList", "LetDeclaration",
+    "BindTargetList", "LetDeclaration",
     "ForwardTypedefDeclaration", "ForwardTypeRestriction",
     "FunctionPrototype", "FunctionPort", "FunctionPortList",
     "MemberAccessExpression", "VirtualInterfaceType",

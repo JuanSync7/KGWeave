@@ -13,18 +13,18 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 29 | 15 | 23 | 97 |
-| CONTAINER | 88 | 15 | 0 | 0 | 0 |
-| BLOB | 213 | 16 | 0 | 0 | 0 |
+| PROMOTE | 135 | 33 | 39 | 0 | 96 |
+| CONTAINER | 88 | 17 | 0 | 0 | 0 |
+| BLOB | 213 | 17 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
 | OUT-OF-SCOPE | 58 | 0 | 0 | 0 | 0 |
-| **Total** | **536** | **60** | | | |
+| **Total** | **536** | **67** | | | |
 
 ## PROMOTE (135 items)
 | SyntaxKind | Struct | Semantic | Owner |
 |--|--|--|--|
 | `AlwaysBlock` | ⬜ | ⬜ | future |
-| `AlwaysCombBlock` | ⬜ | ⏳ | S8 |
+| `AlwaysCombBlock` | ⬜ | ✅ | S8 |
 | `AlwaysFFBlock` | ⬜ | ✅ | S3 |
 | `AlwaysLatchBlock` | ⬜ | ⬜ | future |
 | `AnonymousProgram` | ⬜ | ⬜ | future |
@@ -32,10 +32,10 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `AssertionItemPort` | ⬜ | ⬜ | future |
 | `AssertionItemPortList` | ⬜ | ⬜ | future |
 | `AssumePropertyStatement` | ⬜ | ⬜ | future |
-| `BindDirective` | ⬜ | ⬜ | future |
+| `BindDirective` | ✅ | ✅ | S13 |
 | `BindTargetList` | ⬜ | ⬜ | future |
 | `BlockingEventTriggerStatement` | ⬜ | ⬜ | future |
-| `CaseGenerate` | ⬜ | ⏳ | S12c |
+| `CaseGenerate` | ⬜ | ✅ | S12c |
 | `CheckerDataDeclaration` | ⬜ | ⬜ | future |
 | `CheckerDeclaration` | ⬜ | ⬜ | future |
 | `CheckerInstanceStatement` | ⬜ | ⬜ | future |
@@ -68,7 +68,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `DefaultDisableDeclaration` | ⬜ | ⬜ | future |
 | `DefaultFunctionPort` | ⬜ | ⬜ | future |
 | `DeferredAssertion` | ⬜ | ⬜ | future |
-| `EnumType` | ✅ | ⏳ | S9c |
+| `EnumType` | ✅ | ✅ | S9c |
 | `ExpectPropertyStatement` | ⬜ | ⬜ | future |
 | `ExplicitAnsiPort` | ⬜ | ⬜ | future |
 | `ExplicitNonAnsiPort` | ⬜ | ⬜ | future |
@@ -79,18 +79,18 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `FinalBlock` | ⬜ | ⬜ | future |
 | `ForwardTypeRestriction` | ⬜ | ⬜ | future |
 | `ForwardTypedefDeclaration` | ⬜ | ⬜ | future |
-| `FunctionDeclaration` | ✅ | ⏳ | S10 |
+| `FunctionDeclaration` | ✅ | ✅ | S10 |
 | `FunctionPort` | ✅ | ⬜ | future |
 | `FunctionPortList` | ✅ | ⬜ | future |
 | `FunctionPrototype` | ✅ | ⬜ | future |
-| `GenerateBlock` | ⬜ | ⏳ | S12b |
-| `GenerateRegion` | ⬜ | ⏳ | S12c |
+| `GenerateBlock` | ✅ | ✅ | S12b |
+| `GenerateRegion` | ✅ | ✅ | S12c |
 | `GenvarDeclaration` | ⬜ | ⬜ | future |
 | `HierarchicalInstance` | ✅ | ✅ | S6 |
 | `HierarchyInstantiation` | ✅ | ✅ | S6 |
 | `IdentifierName` | ✅ | ✅ | S4 |
 | `IdentifierSelectName` | ✅ | ✅ | S4 |
-| `IfGenerate` | ⬜ | ⏳ | S12c |
+| `IfGenerate` | ⬜ | ✅ | S12c |
 | `ImmediateAssertStatement` | ⬜ | ⬜ | future |
 | `ImmediateAssertionMember` | ⬜ | ⬜ | future |
 | `ImmediateAssumeStatement` | ⬜ | ⬜ | future |
@@ -100,40 +100,40 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ImplicitNonAnsiPort` | ⬜ | ⬜ | future |
 | `InitialBlock` | ⬜ | ⬜ | future |
 | `InstanceName` | ✅ | ✅ | S6 |
-| `InterfaceDeclaration` | ⬜ | ⏳ | S11a |
+| `InterfaceDeclaration` | ⬜ | ✅ | S11a |
 | `InterfaceHeader` | ⬜ | ⬜ | future |
 | `InterfacePortHeader` | ⬜ | ⬜ | future |
 | `InvocationExpression` | ✅ | ✅ | S5 |
 | `LetDeclaration` | ⬜ | ⬜ | future |
 | `LocalVariableDeclaration` | ⬜ | ⬜ | future |
-| `LoopGenerate` | ⬜ | ⏳ | S12a |
+| `LoopGenerate` | ✅ | ✅ | S12a |
 | `MemberAccessExpression` | ⬜ | ⬜ | future |
-| `ModportClockingPort` | ⬜ | ⏳ | S11b |
-| `ModportDeclaration` | ✅ | ⏳ | S11b |
-| `ModportExplicitPort` | ⬜ | ⏳ | S11b |
-| `ModportItem` | ✅ | ⏳ | S11b |
-| `ModportNamedPort` | ✅ | ⏳ | S11b |
-| `ModportSimplePortList` | ✅ | ⏳ | S11b |
-| `ModportSubroutinePort` | ⬜ | ⏳ | S11b |
-| `ModportSubroutinePortList` | ⬜ | ⏳ | S11b |
+| `ModportClockingPort` | ⬜ | ✅ | S11b |
+| `ModportDeclaration` | ✅ | ✅ | S11b |
+| `ModportExplicitPort` | ⬜ | ✅ | S11b |
+| `ModportItem` | ✅ | ✅ | S11b |
+| `ModportNamedPort` | ✅ | ✅ | S11b |
+| `ModportSimplePortList` | ✅ | ✅ | S11b |
+| `ModportSubroutinePort` | ⬜ | ✅ | S11b |
+| `ModportSubroutinePortList` | ⬜ | ✅ | S11b |
 | `ModuleDeclaration` | ✅ | ✅ | S1 |
 | `ModuleHeader` | ✅ | ⬜ | future |
-| `NamedParamAssignment` | ✅ | ⏳ | S7 |
+| `NamedParamAssignment` | ✅ | ✅ | S7 |
 | `NamedPortConnection` | ✅ | ✅ | S6 |
 | `NetAlias` | ⬜ | ⬜ | future |
 | `NetDeclaration` | ⬜ | ⬜ | future |
 | `NetTypeDeclaration` | ⬜ | ⬜ | future |
 | `NonblockingEventTriggerStatement` | ⬜ | ⬜ | future |
-| `OrderedParamAssignment` | ⬜ | ⏳ | S7 |
+| `OrderedParamAssignment` | ⬜ | ✅ | S7 |
 | `OrderedPortConnection` | ⬜ | ⬜ | future |
-| `PackageDeclaration` | ⬜ | ⏳ | S9a |
+| `PackageDeclaration` | ⬜ | ✅ | S9a |
 | `PackageExportAllDeclaration` | ⬜ | ⬜ | future |
 | `PackageExportDeclaration` | ⬜ | ⬜ | future |
 | `PackageHeader` | ⬜ | ⬜ | future |
 | `PackageImportDeclaration` | ✅ | ⬜ | future |
 | `PackageImportItem` | ✅ | ⬜ | future |
 | `ParameterDeclaration` | ✅ | ✅ | S1 |
-| `ParameterValueAssignment` | ✅ | ⏳ | S7 |
+| `ParameterValueAssignment` | ✅ | ✅ | S7 |
 | `PortConcatenation` | ⬜ | ⬜ | future |
 | `PortDeclaration` | ⬜ | ⬜ | future |
 | `PortReference` | ⬜ | ⬜ | future |
@@ -150,10 +150,10 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `StructType` | ⬜ | ⬜ | future |
 | `StructUnionMember` | ⬜ | ⬜ | future |
 | `SystemName` | ✅ | ✅ | S5 |
-| `TaskDeclaration` | ⬜ | ⏳ | S10 |
+| `TaskDeclaration` | ⬜ | ✅ | S10 |
 | `TimeUnitsDeclaration` | ⬜ | ⬜ | future |
 | `TypeParameterDeclaration` | ⬜ | ⬜ | future |
-| `TypedefDeclaration` | ✅ | ⏳ | S9b |
+| `TypedefDeclaration` | ✅ | ✅ | S9b |
 | `UnionType` | ⬜ | ⬜ | future |
 | `UserDefinedNetDeclaration` | ⬜ | ⬜ | future |
 | `VariablePortHeader` | ✅ | ✅ | S1 |
@@ -175,7 +175,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `AttributeSpec` | ⬜ | — | structural lift only |
 | `BitSelect` | ✅ | — | structural lift only |
 | `CaseStatement` | ✅ | — | structural lift only |
-| `CompilationUnit` | ⬜ | — | structural lift only |
+| `CompilationUnit` | ✅ | — | structural lift only |
 | `ConditionalPredicate` | ✅ | — | structural lift only |
 | `ConditionalStatement` | ✅ | — | structural lift only |
 | `CoverageBinsArraySize` | ⬜ | — | structural lift only |
@@ -206,7 +206,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ForVariableDeclaration` | ⬜ | — | structural lift only |
 | `ForeachLoopList` | ⬜ | — | structural lift only |
 | `ForeachLoopStatement` | ⬜ | — | structural lift only |
-| `ForeverStatement` | ⬜ | — | structural lift only |
+| `ForeverStatement` | ✅ | — | structural lift only |
 | `ImplicitEventControl` | ⬜ | — | structural lift only |
 | `JumpStatement` | ⬜ | — | structural lift only |
 | `LocalScope` | ⬜ | — | structural lift only |
@@ -367,7 +367,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `MultipleConcatenationExpression` | ⬜ | — | structural lift only |
 | `MultiplyAssignmentExpression` | ⬜ | — | structural lift only |
 | `MultiplyExpression` | ⬜ | — | structural lift only |
-| `NamedBlockClause` | ⬜ | — | structural lift only |
+| `NamedBlockClause` | ✅ | — | structural lift only |
 | `NamedType` | ✅ | — | structural lift only |
 | `NewArrayExpression` | ⬜ | — | structural lift only |
 | `NewClassExpression` | ⬜ | — | structural lift only |
