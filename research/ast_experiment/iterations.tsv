@@ -10,3 +10,4 @@ iteration	layer	commit	hypothesis	score	status	summary
 008	struct	pending	block stmt + conditional stmt + else clause + predicate + pattern round-trip	22	pass	covered BlockStatement/ConditionalStatement/ElseClause/ConditionalPredicate/ConditionalPattern
 009	struct	pending	case statement + standard case item + default case item round-trip	19	pass	covered CaseStatement/StandardCaseItem/DefaultCaseItem
 010	struct	pending	binary + prefix-unary + parenthesized + concatenation expressions round-trip	15	pass	covered BinaryExpression/PrefixUnaryExpression/ParenthesizedExpression/ConcatenationExpression
+011	struct	pending	integer vector + literal + identifier name + identifier-select name round-trip	11	pass	covered IntegerVectorExpression/LiteralExpression/IdentifierName/IdentifierSelectName

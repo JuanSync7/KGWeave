@@ -249,6 +249,24 @@ def test_expression_family(original_tree):
     })
 
 
+def test_atom_expressions(original_tree):
+    """iter-011: integer vector + literal + identifier name + identifier-select name round-trip."""
+    reparsed, _ = _roundtrip(original_tree)
+    for cls in (
+        "IntegerVectorExpressionSyntax",
+        "LiteralExpressionSyntax",
+        "IdentifierNameSyntax",
+        "IdentifierSelectNameSyntax",
+    ):
+        _assert_class_roundtrip(original_tree.root, reparsed.root, cls)
+    _mark_covered({
+        "IntegerVectorExpressionSyntax",
+        "LiteralExpressionSyntax",
+        "IdentifierNameSyntax",
+        "IdentifierSelectNameSyntax",
+    })
+
+
 def test_full_token_text_stream(original_tree):
     """Strongest oracle: every Token's rawText survives the round-trip in DFS
     order (modulo trivia after the final token, which pyslang drops upstream)."""
