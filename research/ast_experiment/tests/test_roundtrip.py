@@ -275,6 +275,24 @@ def test_select_family(original_tree):
     _mark_covered({"BitSelectSyntax", "ElementSelectSyntax", "RangeSelectSyntax"})
 
 
+def test_invocation_family(original_tree):
+    """iter-013: system name + invocation expression + argument list + ordered argument round-trip."""
+    reparsed, _ = _roundtrip(original_tree)
+    for cls in (
+        "SystemNameSyntax",
+        "InvocationExpressionSyntax",
+        "ArgumentListSyntax",
+        "OrderedArgumentSyntax",
+    ):
+        _assert_class_roundtrip(original_tree.root, reparsed.root, cls)
+    _mark_covered({
+        "SystemNameSyntax",
+        "InvocationExpressionSyntax",
+        "ArgumentListSyntax",
+        "OrderedArgumentSyntax",
+    })
+
+
 def test_full_token_text_stream(original_tree):
     """Strongest oracle: every Token's rawText survives the round-trip in DFS
     order (modulo trivia after the final token, which pyslang drops upstream)."""

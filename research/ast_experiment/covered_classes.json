@@ -1,5 +1,6 @@
 [
   "AnsiPortListSyntax",
+  "ArgumentListSyntax",
   "BinaryEventExpressionSyntax",
   "BinaryExpressionSyntax",
   "BitSelectSyntax",
@@ -23,9 +24,11 @@
   "ImplicitAnsiPortSyntax",
   "IntegerTypeSyntax",
   "IntegerVectorExpressionSyntax",
+  "InvocationExpressionSyntax",
   "LiteralExpressionSyntax",
   "ModuleDeclarationSyntax",
   "ModuleHeaderSyntax",
+  "OrderedArgumentSyntax",
   "ParameterDeclarationSyntax",
   "ParameterPortListSyntax",
   "ParenthesizedEventExpressionSyntax",
@@ -36,6 +39,7 @@
   "RangeSelectSyntax",
   "SignalEventExpressionSyntax",
   "StandardCaseItemSyntax",
+  "SystemNameSyntax",
   "TimingControlStatementSyntax",
   "VariableDimensionSyntax",
   "VariablePortHeaderSyntax"

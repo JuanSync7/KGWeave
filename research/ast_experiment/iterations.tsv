@@ -12,3 +12,4 @@ iteration	layer	commit	hypothesis	score	status	summary
 010	struct	pending	binary + prefix-unary + parenthesized + concatenation expressions round-trip	15	pass	covered BinaryExpression/PrefixUnaryExpression/ParenthesizedExpression/ConcatenationExpression
 011	struct	pending	integer vector + literal + identifier name + identifier-select name round-trip	11	pass	covered IntegerVectorExpression/LiteralExpression/IdentifierName/IdentifierSelectName
 012	struct	pending	bit/element/range select round-trip	8	pass	covered BitSelect/ElementSelect/RangeSelect
+013	struct	pending	system name + invocation + argument list + ordered argument round-trip	4	pass	covered SystemName/InvocationExpression/ArgumentList/OrderedArgument
