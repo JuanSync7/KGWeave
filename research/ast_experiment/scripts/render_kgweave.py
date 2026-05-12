@@ -35,17 +35,12 @@ ROOT = HERE.parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
-import pyslang  # noqa: E402
-
 from kgweave.knowledge_graph.backends.networkx_backend import NetworkXBackend  # noqa: E402
 from kgweave.knowledge_graph.common.schemas import Entity, Triple  # noqa: E402
 from kgweave.knowledge_graph.export import export_html  # noqa: E402
 
-from research.ast_experiment.scripts.lift import lift  # noqa: E402
-from research.ast_experiment.scripts.semantic import (  # noqa: E402
-    promote,
-    queryable_nodes,
-)
+from research.ast_experiment.scripts.build import build_kg  # noqa: E402
+from research.ast_experiment.scripts.semantic import queryable_nodes  # noqa: E402
 
 OUT_HTML = HERE / "render" / "kgweave_graph.html"
 OUT_HTML.parent.mkdir(exist_ok=True)
@@ -72,15 +67,11 @@ _ROLE_MAP = {
 
 
 def _build_semantic_graph():
-    # Concatenate so lift + promote share ONE DFS index space (same pattern
-    # the multi-module tests use; separate trees would collide on n0001.* ids
-    # and miss cross-tree edges like top.u_fifo --of_module--> fifo).
-    combined = (HERE / "top.sv").read_text() + "\n" + (HERE / "fifo.sv").read_text()
-    tree = pyslang.SyntaxTree.fromText(combined)
-    compilation = pyslang.Compilation()
-    compilation.addSyntaxTree(tree)
-    graph = lift(tree)
-    promote(graph, tree, compilation)
+    # Production multi-file path: each SV file is its own SyntaxTree, lifted
+    # and promoted into one shared graph (file-stem id prefixes keep node
+    # ids unique; the shared semantic_name_index lets cross-tree references
+    # like top.u_fifo --of_module--> fifo resolve correctly).
+    graph, _trees, _comp = build_kg([HERE / "top.sv", HERE / "fifo.sv"])
     return graph
 
 

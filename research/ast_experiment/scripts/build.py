@@ -18,8 +18,14 @@ from typing import Any
 
 import pyslang
 
-from scripts.lift import lift
-from scripts.semantic import promote
+try:
+    # When the experiment dir is on sys.path (pytest conftest adds it),
+    # use the package-style import.
+    from scripts.lift import lift
+    from scripts.semantic import promote
+except ImportError:  # pragma: no cover — script-mode fallback
+    from .lift import lift
+    from .semantic import promote
 
 
 def build_kg(sv_paths: list[Path]) -> tuple[dict[str, Any], list[Any], Any]:
