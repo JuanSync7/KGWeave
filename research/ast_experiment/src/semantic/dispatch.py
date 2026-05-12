@@ -32,7 +32,8 @@ from .common.tokens import (
 )
 from .rules import RULE_TABLE
 from .rules.dataflow import rule_s3_or_s8
-from .rules.hierarchy import rule_s6, rule_s12, rule_s13
+from .rules.generate import rule_s12
+from .rules.instantiation import rule_s6, rule_s13
 
 
 # Active pass-2 rules — these are the only RULE_TABLE entries whose callable

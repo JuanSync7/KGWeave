@@ -8,13 +8,15 @@ stubs export an empty ``RULES`` list and pin no metadata.
 from __future__ import annotations
 
 from . import (
-    hierarchy, dataflow, types, behavior,
+    structure, instantiation, interfaces, generate,
+    dataflow, types, behavior,
     sva, coverage, classes, constraints,
     procedural, clocking, properties, assertions, checkers, extern,
 )
 
 ALL_RULE_MODULES = [
-    hierarchy, dataflow, types, behavior,
+    structure, instantiation, interfaces, generate,
+    dataflow, types, behavior,
     sva, coverage, classes, constraints,
     procedural, clocking, properties, assertions, checkers, extern,
 ]
