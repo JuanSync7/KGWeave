@@ -131,6 +131,14 @@ def test_module_header_and_port_lists(original_tree):
     _mark_covered({"ModuleHeaderSyntax", "ParameterPortListSyntax", "AnsiPortListSyntax"})
 
 
+def test_port_family(original_tree):
+    """iter-003: implicit ANSI port + variable port header round-trip."""
+    reparsed, _ = _roundtrip(original_tree)
+    for cls in ("ImplicitAnsiPortSyntax", "VariablePortHeaderSyntax"):
+        _assert_class_roundtrip(original_tree.root, reparsed.root, cls)
+    _mark_covered({"ImplicitAnsiPortSyntax", "VariablePortHeaderSyntax"})
+
+
 def test_full_token_text_stream(original_tree):
     """Strongest oracle: every Token's rawText survives the round-trip in DFS
     order (modulo trivia after the final token, which pyslang drops upstream)."""
