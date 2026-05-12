@@ -13,3 +13,4 @@ iteration	layer	commit	hypothesis	score	status	summary
 011	struct	pending	integer vector + literal + identifier name + identifier-select name round-trip	11	pass	covered IntegerVectorExpression/LiteralExpression/IdentifierName/IdentifierSelectName
 012	struct	pending	bit/element/range select round-trip	8	pass	covered BitSelect/ElementSelect/RangeSelect
 013	struct	pending	system name + invocation + argument list + ordered argument round-trip	4	pass	covered SystemName/InvocationExpression/ArgumentList/OrderedArgument
+014	struct	pending	simple property/sequence + universal SyntaxNode + Token round-trip	0	pass	covered SimplePropertyExpr/SimpleSequenceExpr/SyntaxNode/Token — structural score=0

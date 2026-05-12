@@ -38,9 +38,13 @@
   "RangeDimensionSpecifierSyntax",
   "RangeSelectSyntax",
   "SignalEventExpressionSyntax",
+  "SimplePropertyExprSyntax",
+  "SimpleSequenceExprSyntax",
   "StandardCaseItemSyntax",
+  "SyntaxNode",
   "SystemNameSyntax",
   "TimingControlStatementSyntax",
+  "Token",
   "VariableDimensionSyntax",
   "VariablePortHeaderSyntax"
 ]

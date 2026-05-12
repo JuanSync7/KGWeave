@@ -293,6 +293,24 @@ def test_invocation_family(original_tree):
     })
 
 
+def test_property_sequence_and_universal(original_tree):
+    """iter-014: simple property + simple sequence + universal SyntaxNode + Token round-trip."""
+    reparsed, _ = _roundtrip(original_tree)
+    for cls in (
+        "SimplePropertyExprSyntax",
+        "SimpleSequenceExprSyntax",
+        "SyntaxNode",
+        "Token",
+    ):
+        _assert_class_roundtrip(original_tree.root, reparsed.root, cls)
+    _mark_covered({
+        "SimplePropertyExprSyntax",
+        "SimpleSequenceExprSyntax",
+        "SyntaxNode",
+        "Token",
+    })
+
+
 def test_full_token_text_stream(original_tree):
     """Strongest oracle: every Token's rawText survives the round-trip in DFS
     order (modulo trivia after the final token, which pyslang drops upstream)."""
