@@ -67,7 +67,7 @@ def test_instantiates_of_top(multi_bundle):
     assert top is not None and top["semantic"]["role"] == "module"
     insts = neighbors(graph, top["id"], edge_type="instantiates", direction="out")
     paths = [i["semantic"]["path"] for i in insts]
-    assert paths == ["top.u_fifo"]
+    assert set(paths) == {"top.u_fifo", "top.u_fifo_a", "top.u_fifo_b"}
 
 
 def test_module_of_top_u_fifo(multi_bundle):
@@ -135,7 +135,7 @@ def test_tool_instances_of(multi_bundle):
     _tree, _comp, graph = multi_bundle
     from scripts.semantic import instances_of
 
-    assert instances_of(graph, "fifo") == ["top.u_fifo"]
+    assert instances_of(graph, "fifo") == ["top.u_fifo", "top.u_fifo_a", "top.u_fifo_b"]
     assert instances_of(graph, "nonexistent") == []
 
 

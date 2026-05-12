@@ -299,13 +299,13 @@ class TestGroupF:
 
 class TestGroupG:
     def test_G1_top_instantiates_u_fifo(self, gbundle):
-        """G1: top contains exactly one instance, top.u_fifo."""
+        """G1: top contains the named fifo instances, including u_fifo."""
         _t, _c, g = gbundle
         from scripts.semantic import find_by_name, neighbors
         top = find_by_name(g, "top")
         insts = neighbors(g, top["id"], edge_type="instantiates", direction="out")
         paths = [i["semantic"]["path"] for i in insts]
-        assert paths == ["top.u_fifo"]
+        assert set(paths) == {"top.u_fifo", "top.u_fifo_a", "top.u_fifo_b"}
 
     def test_G2_u_fifo_is_of_module_fifo(self, gbundle):
         """G2: top.u_fifo's of_module edge points at module `fifo`."""

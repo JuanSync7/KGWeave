@@ -366,3 +366,17 @@ def test_iter018_named_port_connection(top_tree):
     reparsed, _ = _roundtrip(top_tree)
     _assert_class_roundtrip(top_tree.root, reparsed.root, "NamedPortConnectionSyntax")
     _mark_covered({"NamedPortConnectionSyntax"})
+
+
+def test_iter019_parameter_value_assignment(top_tree):
+    """iter-019: ParameterValueAssignmentSyntax round-trips byte-equal."""
+    reparsed, _ = _roundtrip(top_tree)
+    _assert_class_roundtrip(top_tree.root, reparsed.root, "ParameterValueAssignmentSyntax")
+    _mark_covered({"ParameterValueAssignmentSyntax"})
+
+
+def test_iter020_named_param_assignment(top_tree):
+    """iter-020: NamedParamAssignmentSyntax round-trips byte-equal."""
+    reparsed, _ = _roundtrip(top_tree)
+    _assert_class_roundtrip(top_tree.root, reparsed.root, "NamedParamAssignmentSyntax")
+    _mark_covered({"NamedParamAssignmentSyntax"})
