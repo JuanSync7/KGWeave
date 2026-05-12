@@ -73,7 +73,7 @@ def _build_semantic_graph():
     # like top.u_fifo --of_module--> fifo resolve correctly).
     graph, _trees, _comp = build_kg([
         HERE / "fifo_pkg.sv", HERE / "fifo_if.sv",
-        HERE / "fifo.sv", HERE / "top.sv",
+        HERE / "fifo.sv", HERE / "fifo_asserts.sv", HERE / "top.sv",
     ])
     return graph
 

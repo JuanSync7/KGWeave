@@ -25,6 +25,10 @@ S7. ParameterValueAssignmentSyntax → ``param_override`` edges from the
     resolved expression in the edge payload.
 S8. ProceduralBlockSyntax(always_comb) → ``drives``/``reads`` (mirrors S3
     minus ``sensitive_to``; pyslang's ``kind`` is ``AlwaysCombBlock``).
+S13. BindDirectiveSyntax → ``bound_into`` edge from the binder module node
+    to the target module node, carrying ``instance_name`` and source
+    ``scope`` in the edge payload. Resolves binder + target via the shared
+    ``semantic_name_index`` so cross-file bind directives wire up correctly.
 """
 
 from __future__ import annotations
@@ -567,7 +571,7 @@ def promote(
 
     # Second pass — rules S2..S6 (need name_index complete).
     state2 = {"idx": 0, "module_stack": [], "in_function": 0,
-              "in_generate": 0}
+              "in_generate": 0, "in_bind": 0}
 
     def _cur_module2():
         return state2["module_stack"][-1] if state2["module_stack"] else (None, "")
@@ -593,6 +597,12 @@ def promote(
             # the syntactic HierarchyInstantiationSyntax under the loop is
             # ignored by S6.
             entered_gen = True
+        entered_bind = False
+        if c == "BindDirectiveSyntax":
+            # Dispatch S13 before bumping in_bind so the rule itself runs;
+            # children (the HierarchyInstantiationSyntax under the directive)
+            # are flagged in_bind so S6 ignores them.
+            entered_bind = True
         mod_gid, mname = _cur_module2()
         scope = module_scope_by_name.get(mname)
         scope_path = mname
@@ -607,14 +617,20 @@ def promote(
                 _rule_s4(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks, scope_path)
             elif c == "InvocationExpressionSyntax":
                 _rule_s5(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks, scope_path)
-            elif c == "HierarchyInstantiationSyntax" and state2["in_generate"] == 0:
+            elif (c == "HierarchyInstantiationSyntax"
+                  and state2["in_generate"] == 0
+                  and state2["in_bind"] == 0):
                 _rule_s6(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks,
                          scope_path, mod_gid)
             elif c == "LoopGenerateSyntax":
                 _rule_s12(graph, node, gid, nodes_list[node_offset + idx], scope, name_index, leaks,
                           scope_path, mod_gid)
+            elif c == "BindDirectiveSyntax":
+                _rule_s13(graph, node, gid, nodes_list[node_offset + idx], name_index, leaks)
         if entered_gen:
             state2["in_generate"] += 1
+        if entered_bind:
+            state2["in_bind"] += 1
         if not _is_token(node):
             try:
                 children = list(node)
@@ -624,6 +640,8 @@ def promote(
                 visit_pass2(ch)
         if entered_gen:
             state2["in_generate"] -= 1
+        if entered_bind:
+            state2["in_bind"] -= 1
         if entered_fn:
             state2["in_function"] -= 1
         if popped:
@@ -1021,6 +1039,89 @@ def _rule_s5(graph, node, gid, gnode, scope, name_index, leaks, scope_path=""):
 # ---------------------------------------------------------------------------
 # Public queries.
 # ---------------------------------------------------------------------------
+
+
+def _rule_s13(graph, node, gid, gnode, name_index, leaks):
+    """S13: BindDirectiveSyntax → ``bound_into`` edge.
+
+    Grammar (per pyslang AST dump)::
+
+        BindDirective
+          <attributes>          # SyntaxList, usually empty
+          'bind' keyword
+          IdentifierNameSyntax  # target module being bound INTO (e.g. fifo)
+          HierarchyInstantiationSyntax
+            <attributes>
+            Identifier          # binder module name (e.g. fifo_asserts)
+            HierarchicalInstance
+              InstanceName      # bind instance name (e.g. u_asserts)
+              '(' ... ')'
+          ';'
+
+    The rule resolves both module names via the shared ``name_index`` (built
+    in pass1, populated cross-file by ``build_kg``'s two-phase ordering) and
+    emits exactly one ``bound_into`` edge per bind directive, anchored at
+    the existing module-definition nodes — no new structural nodes are
+    promoted. Payload: ``{instance_name, scope}`` where ``scope`` is the
+    id-prefix of the BindDirective gid (the source-file stem).
+    """
+    # Children of BindDirectiveSyntax in order: SyntaxList, 'bind' keyword,
+    # IdentifierNameSyntax (target), HierarchyInstantiationSyntax (binder).
+    target_name: str | None = None
+    hier_inst: Any | None = None
+    for ch in node:
+        if _is_token(ch):
+            continue
+        kind_name = _cls(ch)
+        if kind_name == "IdentifierNameSyntax" and target_name is None:
+            toks = _identifier_tokens(ch)
+            if toks:
+                target_name = toks[0].valueText
+        elif kind_name == "HierarchyInstantiationSyntax" and hier_inst is None:
+            hier_inst = ch
+    if target_name is None or hier_inst is None:
+        leaks.append({"context": f"bind_directive[{gid}]",
+                      "name": target_name or "?",
+                      "reason": "bind_directive_missing_target_or_instantiation"})
+        return
+    # Binder module type = first Identifier token child of the
+    # HierarchyInstantiationSyntax (same shape S6 uses).
+    binder_name: str | None = None
+    inst_name: str | None = None
+    for ch in hier_inst:
+        if _is_token(ch) and _token_kind_name(ch) == "Identifier" and binder_name is None:
+            binder_name = ch.valueText
+            break
+    # InstanceName under HierarchicalInstance.
+    for d in _descendants(hier_inst):
+        if _cls(d) == "InstanceNameSyntax":
+            toks = _identifier_tokens(d)
+            if toks:
+                inst_name = toks[0].valueText
+                break
+    if binder_name is None:
+        leaks.append({"context": f"bind_directive[{gid}]",
+                      "name": "?",
+                      "reason": "bind_directive_missing_binder_type"})
+        return
+    target_gid = name_index.get("module:" + target_name) or name_index.get(target_name)
+    binder_gid = name_index.get("module:" + binder_name) or name_index.get(binder_name)
+    if target_gid is None:
+        leaks.append({"context": f"bind_directive[{gid}]",
+                      "name": target_name,
+                      "reason": "bind_target_unresolved"})
+        return
+    if binder_gid is None:
+        leaks.append({"context": f"bind_directive[{gid}]",
+                      "name": binder_name,
+                      "reason": "bind_binder_unresolved"})
+        return
+    # Source-file scope = the id-prefix of the BindDirective gid (e.g.
+    # ``fifo_asserts:n0001.BindDirectiveSyntax`` → ``fifo_asserts``).
+    scope = gid.split(":", 1)[0] if ":" in gid else ""
+    if not _has_edge(graph, binder_gid, target_gid, "bound_into"):
+        _add_edge(graph, binder_gid, target_gid, "bound_into",
+                  instance_name=inst_name or "", scope=scope)
 
 
 def _rule_s6(graph, node, gid, gnode, scope, name_index, leaks,

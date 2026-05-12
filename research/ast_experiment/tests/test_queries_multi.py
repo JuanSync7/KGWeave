@@ -22,6 +22,7 @@ PKG = HERE / "fifo_pkg.sv"
 IFACE = HERE / "fifo_if.sv"
 FIFO = HERE / "fifo.sv"
 TOP = HERE / "top.sv"
+BIND = HERE / "fifo_asserts.sv"
 
 
 @pytest.fixture(scope="module")
@@ -32,7 +33,7 @@ def multi_bundle():
     # masked the cross-tree merge bug.
     from scripts.build import build_kg
 
-    graph, trees, comp = build_kg([PKG, IFACE, FIFO, TOP])
+    graph, trees, comp = build_kg([PKG, IFACE, FIFO, BIND, TOP])
     # Pick the first tree as the "round-trip representative" — round-trip
     # tests still exercise the per-tree lift+emit invariant.
     return trees[0], comp, graph
@@ -411,13 +412,42 @@ def test_s7_param_overrides_per_instance(multi_bundle):
     assert param_overrides(graph, "top.u_fifo_b") == {"DEPTH": "8", "WIDTH": "8"}
 
 
+def test_s13_bound_into(multi_bundle):
+    """S13: BindDirectiveSyntax → bound_into edge from binder to target module.
+
+    The fifo_asserts.sv corpus carries ``bind fifo fifo_asserts u_asserts(...);``.
+    Resolution must work cross-file (the binder is declared above the directive
+    in fifo_asserts.sv while the target ``fifo`` lives in fifo.sv) and the
+    edge payload must record the bind instance name plus the source-file
+    scope so query consumers can trace the directive back to its location.
+    """
+    _tree, _comp, graph = multi_bundle
+    from scripts.semantic import find_by_name
+
+    binder = find_by_name(graph, "fifo_asserts")
+    target = find_by_name(graph, "fifo")
+    assert binder is not None and binder["semantic"]["role"] == "module"
+    assert target is not None and target["semantic"]["role"] == "module"
+
+    bound_edges = [e for e in graph["edges"]
+                   if e["type"] == "bound_into"
+                   and e["src"] == binder["id"]
+                   and e["dst"] == target["id"]]
+    assert len(bound_edges) == 1, (
+        f"expected exactly one bound_into edge fifo_asserts→fifo, got {len(bound_edges)}"
+    )
+    payload = bound_edges[0]["payload"]
+    assert payload.get("instance_name") == "u_asserts"
+    assert payload.get("scope") == "fifo_asserts"
+
+
 def test_s1_fires_per_module(multi_bundle):
     """S1 must fire on BOTH modules — every module's ports/params/nets are
     promoted with hierarchical paths."""
     _tree, _comp, graph = multi_bundle
     modules = _queryable_by_role(graph, "module")
     names = {m["semantic"]["name"] for m in modules}
-    assert names == {"top", "fifo"}
+    assert names == {"top", "fifo", "fifo_asserts"}
     # fifo has 8 ports; top has 8 ports — total 16 promoted ports.
     ports = _queryable_by_role(graph, "port")
     paths = {p["semantic"]["path"] for p in ports}

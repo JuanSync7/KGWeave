@@ -21,6 +21,7 @@ IFACE = HERE / "fifo_if.sv"
 FIFO = HERE / "fifo.sv"
 TOP = HERE / "top.sv"
 TB = HERE / "tb_fifo.sv"
+BIND = HERE / "fifo_asserts.sv"
 
 
 _CONTAINMENT_EDGES = {
@@ -44,7 +45,7 @@ _OWNER_ROLES = {"module", "package", "interface"}
 def kg():
     from scripts.build import build_kg
 
-    graph, trees, comp = build_kg([PKG, IFACE, FIFO, TOP, TB])
+    graph, trees, comp = build_kg([PKG, IFACE, FIFO, BIND, TOP, TB])
     return graph, trees, comp
 
 
