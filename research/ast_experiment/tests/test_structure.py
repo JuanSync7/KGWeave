@@ -115,6 +115,141 @@ def test_stub_modules_export_empty_rules(name):
     assert mod.RULES == [], f"rules.{name}.RULES should be empty"
 
 
+# ---------------------------------------------------------------------------
+# split2: 16-file target layout for rules/
+# ---------------------------------------------------------------------------
+
+_TARGET_RULES_FILES = [
+    "__init__.py",
+    "structure.py",
+    "instantiation.py",
+    "interfaces.py",
+    "generate.py",
+    "dataflow.py",
+    "types.py",
+    "behavior.py",
+    "procedural.py",
+    "clocking.py",
+    "properties.py",
+    "assertions.py",
+    "coverage.py",
+    "classes.py",
+    "constraints.py",
+    "checkers.py",
+    "extern.py",
+]
+
+_TARGET_ACTIVE_MODULES = [
+    "structure", "instantiation", "interfaces", "generate",
+    "dataflow", "types", "behavior",
+]
+
+_TARGET_STUB_MODULES = [
+    "procedural", "clocking", "properties", "assertions",
+    "coverage", "classes", "constraints", "checkers", "extern",
+]
+
+_STUB_PLANNED_KIND_HINTS = {
+    "procedural": ["AlwaysBlock", "InitialBlock", "FinalBlock"],
+    "clocking": ["ClockingDeclaration"],
+    "properties": ["PropertyDeclaration", "SequenceDeclaration"],
+    "assertions": ["AssertProperty", "AssumeProperty", "CoverProperty"],
+    "coverage": ["CovergroupDeclaration", "Coverpoint", "CoverCross"],
+    "classes": ["ClassDeclaration"],
+    "constraints": ["ConstraintDeclaration", "ConstraintBlock"],
+    "checkers": ["CheckerDeclaration", "CheckerInstantiation"],
+    "extern": ["ExternModuleDecl", "ProgramDeclaration"],
+}
+
+
+def test_rules_target_layout_files_exist():
+    """All 16 named .py files live in src/semantic/rules/."""
+    rules_dir = _SEMANTIC_DIR / "rules"
+    missing = [f for f in _TARGET_RULES_FILES if not (rules_dir / f).is_file()]
+    assert not missing, f"missing target rule files: {missing}"
+
+
+def test_legacy_hierarchy_module_removed():
+    """rules/hierarchy.py is gone after the split."""
+    assert not (_SEMANTIC_DIR / "rules" / "hierarchy.py").exists()
+
+
+def test_legacy_sva_module_removed():
+    """rules/sva.py is gone — replaced by properties.py + assertions.py."""
+    assert not (_SEMANTIC_DIR / "rules" / "sva.py").exists()
+
+
+def test_each_active_rule_module_exports_rules():
+    """Every active rule module exports a non-empty RULES list."""
+    for name in _TARGET_ACTIVE_MODULES:
+        mod = importlib.import_module(
+            f"research.ast_experiment.src.semantic.rules.{name}"
+        )
+        assert hasattr(mod, "RULES"), f"rules.{name} missing RULES"
+        assert mod.RULES, f"rules.{name}.RULES should be non-empty"
+
+
+def test_each_stub_module_exports_empty_rules():
+    """Every stub rule module exports RULES == []."""
+    for name in _TARGET_STUB_MODULES:
+        mod = importlib.import_module(
+            f"research.ast_experiment.src.semantic.rules.{name}"
+        )
+        assert hasattr(mod, "RULES"), f"rules.{name} missing RULES"
+        assert mod.RULES == [], f"rules.{name}.RULES should be empty"
+
+
+def test_active_rule_kinds_unchanged():
+    """Union of RULES across active modules covers all expected active kinds."""
+    union: set[str] = set()
+    for name in _TARGET_ACTIVE_MODULES:
+        mod = importlib.import_module(
+            f"research.ast_experiment.src.semantic.rules.{name}"
+        )
+        for kind, _fn in mod.RULES:
+            union.add(kind.name)
+    missing = _ACTIVE_RULE_KINDS - union
+    assert not missing, f"active kinds lost in split: {sorted(missing)}"
+
+
+def test_no_kind_in_multiple_active_modules():
+    """Every SyntaxKind is registered by exactly one rule module."""
+    seen: dict[str, str] = {}
+    duplicates: list[str] = []
+    for name in _TARGET_ACTIVE_MODULES:
+        mod = importlib.import_module(
+            f"research.ast_experiment.src.semantic.rules.{name}"
+        )
+        for kind, _fn in mod.RULES:
+            if kind.name in seen:
+                duplicates.append(f"{kind.name}: {seen[kind.name]} & {name}")
+            else:
+                seen[kind.name] = name
+    assert not duplicates, f"double-registered kinds: {duplicates}"
+
+
+def test_stub_modules_have_planned_kinds_docstring():
+    """Every stub's docstring names at least one planned pyslang SyntaxKind."""
+    for name, hints in _STUB_PLANNED_KIND_HINTS.items():
+        mod = importlib.import_module(
+            f"research.ast_experiment.src.semantic.rules.{name}"
+        )
+        doc = mod.__doc__ or ""
+        found = [h for h in hints if h in doc]
+        assert found, (
+            f"rules.{name} docstring lacks planned kind hint "
+            f"from {hints}: {doc!r}"
+        )
+
+
+def test_rule_module_count_is_sixteen():
+    """rules/ contains exactly 16 .py files outside __init__.py."""
+    rules_dir = _SEMANTIC_DIR / "rules"
+    files = [p for p in rules_dir.iterdir()
+             if p.is_file() and p.suffix == ".py" and p.name != "__init__.py"]
+    assert len(files) == 16, f"expected 16, got {len(files)}: {sorted(p.name for p in files)}"
+
+
 def test_rules_modules_isolated_from_each_other():
     """No cross-imports between rule submodules; queries do not import rules
     and rules do not import queries."""
