@@ -1,312 +1,583 @@
-# Bucket 1 — SV-AST elaboration coverage checklist (pyslang SyntaxKind universe)
-
-Total `pyslang.SyntaxKind` enum size: **536** distinct values.
-
-Each item below is classified:
-
-| Mark | Meaning |
-|------|---------|
-| 🟢 **PROMOTE** | Becomes a queryable graph node and draws typed semantic edges (`drives`, `reads`, `has_port`, `instantiates`, …). The "bucket 1 edge contribution." |
-| 🔵 **CONTAINER** | Lifted as a structural node (lossless), but not promoted into the queryable surface. Reachable via its parent's payload or structural slot. Useful only as an anchor for richer rules later. |
-| ⚪ **BLOB** | Stays as opaque JSON payload on its owning node. Captures all bytes (operator, literal, bit-width, source range, etc.) so the agent can read the detail once it arrives, but never becomes a separate graph node. |
-| 🟣 **DIRECTIVE** | Preprocessor / pragma — appears in raw syntax tree but typically vanishes post-elab. Lift trivially, do not promote. |
-| ⚫ **OUT-OF-SCOPE** | UDP, library map, config rules, SDF — niche / not used in typical RAG-target RTL. Keep classifier honest by listing but don't plan a rule. |
-
-Coverage status for promotable items:
-
-| Symbol | Status |
-|--------|--------|
-| ✅ | Currently covered by an active rule (S1..S6) |
-| ⏳ | In flight in the running expansion loop (S7..S12, Phases 1–7) |
-| ⬜ | Not yet covered; future Ralph iteration |
-
----
-
-## 1. Module-level declarations (the universe roots)
-
-| SyntaxKind | Class | Status | Notes |
-|---|---|---|---|
-| `ModuleDeclaration` | 🟢 PROMOTE | ✅ S1 | Already covered |
-| `ModuleHeader` | 🔵 CONTAINER | ✅ | Lifted by S1; payload carries port list / param list. |
-| `InterfaceDeclaration` | 🟢 PROMOTE | ⏳ S11a | Phase 5 |
-| `InterfaceHeader` | 🔵 CONTAINER | ⏳ | |
-| `InterfacePortHeader` | 🔵 CONTAINER | ⏳ | |
-| `PackageDeclaration` | 🟢 PROMOTE | ⏳ S9a | Phase 3 |
-| `PackageHeader` | 🔵 CONTAINER | ⏳ | |
-| `ProgramDeclaration` | 🟢 PROMOTE | ⬜ | Rare in DV; treat like Module when needed. |
-| `ProgramHeader` | 🔵 CONTAINER | ⬜ | |
-| `ClassDeclaration` | 🟢 PROMOTE | ⬜ | Future: UVM classes. Needs class-method, property, extends edges. |
-| `CheckerDeclaration` | 🟢 PROMOTE | ⬜ | SVA checker block — promote into the assertion sub-graph. |
-| `ConfigDeclaration` | ⚫ OUT-OF-SCOPE | ⬜ | Build config; skip. |
-| `LibraryDeclaration`, `LibraryMap`, `LibraryIncludeStatement`, `LibraryIncDirClause` | ⚫ OUT-OF-SCOPE | ⬜ | Build-tool concerns. |
-| `PrimitiveInstantiation`, `UdpDeclaration`, `UdpBody`, `UdpEntry`, `UdpInitialStmt`, `UdpInputPortDecl`, `UdpOutputPortDecl`, `UdpEdgeField`, `UdpSimpleField`, `AnsiUdpPortList`, `NonAnsiUdpPortList`, `WildcardUdpPortList` | ⚫ OUT-OF-SCOPE | ⬜ | UDPs; rare in modern designs. |
-| `CompilationUnit`, `RootScope`, `UnitScope`, `LocalScope` | 🔵 CONTAINER | ✅ | Trivially walked. |
-| `AnonymousProgram` | 🔵 CONTAINER | ⬜ | |
-| `ExternModuleDecl`, `ExternUdpDecl`, `ExternInterfaceMethod` | 🔵 CONTAINER | ⬜ | Lift as node; no body. |
-
-## 2. Port lists & headers
-
-| SyntaxKind | Class | Status |
-|---|---|---|
-| `AnsiPortList` | 🔵 CONTAINER | ✅ |
-| `NonAnsiPortList` | 🔵 CONTAINER | ⬜ |
-| `ImplicitAnsiPort` | 🟢 PROMOTE | ✅ S1 (as `port`) |
-| `ExplicitAnsiPort` | 🟢 PROMOTE | ⬜ Same as ImplicitAnsi |
-| `ImplicitNonAnsiPort` | 🟢 PROMOTE | ⬜ |
-| `ExplicitNonAnsiPort` | 🟢 PROMOTE | ⬜ |
-| `EmptyNonAnsiPort` | 🔵 CONTAINER | ⬜ |
-| `VariablePortHeader` | 🔵 CONTAINER | ✅ |
-| `NetPortHeader` | 🔵 CONTAINER | ⬜ |
-| `PortDeclaration` | 🟢 PROMOTE | ⬜ Non-ANSI form |
-| `PortReference`, `PortConcatenation`, `WildcardPortList` | 🔵 CONTAINER | ⬜ |
-
-## 3. Parameters
-
-| SyntaxKind | Class | Status |
-|---|---|---|
-| `ParameterPortList` | 🔵 CONTAINER | ✅ |
-| `ParameterDeclaration` | 🟢 PROMOTE | ✅ S1 (as `param`) |
-| `ParameterDeclarationStatement` | 🔵 CONTAINER | ⬜ |
-| `TypeParameterDeclaration` | 🟢 PROMOTE | ⬜ Type params (rare but real) |
-| `TypeAssignment` | ⚪ BLOB | ⬜ |
-| `EqualsTypeClause` | ⚪ BLOB | ⬜ |
-| `ParameterValueAssignment` | 🟢 PROMOTE | ⏳ S7 — `param_override` edge on instance |
-| `NamedParamAssignment`, `OrderedParamAssignment` | 🔵 CONTAINER | ⏳ — children of ParameterValueAssignment |
-| `DefParam`, `DefParamAssignment` | 🟢 PROMOTE | ⬜ Legacy override mechanism |
-
-## 4. Variable / net declarations
-
-| SyntaxKind | Class | Status |
-|---|---|---|
-| `DataDeclaration` | 🔵 CONTAINER | ✅ |
-| `NetDeclaration` | 🔵 CONTAINER | ⬜ explicit `wire`/`tri` decls |
-| `LocalVariableDeclaration` | 🔵 CONTAINER | ⬜ inside SVA properties |
-| `GenvarDeclaration` | 🔵 CONTAINER | ⬜ |
-| `SpecparamDeclaration`, `SpecparamDeclarator` | ⚫ OUT-OF-SCOPE | ⬜ Specify-block only |
-| `Declarator` | 🟢 PROMOTE | ✅ becomes `net` |
-| `UserDefinedNetDeclaration`, `NetAlias`, `NetTypeDeclaration` | ⬜ | rare |
-| `VariableDimension`, `RangeDimensionSpecifier`, `QueueDimensionSpecifier`, `WildcardDimensionSpecifier` | ⚪ BLOB | ✅ in payload as `dim` |
-| `EqualsValueClause` | ⚪ BLOB | ✅ default-value payload |
-
-## 5. Types (all primitive + composite)
-
-All scalar/integer/real/string types — **⚪ BLOB on the owning declarator's payload.** Type info IS captured (so `width_of` works) but not promoted to its own node. Listed exhaustively for closure:
-
-| SyntaxKind | Class |
-|---|---|
-| `IntegerType`, `LogicType`, `BitType`, `ByteType`, `IntType`, `LongIntType`, `ShortIntType`, `RegType`, `RealType`, `ShortRealType`, `RealTimeType`, `TimeType`, `StringType`, `VoidType`, `CHandleType`, `EventType`, `Untyped` | ⚪ BLOB |
-| `EnumType` | 🟢 PROMOTE | ⏳ S9c — enum values as `has_enum_value` edges |
-| `StructType`, `UnionType`, `StructUnionMember` | 🟢 PROMOTE | ⬜ — `has_field` edges per member |
-| `TypedefDeclaration` | 🟢 PROMOTE | ⏳ S9b |
-| `ForwardTypedefDeclaration`, `ForwardTypeRestriction` | 🔵 CONTAINER | ⬜ |
-| `NamedType`, `TypeReference` | ⚪ BLOB | ⬜ — type-ref payload pointing at the typedef's path |
-| `VirtualInterfaceType` | 🟢 PROMOTE | ⬜ — `virtual_interface_of` edge |
-| `ImplicitType` | ⚪ BLOB |
-
-## 6. Procedural blocks
-
-| SyntaxKind | Class | Status |
-|---|---|---|
-| `AlwaysBlock` | 🟢 PROMOTE | ⬜ Generic always (no edge-type assumed). |
-| `AlwaysFFBlock` | 🟢 PROMOTE | ✅ S3 |
-| `AlwaysCombBlock` | 🟢 PROMOTE | ⏳ S8 — like S3 but no `sensitive_to` |
-| `AlwaysLatchBlock` | 🟢 PROMOTE | ⬜ |
-| `InitialBlock` | 🟢 PROMOTE | ⬜ — `runs_at_time(0)` semantic edge optional |
-| `FinalBlock` | 🟢 PROMOTE | ⬜ |
-| `SequentialBlockStatement`, `ParallelBlockStatement`, `BlockStatement` | 🔵 CONTAINER | ✅ |
-| `NamedBlockClause` | ⚪ BLOB | ✅ |
-
-## 7. Continuous-assign & instantiation
-
-| SyntaxKind | Class | Status |
-|---|---|---|
-| `ContinuousAssign` | 🟢 PROMOTE | ✅ S2 |
-| `HierarchyInstantiation` | 🟢 PROMOTE | ✅ S6 |
-| `HierarchicalInstance` | 🟢 PROMOTE | ✅ S6 (becomes `instance` node) |
-| `InstanceName` | 🔵 CONTAINER | ✅ |
-| `NamedPortConnection` | 🟢 PROMOTE | ✅ S6 — becomes `connects` edge |
-| `OrderedPortConnection` | 🟢 PROMOTE | ⬜ — positional form |
-| `WildcardPortConnection`, `EmptyPortConnection` | 🔵 CONTAINER | ⬜ |
-| `CheckerInstantiation`, `CheckerInstanceStatement` | 🟢 PROMOTE | ⬜ Assertion checker |
-| `BindDirective`, `BindTargetList` | 🟢 PROMOTE | ⬜ — `bind_target` edge |
-
-## 8. Statements
-
-| SyntaxKind | Class | Status |
-|---|---|---|
-| `ConditionalStatement` | 🔵 CONTAINER | ✅ |
-| `ElseClause`, `ConditionalPredicate`, `ConditionalPattern` | 🔵 CONTAINER | ✅ |
-| `CaseStatement`, `StandardCaseItem`, `DefaultCaseItem` | 🔵 CONTAINER | ✅ |
-| `RandCaseStatement`, `RandCaseItem`, `StandardPropertyCaseItem`, `DefaultPropertyCaseItem`, `StandardRsCaseItem`, `DefaultRsCaseItem`, `PatternCaseItem` | 🔵 CONTAINER | ⬜ |
-| `ForLoopStatement`, `ForVariableDeclaration`, `ForeachLoopStatement`, `ForeachLoopList`, `ForeverStatement`, `DoWhileStatement`, `LoopStatement` | 🔵 CONTAINER | ⬜ |
-| `WhileStatement` (via LoopStatement), `RepeatedEventControl` | 🔵 CONTAINER | ⬜ |
-| `ExpressionStatement` | 🔵 CONTAINER | ✅ |
-| `EmptyStatement`, `JumpStatement`, `ReturnStatement` | 🔵 CONTAINER | ✅/⬜ |
-| `DisableStatement`, `DisableForkStatement`, `WaitForkStatement`, `WaitOrderStatement`, `WaitStatement` | 🔵 CONTAINER | ⬜ |
-| `ProceduralAssignStatement`, `ProceduralDeassignStatement`, `ProceduralForceStatement`, `ProceduralReleaseStatement` | 🟢 PROMOTE | ⬜ — same as continuous_assign but procedural |
-| `BlockingEventTriggerStatement`, `NonblockingEventTriggerStatement` | 🟢 PROMOTE | ⬜ |
-| `ImmediateAssertStatement`, `ImmediateAssumeStatement`, `ImmediateCoverStatement`, `ImmediateAssertionMember`, `DeferredAssertion` | 🟢 PROMOTE | ⬜ Inline SVA |
-| `AssertPropertyStatement`, `AssumePropertyStatement`, `CoverPropertyStatement`, `CoverSequenceStatement`, `RestrictPropertyStatement`, `ExpectPropertyStatement`, `ConcurrentAssertionMember` | 🟢 PROMOTE | ⬜ Concurrent SVA — important for OpenTitan |
-| `VoidCastedCallStatement` | ⚪ BLOB | ⬜ |
-| `TimingControlStatement`, `TimingControlExpression`, `EventControl`, `EventControlWithExpression`, `ImplicitEventControl`, `DelayControl`, `OneStepDelay`, `CycleDelay`, `SignalEventExpression`, `BinaryEventExpression`, `ParenthesizedEventExpression`, `IffEventClause` | 🔵 CONTAINER + ⚪ BLOB | ✅ partial (S3) |
-| `ElabSystemTask`, `SystemTimingCheck`, `TimingCheckEventArg`, `TimingCheckEventCondition`, `ExpressionTimingCheckArg`, `EmptyTimingCheckArg` | ⚫ OUT-OF-SCOPE | ⬜ Specify-block timing |
-
-## 9. Expressions — *most* live in payload (⚪ BLOB)
-
-Expressions are the **canonical "in-blob" case.** They're lifted into the structural backbone (lossless), but the queryable layer only attaches **`reads` edges to identifier leaves**. The operator tree, operator type, intermediate subexpressions, parenthesization — all opaque payload.
-
-### Identifier / select / member
-| SyntaxKind | Class | Status |
-|---|---|---|
-| `IdentifierName` | 🟢 PROMOTE | ✅ (leaf becomes `reads` edge) |
-| `IdentifierSelectName` | 🟢 PROMOTE | ✅ S4 |
-| `ScopedName`, `ClassName`, `ConstructorName`, `SuperHandle`, `ThisHandle`, `EmptyIdentifierName` | 🔵 CONTAINER | ⬜ |
-| `MemberAccessExpression`, `DotMemberClause` | 🟢 PROMOTE | ⬜ — `reads(member_of_obj)` |
-| `ElementSelect`, `ElementSelectExpression`, `BitSelect`, `SimpleRangeSelect`, `AscendingRangeSelect`, `DescendingRangeSelect`, `RangeList` | 🔵 CONTAINER + ⚪ BLOB | ✅ partial |
-
-### Literals
-| SyntaxKind | Class |
-|---|---|
-| `IntegerLiteralExpression`, `IntegerVectorExpression`, `RealLiteralExpression`, `TimeLiteralExpression`, `StringLiteralExpression`, `NullLiteralExpression`, `UnbasedUnsizedLiteralExpression`, `WildcardLiteralExpression` | ⚪ BLOB |
-
-### Arithmetic / logical / bitwise / relational / shift (all operator variants)
-All ⚪ BLOB. The operator class (`AddExpression`, `MultiplyExpression`, `LogicalAndExpression`, etc. — ~80 variants) becomes a payload field `operator: "+"`, `"&&"`, etc. Identifier leaves still become `reads` edges via the structural walk.
-
-Variants (full list, all ⚪ BLOB unless noted):
-`AddExpression`, `SubtractExpression`, `MultiplyExpression`, `DivideExpression`, `ModExpression`, `PowerExpression`, `ArithmeticShiftLeftExpression`, `ArithmeticShiftRightExpression`, `LogicalShiftLeftExpression`, `LogicalShiftRightExpression`, `BinaryAndExpression`, `BinaryOrExpression`, `BinaryXorExpression`, `BinaryXnorExpression`, `LogicalAndExpression`, `LogicalOrExpression`, `LogicalImplicationExpression`, `LogicalEquivalenceExpression`, `EqualityExpression`, `InequalityExpression`, `CaseEqualityExpression`, `CaseInequalityExpression`, `WildcardEqualityExpression`, `WildcardInequalityExpression`, `GreaterThanExpression`, `LessThanExpression`, `GreaterThanEqualExpression`, `LessThanEqualExpression`, `UnaryBitwiseAndExpression`, `UnaryBitwiseOrExpression`, `UnaryBitwiseXorExpression`, `UnaryBitwiseNotExpression`, `UnaryBitwiseNandExpression`, `UnaryBitwiseNorExpression`, `UnaryBitwiseXnorExpression`, `UnaryLogicalNotExpression`, `UnaryPlusExpression`, `UnaryMinusExpression`, `UnaryPredecrementExpression`, `UnaryPreincrementExpression`, `PostdecrementExpression`, `PostincrementExpression`, `ConditionalExpression`, `ParenthesizedExpression`, `CastExpression`, `SignedCastExpression`, `ConcatenationExpression`, `MultipleConcatenationExpression`, `ReplicatedAssignmentPattern`, `StreamingConcatenationExpression`, `StreamExpression`, `StreamExpressionWithRange`, `InsideExpression`, `MinTypMaxExpression`, `ValueRangeExpression`, `EmptyQueueExpression`, `TaggedUnionExpression`, `CopyClassExpression`, `NewArrayExpression`, `NewClassExpression`, `SuperNewDefaultedArgsExpression` → all ⚪ BLOB.
-
-### Assignment expressions (binary form with target)
-| SyntaxKind | Class | Notes |
-|---|---|---|
-| `AssignmentExpression`, `AddAssignmentExpression`, `SubtractAssignmentExpression`, `MultiplyAssignmentExpression`, `DivideAssignmentExpression`, `ModAssignmentExpression`, `AndAssignmentExpression`, `OrAssignmentExpression`, `XorAssignmentExpression`, `LogicalLeftShiftAssignmentExpression`, `LogicalRightShiftAssignmentExpression`, `ArithmeticLeftShiftAssignmentExpression`, `ArithmeticRightShiftAssignmentExpression`, `NonblockingAssignmentExpression` | 🟢 PROMOTE | ⬜ — like ContinuousAssign but in procedural context. S3 already handles via parent always_ff. |
-
-### Invocation / arguments
-| SyntaxKind | Class | Status |
-|---|---|---|
-| `InvocationExpression`, `ArgumentList`, `OrderedArgument`, `NamedArgument`, `EmptyArgument`, `ArrayOrRandomizeMethodExpression`, `ArrayAndMethod`, `ArrayOrMethod`, `ArrayUniqueMethod`, `ArrayXorMethod` | 🔵 CONTAINER + 🟢 PROMOTE | ✅ partial (S5 covers `$clog2`) |
-| `SystemName` | 🟢 PROMOTE | ✅ S5 |
-| `WithClause`, `WithFunctionClause`, `WithFunctionSample` | 🔵 CONTAINER | ⬜ |
-
-### Patterns (case/match)
-`ExpressionPattern`, `VariablePattern`, `WildcardPattern`, `StructurePattern`, `TaggedPattern`, `ParenthesizedPattern`, `MatchesClause`, `OrderedStructurePatternMember`, `NamedStructurePatternMember`, `SimpleAssignmentPattern`, `StructuredAssignmentPattern`, `AssignmentPatternExpression`, `AssignmentPatternItem`, `DefaultPatternKeyExpression` → all 🔵 CONTAINER. Promote on demand for advanced pattern queries.
-
-### Bad / unknown
-`BadExpression`, `Unknown` → 🔵 CONTAINER; treat as parse-error fingerprints.
-
-## 10. Generate
-
-| SyntaxKind | Class | Status |
-|---|---|---|
-| `IfGenerate` | 🟢 PROMOTE | ⏳ — extend S12 |
-| `CaseGenerate` | 🟢 PROMOTE | ⏳ — extend S12 |
-| `LoopGenerate` | 🟢 PROMOTE | ⏳ S12a |
-| `GenerateBlock` | 🟢 PROMOTE | ⏳ S12b |
-| `GenerateRegion` | 🔵 CONTAINER | ⏳ |
-
-## 11. Functions / Tasks / Subroutines
-
-| SyntaxKind | Class | Status |
-|---|---|---|
-| `FunctionDeclaration` | 🟢 PROMOTE | ⏳ S10 |
-| `TaskDeclaration` | 🟢 PROMOTE | ⏳ S10 |
-| `FunctionPort`, `FunctionPortList`, `DefaultFunctionPort` | 🔵 CONTAINER | ⏳ |
-| `FunctionPrototype`, `ClassMethodDeclaration`, `ClassMethodPrototype` | 🟢 PROMOTE | ⬜ for class methods |
-| `LetDeclaration` | 🟢 PROMOTE | ⬜ |
-
-## 12. Modports (interfaces)
-
-| SyntaxKind | Class | Status |
-|---|---|---|
-| `ModportDeclaration` | 🟢 PROMOTE | ⏳ S11b |
-| `ModportItem` | 🟢 PROMOTE | ⏳ — modport sub-node |
-| `ModportSimplePortList`, `ModportSubroutinePortList` | 🔵 CONTAINER | ⏳ |
-| `ModportNamedPort`, `ModportExplicitPort`, `ModportClockingPort`, `ModportSubroutinePort` | 🟢 PROMOTE | ⏳ — direction info per signal |
-
-## 13. Clocking blocks / SVA
-
-| SyntaxKind | Class | Status |
-|---|---|---|
-| `ClockingDeclaration`, `ClockingItem`, `ClockingDirection`, `ClockingSkew`, `DefaultClockingReference`, `DefaultSkewItem`, `DefaultDisableDeclaration` | 🟢 PROMOTE | ⬜ — `clocking_block` node, `clocked_by` edges |
-| `PropertyDeclaration`, `SequenceDeclaration`, `PropertyType`, `SequenceType`, `PropertySpec` | 🟢 PROMOTE | ⬜ — SVA queryable surface |
-| `SimplePropertyExpr`, `SimpleSequenceExpr`, `ParenthesizedPropertyExpr`, `ParenthesizedSequenceExpr` | 🔵 CONTAINER | ✅ partial |
-| `AndPropertyExpr`, `OrPropertyExpr`, `IffPropertyExpr`, `ImpliesPropertyExpr`, `ImplicationPropertyExpr`, `FollowedByPropertyExpr`, `AcceptOnPropertyExpr`, `ConditionalPropertyExpr`, `CasePropertyExpr`, `StrongWeakPropertyExpr`, `UnaryPropertyExpr`, `UnarySelectPropertyExpr`, `UntilPropertyExpr`, `UntilWithPropertyExpr`, `SUntilPropertyExpr`, `SUntilWithPropertyExpr`, `ClockingPropertyExpr`, `DisableIff` | ⚪ BLOB | ⬜ — SVA operator tree, like arithmetic operators |
-| `AndSequenceExpr`, `OrSequenceExpr`, `IntersectSequenceExpr`, `WithinSequenceExpr`, `ThroughoutSequenceExpr`, `DelayedSequenceExpr`, `DelayedSequenceElement`, `FirstMatchSequenceExpr`, `ClockingSequenceExpr`, `SequenceRepetition`, `SequenceMatchList`, `IntersectClause` | ⚪ BLOB | ⬜ |
-
-## 14. Coverage (covergroups)
-
-| SyntaxKind | Class | Status |
-|---|---|---|
-| `CovergroupDeclaration` | 🟢 PROMOTE | ⬜ |
-| `Coverpoint`, `CoverCross`, `CoverageBins`, `CoverageBinsArraySize`, `CoverageIffClause`, `CoverageOption`, `BlockCoverageEvent`, `WithFunctionSample` | 🟢 PROMOTE | ⬜ |
-| `IdWithExprCoverageBinInitializer`, `ExpressionCoverageBinInitializer`, `RangeCoverageBinInitializer`, `TransListCoverageBinInitializer`, `DefaultCoverageBinInitializer`, `TransRange`, `TransRepeatRange`, `TransSet` | 🔵 CONTAINER | ⬜ |
-| `BinSelectWithFilterExpr`, `BinaryBinsSelectExpr`, `BinsSelectConditionExpr`, `UnaryBinsSelectExpr`, `SimpleBinsSelectExpr`, `ParenthesizedBinsSelectExpr`, `BinsSelection` | ⚪ BLOB | ⬜ |
-
-## 15. Constraints (UVM / class randomization)
-
-| SyntaxKind | Class | Status |
-|---|---|---|
-| `ConstraintBlock`, `ConstraintDeclaration`, `ConstraintPrototype` | 🟢 PROMOTE | ⬜ |
-| `ConditionalConstraint`, `LoopConstraint`, `DisableConstraint`, `SolveBeforeConstraint`, `ImplicationConstraint`, `UniquenessConstraint`, `ElseConstraintClause`, `ExpressionConstraint`, `DistConstraintList`, `DistItem`, `DistWeight`, `DefaultDistItem`, `ExpressionOrDist`, `RandJoinClause` | 🔵 CONTAINER + ⚪ BLOB | ⬜ |
-
-## 16. Hierarchy / cross-module
-
-| SyntaxKind | Class | Status |
-|---|---|---|
-| `PackageImportDeclaration`, `PackageImportItem`, `PackageExportDeclaration`, `PackageExportAllDeclaration` | 🟢 PROMOTE | ⬜ — `imports_package` edges |
-| `TimeUnitsDeclaration` | ⚪ BLOB | ⬜ |
-| `ExtendsClause`, `ImplementsClause`, `DefaultExtendsClauseArg`, `ClassPropertyDeclaration`, `ClassSpecifier`, `LocalVariableDeclaration` | 🟢 PROMOTE | ⬜ — class inheritance edges |
-| `CheckerDataDeclaration` | 🔵 CONTAINER | ⬜ |
-| `AssertionItemPort`, `AssertionItemPortList` | 🔵 CONTAINER | ⬜ |
-
-## 17. SDF / Specify / Path delays (specify blocks)
-
-All ⚫ OUT-OF-SCOPE for graph queries (timing back-annotation domain):
-`SpecifyBlock`, `PathDeclaration`, `PathDescription`, `SimplePathSuffix`, `EdgeSensitivePathSuffix`, `ConditionalPathDeclaration`, `IfNonePathDeclaration`, `EdgeControlSpecifier`, `EdgeDescriptor`, `DriveStrength`, `PullStrength`, `ChargeStrength`, `PulseStyleDeclaration`, `Delay3`, `DividerClause`, `ColonExpressionClause`, `NoUnconnectedDriveDirective`, `UnconnectedDriveDirective`.
-
-## 18. Random sequences (`randsequence`)
-
-⚫ OUT-OF-SCOPE for typical RTL/DV graph use:
-`RandSequenceStatement`, `Production`, `RsCase`, `RsIfElse`, `RsElseClause`, `RsCodeBlock`, `RsRule`, `RsProdItem`, `RsRepeat`, `RsWeightClause`.
-
-## 19. Preprocessor directives & macros — 🟣 DIRECTIVE
-
-Live in raw syntax tree, mostly invisible post-elab. Lift trivially (they appear as `SyntaxKind` items), but DO NOT promote to queryable nodes — they're not part of the elaborated graph:
-
-`DefineDirective`, `UndefDirective`, `UndefineAllDirective`, `IncludeDirective`, `IfDefDirective`, `IfNDefDirective`, `ElsIfDirective`, `ElseDirective`, `EndIfDirective`, `LineDirective`, `PragmaDirective`, `BeginKeywordsDirective`, `EndKeywordsDirective`, `ResetAllDirective`, `TimeScaleDirective`, `DefaultNetTypeDirective`, `DefaultDecayTimeDirective`, `DefaultTriregStrengthDirective`, `DelayModeDistributedDirective`, `DelayModePathDirective`, `DelayModeUnitDirective`, `DelayModeZeroDirective`, `CellDefineDirective`, `EndCellDefineDirective`, `ProtectDirective`, `EndProtectDirective`, `ProtectedDirective`, `EndProtectedDirective`, `MacroUsage`, `MacroFormalArgument`, `MacroFormalArgumentList`, `MacroActualArgument`, `MacroActualArgumentList`, `MacroArgumentDefault`, `BinaryConditionalDirectiveExpression`, `UnaryConditionalDirectiveExpression`, `NamedConditionalDirectiveExpression`, `ParenthesizedConditionalDirectiveExpression`, `NamePragmaExpression`, `NumberPragmaExpression`, `SimplePragmaExpression`, `ParenPragmaExpression`, `NameValuePragmaExpression`.
-
-## 20. Misc lists / atoms (always 🔵 CONTAINER)
-
-`SyntaxList`, `SeparatedList`, `TokenList`, `AttributeInstance`, `AttributeSpec`, `EmptyMember`, `NamedLabel`, `Untyped`, `Unknown`.
-
----
-
-# Summary table — coverage by class
-
-| Class | # SyntaxKinds (approx) | Currently covered | In flight | Future |
-|-------|------------------------|-------------------|-----------|--------|
-| 🟢 PROMOTE | ~95 | 18 (S1..S6) | 18 (S7..S12 Phases 1–7) | ~59 (SVA, class, covergroup, constraint, package-import, etc.) |
-| 🔵 CONTAINER | ~140 | ~all (class-generic lift handles them) | — | — |
-| ⚪ BLOB | ~250 | ~all (round-trip preserves payload) | — | — |
-| 🟣 DIRECTIVE | ~45 | n/a (don't reach elab) | — | — |
-| ⚫ OUT-OF-SCOPE | ~30 (UDP, SDF, library, config, randsequence) | n/a | — | — |
-| **TOTAL** | **536** | | | |
-
-**Bucket-1 progress (queryable layer):**
-- Currently queryable: **18 of ~95 PROMOTE candidates ≈ 19%**
-- After Phases 1–7 ship: **36 of ~95 ≈ 38%**
-- Long-tail to 100%: SVA (concurrent assertions, properties, sequences), classes + UVM, covergroups, constraints, package imports, clocking blocks, bind directives, immediate assertions, defparam, virtual interfaces.
-
----
-
-# How to drive this checklist to completion
-
-1. **Run the corpus expansion loop** (S7–S12 already in flight) to close Phases 1–7.
-2. After Phase 7 ships, pick the next 5 highest-value PROMOTE items by **OpenTitan AES occurrence frequency** — measured by inventorying AES `.sv` and counting per-SyntaxKind hits. Likely: `AssertPropertyStatement`, `PropertyDeclaration`, `SequenceDeclaration`, `PackageImportDeclaration`, `CovergroupDeclaration`.
-3. For each one: one Ralph iteration (failing query test → rule → invariant) until the OpenTitan demo can be re-rendered with no remaining unpromoted constructs.
-4. Stop conditions for "bucket 1 complete":
-   - Every 🟢 PROMOTE item in this checklist is ✅.
-   - `build_kg(opentitan/hw/ip/aes/rtl/*.sv)` reports `semantic_leaks == []`.
-   - Round-trip byte-equal on every `.sv` in the corpus.
-   - Structural-invariant suite green.
-
-**Out-of-scope items (⚫) and directives (🟣) never get rules** — that's the point of the classification. Closing the checklist means closing all 🟢 PROMOTE items, not all 536 SyntaxKinds.
+# Bucket 1 — SV-AST elaboration coverage checklist (per-SyntaxKind)
+Total `pyslang.SyntaxKind` enum size: **536**.
+Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
+
+## Column meanings
+| Column | Meaning |
+|--|--|
+| **Class** | PROMOTE (queryable node + typed edges), CONTAINER (lifted, traversable, not promoted), BLOB (payload only — operator/literal/type detail), DIRECTIVE (preprocessor — invisible post-elab), OUT-OF-SCOPE (UDP, SDF, library, config, randsequence). |
+| **Struct** | ✅ = seen in `ast_classes.json` (test-corpus exercised, round-trip green). ⬜ = NOT yet seen in any test source → structural lift is class-generic so it should work, but is **unverified**. |
+| **Semantic** | ✅ = promoted by an active S-rule. ⏳ = in flight in the running expansion loop. ⬜ = PROMOTE candidate with no rule yet. — = not applicable (BLOB/CONTAINER/DIRECTIVE/OOS — no semantic promotion expected). |
+| **Owner** | The S-rule that promotes this kind, or `structural lift only` for BLOB/CONTAINER, or the reason for —. |
+
+## Roll-up
+| Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
+|--|--|--|--|--|--|
+| PROMOTE | 131 | 17 | 15 | 23 | 93 |
+| CONTAINER | 100 | 14 | 0 | 0 | 0 |
+| BLOB | 208 | 15 | 0 | 0 | 0 |
+| DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
+| OUT-OF-SCOPE | 55 | 0 | 0 | 0 | 0 |
+| **Total** | **536** | **46** | | | |
+
+## PROMOTE (131 items)
+| SyntaxKind | Struct | Semantic | Owner |
+|--|--|--|--|
+| `AlwaysBlock` | ⬜ | ⬜ | future |
+| `AlwaysCombBlock` | ⬜ | ⏳ | S8 |
+| `AlwaysFFBlock` | ⬜ | ✅ | S3 |
+| `AlwaysLatchBlock` | ⬜ | ⬜ | future |
+| `AnonymousProgram` | ⬜ | ⬜ | future |
+| `AssertPropertyStatement` | ⬜ | ⬜ | future |
+| `AssertionItemPort` | ⬜ | ⬜ | future |
+| `AssertionItemPortList` | ⬜ | ⬜ | future |
+| `AssumePropertyStatement` | ⬜ | ⬜ | future |
+| `BindDirective` | ⬜ | ⬜ | future |
+| `BindTargetList` | ⬜ | ⬜ | future |
+| `BlockingEventTriggerStatement` | ⬜ | ⬜ | future |
+| `CaseGenerate` | ⬜ | ⏳ | S12c |
+| `CheckerDataDeclaration` | ⬜ | ⬜ | future |
+| `CheckerDeclaration` | ⬜ | ⬜ | future |
+| `CheckerInstanceStatement` | ⬜ | ⬜ | future |
+| `CheckerInstantiation` | ⬜ | ⬜ | future |
+| `ClassDeclaration` | ⬜ | ⬜ | future |
+| `ClassMethodDeclaration` | ⬜ | ⬜ | future |
+| `ClassMethodPrototype` | ⬜ | ⬜ | future |
+| `ClassPropertyDeclaration` | ⬜ | ⬜ | future |
+| `ClassSpecifier` | ⬜ | ⬜ | future |
+| `ClockingDeclaration` | ⬜ | ⬜ | future |
+| `ClockingItem` | ⬜ | ⬜ | future |
+| `ConcurrentAssertionMember` | ⬜ | ⬜ | future |
+| `ConstraintBlock` | ⬜ | ⬜ | future |
+| `ConstraintDeclaration` | ⬜ | ⬜ | future |
+| `ConstraintPrototype` | ⬜ | ⬜ | future |
+| `ConstructorName` | ⬜ | ⬜ | future |
+| `ContinuousAssign` | ✅ | ✅ | S2 |
+| `CoverCross` | ⬜ | ⬜ | future |
+| `CoverPropertyStatement` | ⬜ | ⬜ | future |
+| `CoverSequenceStatement` | ⬜ | ⬜ | future |
+| `CoverageBins` | ⬜ | ⬜ | future |
+| `CovergroupDeclaration` | ⬜ | ⬜ | future |
+| `Coverpoint` | ⬜ | ⬜ | future |
+| `Declarator` | ✅ | ✅ | S1 |
+| `DefParam` | ⬜ | ⬜ | future |
+| `DefParamAssignment` | ⬜ | ⬜ | future |
+| `DefaultClockingReference` | ⬜ | ⬜ | future |
+| `DefaultDisableDeclaration` | ⬜ | ⬜ | future |
+| `DeferredAssertion` | ⬜ | ⬜ | future |
+| `EnumType` | ⬜ | ⏳ | S9c |
+| `ExpectPropertyStatement` | ⬜ | ⬜ | future |
+| `ExplicitAnsiPort` | ⬜ | ⬜ | future |
+| `ExplicitNonAnsiPort` | ⬜ | ⬜ | future |
+| `ExtendsClause` | ⬜ | ⬜ | future |
+| `ExternInterfaceMethod` | ⬜ | ⬜ | future |
+| `ExternModuleDecl` | ⬜ | ⬜ | future |
+| `ExternUdpDecl` | ⬜ | ⬜ | future |
+| `FinalBlock` | ⬜ | ⬜ | future |
+| `ForwardTypeRestriction` | ⬜ | ⬜ | future |
+| `ForwardTypedefDeclaration` | ⬜ | ⬜ | future |
+| `FunctionDeclaration` | ⬜ | ⏳ | S10 |
+| `FunctionPort` | ⬜ | ⬜ | future |
+| `FunctionPortList` | ⬜ | ⬜ | future |
+| `FunctionPrototype` | ⬜ | ⬜ | future |
+| `GenerateBlock` | ⬜ | ⏳ | S12b |
+| `GenerateRegion` | ⬜ | ⏳ | S12c |
+| `GenvarDeclaration` | ⬜ | ⬜ | future |
+| `HierarchicalInstance` | ✅ | ✅ | S6 |
+| `HierarchyInstantiation` | ✅ | ✅ | S6 |
+| `IdentifierName` | ✅ | ✅ | S4 |
+| `IdentifierSelectName` | ✅ | ✅ | S4 |
+| `IfGenerate` | ⬜ | ⏳ | S12c |
+| `ImmediateAssertStatement` | ⬜ | ⬜ | future |
+| `ImmediateAssertionMember` | ⬜ | ⬜ | future |
+| `ImmediateAssumeStatement` | ⬜ | ⬜ | future |
+| `ImmediateCoverStatement` | ⬜ | ⬜ | future |
+| `ImplementsClause` | ⬜ | ⬜ | future |
+| `ImplicitAnsiPort` | ✅ | ✅ | S1 |
+| `ImplicitNonAnsiPort` | ⬜ | ⬜ | future |
+| `InitialBlock` | ⬜ | ⬜ | future |
+| `InstanceName` | ✅ | ✅ | S6 |
+| `InterfaceDeclaration` | ⬜ | ⏳ | S11a |
+| `InterfaceHeader` | ⬜ | ⬜ | future |
+| `InterfacePortHeader` | ⬜ | ⬜ | future |
+| `InvocationExpression` | ✅ | ✅ | S5 |
+| `LetDeclaration` | ⬜ | ⬜ | future |
+| `LocalVariableDeclaration` | ⬜ | ⬜ | future |
+| `LoopGenerate` | ⬜ | ⏳ | S12a |
+| `MemberAccessExpression` | ⬜ | ⬜ | future |
+| `ModportClockingPort` | ⬜ | ⏳ | S11b |
+| `ModportDeclaration` | ⬜ | ⏳ | S11b |
+| `ModportExplicitPort` | ⬜ | ⏳ | S11b |
+| `ModportItem` | ⬜ | ⏳ | S11b |
+| `ModportNamedPort` | ⬜ | ⏳ | S11b |
+| `ModportSimplePortList` | ⬜ | ⏳ | S11b |
+| `ModportSubroutinePort` | ⬜ | ⏳ | S11b |
+| `ModportSubroutinePortList` | ⬜ | ⏳ | S11b |
+| `ModuleDeclaration` | ✅ | ✅ | S1 |
+| `ModuleHeader` | ✅ | ⬜ | future |
+| `NamedParamAssignment` | ✅ | ⏳ | S7 |
+| `NamedPortConnection` | ✅ | ✅ | S6 |
+| `NetAlias` | ⬜ | ⬜ | future |
+| `NetDeclaration` | ⬜ | ⬜ | future |
+| `NetTypeDeclaration` | ⬜ | ⬜ | future |
+| `NonblockingEventTriggerStatement` | ⬜ | ⬜ | future |
+| `OrderedParamAssignment` | ⬜ | ⏳ | S7 |
+| `OrderedPortConnection` | ⬜ | ⬜ | future |
+| `PackageDeclaration` | ⬜ | ⏳ | S9a |
+| `PackageExportAllDeclaration` | ⬜ | ⬜ | future |
+| `PackageExportDeclaration` | ⬜ | ⬜ | future |
+| `PackageHeader` | ⬜ | ⬜ | future |
+| `PackageImportDeclaration` | ⬜ | ⬜ | future |
+| `PackageImportItem` | ⬜ | ⬜ | future |
+| `ParameterDeclaration` | ✅ | ✅ | S1 |
+| `ParameterValueAssignment` | ✅ | ⏳ | S7 |
+| `PortConcatenation` | ⬜ | ⬜ | future |
+| `PortDeclaration` | ⬜ | ⬜ | future |
+| `PortReference` | ⬜ | ⬜ | future |
+| `ProceduralAssignStatement` | ⬜ | ⬜ | future |
+| `ProceduralDeassignStatement` | ⬜ | ⬜ | future |
+| `ProceduralForceStatement` | ⬜ | ⬜ | future |
+| `ProceduralReleaseStatement` | ⬜ | ⬜ | future |
+| `ProgramDeclaration` | ⬜ | ⬜ | future |
+| `ProgramHeader` | ⬜ | ⬜ | future |
+| `PropertyDeclaration` | ⬜ | ⬜ | future |
+| `RestrictPropertyStatement` | ⬜ | ⬜ | future |
+| `SequenceDeclaration` | ⬜ | ⬜ | future |
+| `StructType` | ⬜ | ⬜ | future |
+| `StructUnionMember` | ⬜ | ⬜ | future |
+| `SystemName` | ✅ | ✅ | S5 |
+| `TaskDeclaration` | ⬜ | ⏳ | S10 |
+| `TimeUnitsDeclaration` | ⬜ | ⬜ | future |
+| `TypeParameterDeclaration` | ⬜ | ⬜ | future |
+| `TypedefDeclaration` | ⬜ | ⏳ | S9b |
+| `UnionType` | ⬜ | ⬜ | future |
+| `UserDefinedNetDeclaration` | ⬜ | ⬜ | future |
+| `VariablePortHeader` | ✅ | ✅ | S1 |
+| `VirtualInterfaceType` | ⬜ | ⬜ | future |
+
+## CONTAINER (100 items)
+| SyntaxKind | Struct | Semantic | Owner |
+|--|--|--|--|
+| `ActionBlock` | ⬜ | — | structural lift only |
+| `AnsiPortList` | ✅ | — | structural lift only |
+| `ArgumentList` | ✅ | — | structural lift only |
+| `ArrayAndMethod` | ⬜ | — | structural lift only |
+| `ArrayOrMethod` | ⬜ | — | structural lift only |
+| `ArrayUniqueMethod` | ⬜ | — | structural lift only |
+| `ArrayXorMethod` | ⬜ | — | structural lift only |
+| `AscendingRangeSelect` | ⬜ | — | structural lift only |
+| `AssignmentPatternItem` | ⬜ | — | structural lift only |
+| `AttributeInstance` | ⬜ | — | structural lift only |
+| `AttributeSpec` | ⬜ | — | structural lift only |
+| `BinSelectWithFilterExpr` | ⬜ | — | structural lift only |
+| `BinsSelectConditionExpr` | ⬜ | — | structural lift only |
+| `BinsSelection` | ⬜ | — | structural lift only |
+| `BitSelect` | ✅ | — | structural lift only |
+| `CaseStatement` | ✅ | — | structural lift only |
+| `CompilationUnit` | ⬜ | — | structural lift only |
+| `ConditionalPredicate` | ✅ | — | structural lift only |
+| `ConditionalStatement` | ✅ | — | structural lift only |
+| `CoverageBinsArraySize` | ⬜ | — | structural lift only |
+| `CycleDelay` | ⬜ | — | structural lift only |
+| `DPIExport` | ⬜ | — | structural lift only |
+| `DPIImport` | ⬜ | — | structural lift only |
+| `DataDeclaration` | ✅ | — | structural lift only |
+| `DefaultCaseItem` | ✅ | — | structural lift only |
+| `DefaultConfigRule` | ⬜ | — | structural lift only |
+| `DefaultFunctionPort` | ⬜ | — | structural lift only |
+| `DefaultPropertyCaseItem` | ⬜ | — | structural lift only |
+| `DefaultRsCaseItem` | ⬜ | — | structural lift only |
+| `DefaultSkewItem` | ⬜ | — | structural lift only |
+| `DelayControl` | ⬜ | — | structural lift only |
+| `DelayedSequenceElement` | ⬜ | — | structural lift only |
+| `DescendingRangeSelect` | ⬜ | — | structural lift only |
+| `DisableForkStatement` | ⬜ | — | structural lift only |
+| `DisableIff` | ⬜ | — | structural lift only |
+| `DisableStatement` | ⬜ | — | structural lift only |
+| `DoWhileStatement` | ⬜ | — | structural lift only |
+| `ElementSelect` | ✅ | — | structural lift only |
+| `EmptyArgument` | ⬜ | — | structural lift only |
+| `EmptyMember` | ⬜ | — | structural lift only |
+| `EmptyNonAnsiPort` | ⬜ | — | structural lift only |
+| `EmptyPortConnection` | ⬜ | — | structural lift only |
+| `EmptyStatement` | ⬜ | — | structural lift only |
+| `EmptyTimingCheckArg` | ⬜ | — | structural lift only |
+| `EventControl` | ⬜ | — | structural lift only |
+| `ExpressionStatement` | ✅ | — | structural lift only |
+| `ExpressionTimingCheckArg` | ⬜ | — | structural lift only |
+| `FilePathSpec` | ⬜ | — | structural lift only |
+| `ForLoopStatement` | ⬜ | — | structural lift only |
+| `ForVariableDeclaration` | ⬜ | — | structural lift only |
+| `ForeachLoopList` | ⬜ | — | structural lift only |
+| `ForeachLoopStatement` | ⬜ | — | structural lift only |
+| `ForeverStatement` | ⬜ | — | structural lift only |
+| `ImplicitEventControl` | ⬜ | — | structural lift only |
+| `InstanceConfigRule` | ⬜ | — | structural lift only |
+| `JumpStatement` | ⬜ | — | structural lift only |
+| `LocalScope` | ⬜ | — | structural lift only |
+| `LoopStatement` | ⬜ | — | structural lift only |
+| `MacroActualArgumentList` | ⬜ | — | structural lift only |
+| `MacroFormalArgumentList` | ⬜ | — | structural lift only |
+| `NamedArgument` | ⬜ | — | structural lift only |
+| `NamedLabel` | ⬜ | — | structural lift only |
+| `NamedStructurePatternMember` | ⬜ | — | structural lift only |
+| `NetPortHeader` | ⬜ | — | structural lift only |
+| `NonAnsiPortList` | ⬜ | — | structural lift only |
+| `OrderedArgument` | ✅ | — | structural lift only |
+| `OrderedStructurePatternMember` | ⬜ | — | structural lift only |
+| `ParallelBlockStatement` | ⬜ | — | structural lift only |
+| `ParameterDeclarationStatement` | ⬜ | — | structural lift only |
+| `ParameterPortList` | ✅ | — | structural lift only |
+| `ParenExpressionList` | ⬜ | — | structural lift only |
+| `PatternCaseItem` | ⬜ | — | structural lift only |
+| `PrimitiveInstantiation` | ⬜ | — | structural lift only |
+| `Production` | ⬜ | — | structural lift only |
+| `RangeList` | ⬜ | — | structural lift only |
+| `RepeatedEventControl` | ⬜ | — | structural lift only |
+| `ReturnStatement` | ⬜ | — | structural lift only |
+| `RootScope` | ⬜ | — | structural lift only |
+| `SeparatedList` | ⬜ | — | structural lift only |
+| `SequentialBlockStatement` | ⬜ | — | structural lift only |
+| `SimpleRangeSelect` | ⬜ | — | structural lift only |
+| `StandardCaseItem` | ✅ | — | structural lift only |
+| `StandardPropertyCaseItem` | ⬜ | — | structural lift only |
+| `StandardRsCaseItem` | ⬜ | — | structural lift only |
+| `StreamExpressionWithRange` | ⬜ | — | structural lift only |
+| `SuperHandle` | ⬜ | — | structural lift only |
+| `SyntaxList` | ⬜ | — | structural lift only |
+| `ThisHandle` | ⬜ | — | structural lift only |
+| `TimingControlStatement` | ✅ | — | structural lift only |
+| `TokenList` | ⬜ | — | structural lift only |
+| `UnitScope` | ⬜ | — | structural lift only |
+| `Unknown` | ⬜ | — | structural lift only |
+| `Untyped` | ⬜ | — | structural lift only |
+| `VoidCastedCallStatement` | ⬜ | — | structural lift only |
+| `WaitForkStatement` | ⬜ | — | structural lift only |
+| `WaitOrderStatement` | ⬜ | — | structural lift only |
+| `WaitStatement` | ⬜ | — | structural lift only |
+| `WildcardPortConnection` | ⬜ | — | structural lift only |
+| `WildcardPortList` | ⬜ | — | structural lift only |
+| `WithFunctionSample` | ⬜ | — | structural lift only |
+
+## BLOB (208 items)
+| SyntaxKind | Struct | Semantic | Owner |
+|--|--|--|--|
+| `AcceptOnPropertyExpr` | ⬜ | — | structural lift only |
+| `AddAssignmentExpression` | ⬜ | — | structural lift only |
+| `AddExpression` | ⬜ | — | structural lift only |
+| `AndAssignmentExpression` | ⬜ | — | structural lift only |
+| `AndPropertyExpr` | ⬜ | — | structural lift only |
+| `AndSequenceExpr` | ⬜ | — | structural lift only |
+| `ArithmeticLeftShiftAssignmentExpression` | ⬜ | — | structural lift only |
+| `ArithmeticRightShiftAssignmentExpression` | ⬜ | — | structural lift only |
+| `ArithmeticShiftLeftExpression` | ⬜ | — | structural lift only |
+| `ArithmeticShiftRightExpression` | ⬜ | — | structural lift only |
+| `ArrayOrRandomizeMethodExpression` | ⬜ | — | structural lift only |
+| `AssignmentExpression` | ⬜ | — | structural lift only |
+| `AssignmentPatternExpression` | ⬜ | — | structural lift only |
+| `BadExpression` | ⬜ | — | structural lift only |
+| `BinaryAndExpression` | ⬜ | — | structural lift only |
+| `BinaryBinsSelectExpr` | ⬜ | — | structural lift only |
+| `BinaryBlockEventExpression` | ⬜ | — | structural lift only |
+| `BinaryEventExpression` | ✅ | — | structural lift only |
+| `BinaryOrExpression` | ⬜ | — | structural lift only |
+| `BinaryXnorExpression` | ⬜ | — | structural lift only |
+| `BinaryXorExpression` | ⬜ | — | structural lift only |
+| `BitType` | ⬜ | — | structural lift only |
+| `BlockCoverageEvent` | ⬜ | — | structural lift only |
+| `ByteType` | ⬜ | — | structural lift only |
+| `CHandleType` | ⬜ | — | structural lift only |
+| `CaseEqualityExpression` | ⬜ | — | structural lift only |
+| `CaseInequalityExpression` | ⬜ | — | structural lift only |
+| `CasePropertyExpr` | ⬜ | — | structural lift only |
+| `CastExpression` | ⬜ | — | structural lift only |
+| `ClassName` | ⬜ | — | structural lift only |
+| `ClockingDirection` | ⬜ | — | structural lift only |
+| `ClockingPropertyExpr` | ⬜ | — | structural lift only |
+| `ClockingSequenceExpr` | ⬜ | — | structural lift only |
+| `ClockingSkew` | ⬜ | — | structural lift only |
+| `ConcatenationExpression` | ✅ | — | structural lift only |
+| `ConditionalConstraint` | ⬜ | — | structural lift only |
+| `ConditionalExpression` | ⬜ | — | structural lift only |
+| `ConditionalPattern` | ✅ | — | structural lift only |
+| `ConditionalPropertyExpr` | ⬜ | — | structural lift only |
+| `CopyClassExpression` | ⬜ | — | structural lift only |
+| `CoverageIffClause` | ⬜ | — | structural lift only |
+| `CoverageOption` | ⬜ | — | structural lift only |
+| `DefaultCoverageBinInitializer` | ⬜ | — | structural lift only |
+| `DefaultDistItem` | ⬜ | — | structural lift only |
+| `DefaultExtendsClauseArg` | ⬜ | — | structural lift only |
+| `DefaultPatternKeyExpression` | ⬜ | — | structural lift only |
+| `DelayedSequenceExpr` | ⬜ | — | structural lift only |
+| `DisableConstraint` | ⬜ | — | structural lift only |
+| `DistConstraintList` | ⬜ | — | structural lift only |
+| `DistItem` | ⬜ | — | structural lift only |
+| `DistWeight` | ⬜ | — | structural lift only |
+| `DivideAssignmentExpression` | ⬜ | — | structural lift only |
+| `DivideExpression` | ⬜ | — | structural lift only |
+| `DotMemberClause` | ⬜ | — | structural lift only |
+| `ElementSelectExpression` | ⬜ | — | structural lift only |
+| `ElseClause` | ✅ | — | structural lift only |
+| `ElseConstraintClause` | ⬜ | — | structural lift only |
+| `ElsePropertyClause` | ⬜ | — | structural lift only |
+| `EmptyIdentifierName` | ⬜ | — | structural lift only |
+| `EmptyQueueExpression` | ⬜ | — | structural lift only |
+| `EqualityExpression` | ⬜ | — | structural lift only |
+| `EqualsAssertionArgClause` | ⬜ | — | structural lift only |
+| `EqualsTypeClause` | ⬜ | — | structural lift only |
+| `EqualsValueClause` | ✅ | — | structural lift only |
+| `EventControlWithExpression` | ✅ | — | structural lift only |
+| `EventType` | ⬜ | — | structural lift only |
+| `ExpressionConstraint` | ⬜ | — | structural lift only |
+| `ExpressionCoverageBinInitializer` | ⬜ | — | structural lift only |
+| `ExpressionOrDist` | ⬜ | — | structural lift only |
+| `ExpressionPattern` | ⬜ | — | structural lift only |
+| `FirstMatchSequenceExpr` | ⬜ | — | structural lift only |
+| `FollowedByPropertyExpr` | ⬜ | — | structural lift only |
+| `GreaterThanEqualExpression` | ⬜ | — | structural lift only |
+| `GreaterThanExpression` | ⬜ | — | structural lift only |
+| `IdWithExprCoverageBinInitializer` | ⬜ | — | structural lift only |
+| `IffEventClause` | ⬜ | — | structural lift only |
+| `IffPropertyExpr` | ⬜ | — | structural lift only |
+| `ImplicationConstraint` | ⬜ | — | structural lift only |
+| `ImplicationPropertyExpr` | ⬜ | — | structural lift only |
+| `ImplicitType` | ⬜ | — | structural lift only |
+| `ImpliesPropertyExpr` | ⬜ | — | structural lift only |
+| `InequalityExpression` | ⬜ | — | structural lift only |
+| `InsideExpression` | ⬜ | — | structural lift only |
+| `IntType` | ⬜ | — | structural lift only |
+| `IntegerLiteralExpression` | ⬜ | — | structural lift only |
+| `IntegerType` | ✅ | — | structural lift only |
+| `IntegerVectorExpression` | ✅ | — | structural lift only |
+| `IntersectClause` | ⬜ | — | structural lift only |
+| `IntersectSequenceExpr` | ⬜ | — | structural lift only |
+| `LessThanEqualExpression` | ⬜ | — | structural lift only |
+| `LessThanExpression` | ⬜ | — | structural lift only |
+| `LogicType` | ⬜ | — | structural lift only |
+| `LogicalAndExpression` | ⬜ | — | structural lift only |
+| `LogicalEquivalenceExpression` | ⬜ | — | structural lift only |
+| `LogicalImplicationExpression` | ⬜ | — | structural lift only |
+| `LogicalLeftShiftAssignmentExpression` | ⬜ | — | structural lift only |
+| `LogicalOrExpression` | ⬜ | — | structural lift only |
+| `LogicalRightShiftAssignmentExpression` | ⬜ | — | structural lift only |
+| `LogicalShiftLeftExpression` | ⬜ | — | structural lift only |
+| `LogicalShiftRightExpression` | ⬜ | — | structural lift only |
+| `LongIntType` | ⬜ | — | structural lift only |
+| `LoopConstraint` | ⬜ | — | structural lift only |
+| `MatchesClause` | ⬜ | — | structural lift only |
+| `MinTypMaxExpression` | ⬜ | — | structural lift only |
+| `ModAssignmentExpression` | ⬜ | — | structural lift only |
+| `ModExpression` | ⬜ | — | structural lift only |
+| `MultipleConcatenationExpression` | ⬜ | — | structural lift only |
+| `MultiplyAssignmentExpression` | ⬜ | — | structural lift only |
+| `MultiplyExpression` | ⬜ | — | structural lift only |
+| `NamedBlockClause` | ⬜ | — | structural lift only |
+| `NamedType` | ⬜ | — | structural lift only |
+| `NewArrayExpression` | ⬜ | — | structural lift only |
+| `NewClassExpression` | ⬜ | — | structural lift only |
+| `NonblockingAssignmentExpression` | ⬜ | — | structural lift only |
+| `NullLiteralExpression` | ⬜ | — | structural lift only |
+| `OrAssignmentExpression` | ⬜ | — | structural lift only |
+| `OrPropertyExpr` | ⬜ | — | structural lift only |
+| `OrSequenceExpr` | ⬜ | — | structural lift only |
+| `ParenthesizedBinsSelectExpr` | ⬜ | — | structural lift only |
+| `ParenthesizedEventExpression` | ✅ | — | structural lift only |
+| `ParenthesizedExpression` | ✅ | — | structural lift only |
+| `ParenthesizedPattern` | ⬜ | — | structural lift only |
+| `ParenthesizedPropertyExpr` | ⬜ | — | structural lift only |
+| `ParenthesizedSequenceExpr` | ⬜ | — | structural lift only |
+| `PostdecrementExpression` | ⬜ | — | structural lift only |
+| `PostincrementExpression` | ⬜ | — | structural lift only |
+| `PowerExpression` | ⬜ | — | structural lift only |
+| `PrimaryBlockEventExpression` | ⬜ | — | structural lift only |
+| `PropertySpec` | ⬜ | — | structural lift only |
+| `PropertyType` | ⬜ | — | structural lift only |
+| `QueueDimensionSpecifier` | ⬜ | — | structural lift only |
+| `RandJoinClause` | ⬜ | — | structural lift only |
+| `RangeCoverageBinInitializer` | ⬜ | — | structural lift only |
+| `RangeDimensionSpecifier` | ✅ | — | structural lift only |
+| `RealLiteralExpression` | ⬜ | — | structural lift only |
+| `RealTimeType` | ⬜ | — | structural lift only |
+| `RealType` | ⬜ | — | structural lift only |
+| `RegType` | ⬜ | — | structural lift only |
+| `ReplicatedAssignmentPattern` | ⬜ | — | structural lift only |
+| `SUntilPropertyExpr` | ⬜ | — | structural lift only |
+| `SUntilWithPropertyExpr` | ⬜ | — | structural lift only |
+| `ScopedName` | ⬜ | — | structural lift only |
+| `SequenceMatchList` | ⬜ | — | structural lift only |
+| `SequenceRepetition` | ⬜ | — | structural lift only |
+| `SequenceType` | ⬜ | — | structural lift only |
+| `ShortIntType` | ⬜ | — | structural lift only |
+| `ShortRealType` | ⬜ | — | structural lift only |
+| `SignalEventExpression` | ✅ | — | structural lift only |
+| `SignedCastExpression` | ⬜ | — | structural lift only |
+| `SimpleAssignmentPattern` | ⬜ | — | structural lift only |
+| `SimpleBinsSelectExpr` | ⬜ | — | structural lift only |
+| `SimplePropertyExpr` | ✅ | — | structural lift only |
+| `SimpleSequenceExpr` | ✅ | — | structural lift only |
+| `SolveBeforeConstraint` | ⬜ | — | structural lift only |
+| `StreamExpression` | ⬜ | — | structural lift only |
+| `StreamingConcatenationExpression` | ⬜ | — | structural lift only |
+| `StringLiteralExpression` | ⬜ | — | structural lift only |
+| `StringType` | ⬜ | — | structural lift only |
+| `StrongWeakPropertyExpr` | ⬜ | — | structural lift only |
+| `StructurePattern` | ⬜ | — | structural lift only |
+| `StructuredAssignmentPattern` | ⬜ | — | structural lift only |
+| `SubtractAssignmentExpression` | ⬜ | — | structural lift only |
+| `SubtractExpression` | ⬜ | — | structural lift only |
+| `SuperNewDefaultedArgsExpression` | ⬜ | — | structural lift only |
+| `TaggedPattern` | ⬜ | — | structural lift only |
+| `TaggedUnionExpression` | ⬜ | — | structural lift only |
+| `ThroughoutSequenceExpr` | ⬜ | — | structural lift only |
+| `TimeLiteralExpression` | ⬜ | — | structural lift only |
+| `TimeType` | ⬜ | — | structural lift only |
+| `TimingControlExpression` | ⬜ | — | structural lift only |
+| `TransListCoverageBinInitializer` | ⬜ | — | structural lift only |
+| `TransRange` | ⬜ | — | structural lift only |
+| `TransRepeatRange` | ⬜ | — | structural lift only |
+| `TransSet` | ⬜ | — | structural lift only |
+| `TypeAssignment` | ⬜ | — | structural lift only |
+| `TypeReference` | ⬜ | — | structural lift only |
+| `UnaryBinsSelectExpr` | ⬜ | — | structural lift only |
+| `UnaryBitwiseAndExpression` | ⬜ | — | structural lift only |
+| `UnaryBitwiseNandExpression` | ⬜ | — | structural lift only |
+| `UnaryBitwiseNorExpression` | ⬜ | — | structural lift only |
+| `UnaryBitwiseNotExpression` | ⬜ | — | structural lift only |
+| `UnaryBitwiseOrExpression` | ⬜ | — | structural lift only |
+| `UnaryBitwiseXnorExpression` | ⬜ | — | structural lift only |
+| `UnaryBitwiseXorExpression` | ⬜ | — | structural lift only |
+| `UnaryLogicalNotExpression` | ⬜ | — | structural lift only |
+| `UnaryMinusExpression` | ⬜ | — | structural lift only |
+| `UnaryPlusExpression` | ⬜ | — | structural lift only |
+| `UnaryPredecrementExpression` | ⬜ | — | structural lift only |
+| `UnaryPreincrementExpression` | ⬜ | — | structural lift only |
+| `UnaryPropertyExpr` | ⬜ | — | structural lift only |
+| `UnarySelectPropertyExpr` | ⬜ | — | structural lift only |
+| `UnbasedUnsizedLiteralExpression` | ⬜ | — | structural lift only |
+| `UniquenessConstraint` | ⬜ | — | structural lift only |
+| `UntilPropertyExpr` | ⬜ | — | structural lift only |
+| `UntilWithPropertyExpr` | ⬜ | — | structural lift only |
+| `ValueRangeExpression` | ⬜ | — | structural lift only |
+| `VariableDimension` | ✅ | — | structural lift only |
+| `VariablePattern` | ⬜ | — | structural lift only |
+| `VoidType` | ⬜ | — | structural lift only |
+| `WildcardDimensionSpecifier` | ⬜ | — | structural lift only |
+| `WildcardEqualityExpression` | ⬜ | — | structural lift only |
+| `WildcardInequalityExpression` | ⬜ | — | structural lift only |
+| `WildcardLiteralExpression` | ⬜ | — | structural lift only |
+| `WildcardPattern` | ⬜ | — | structural lift only |
+| `WithClause` | ⬜ | — | structural lift only |
+| `WithFunctionClause` | ⬜ | — | structural lift only |
+| `WithinSequenceExpr` | ⬜ | — | structural lift only |
+| `XorAssignmentExpression` | ⬜ | — | structural lift only |
+
+## DIRECTIVE (42 items)
+| SyntaxKind | Struct | Semantic | Owner |
+|--|--|--|--|
+| `BeginKeywordsDirective` | ⬜ | — | preprocessor (no elab) |
+| `BinaryConditionalDirectiveExpression` | ⬜ | — | preprocessor (no elab) |
+| `CellDefineDirective` | ⬜ | — | preprocessor (no elab) |
+| `DefaultDecayTimeDirective` | ⬜ | — | preprocessor (no elab) |
+| `DefaultNetTypeDirective` | ⬜ | — | preprocessor (no elab) |
+| `DefaultTriregStrengthDirective` | ⬜ | — | preprocessor (no elab) |
+| `DefineDirective` | ⬜ | — | preprocessor (no elab) |
+| `DelayModeDistributedDirective` | ⬜ | — | preprocessor (no elab) |
+| `DelayModePathDirective` | ⬜ | — | preprocessor (no elab) |
+| `DelayModeUnitDirective` | ⬜ | — | preprocessor (no elab) |
+| `DelayModeZeroDirective` | ⬜ | — | preprocessor (no elab) |
+| `ElsIfDirective` | ⬜ | — | preprocessor (no elab) |
+| `ElseDirective` | ⬜ | — | preprocessor (no elab) |
+| `EndCellDefineDirective` | ⬜ | — | preprocessor (no elab) |
+| `EndIfDirective` | ⬜ | — | preprocessor (no elab) |
+| `EndKeywordsDirective` | ⬜ | — | preprocessor (no elab) |
+| `EndProtectDirective` | ⬜ | — | preprocessor (no elab) |
+| `EndProtectedDirective` | ⬜ | — | preprocessor (no elab) |
+| `IfDefDirective` | ⬜ | — | preprocessor (no elab) |
+| `IfNDefDirective` | ⬜ | — | preprocessor (no elab) |
+| `IncludeDirective` | ⬜ | — | preprocessor (no elab) |
+| `LineDirective` | ⬜ | — | preprocessor (no elab) |
+| `MacroActualArgument` | ⬜ | — | preprocessor (no elab) |
+| `MacroArgumentDefault` | ⬜ | — | preprocessor (no elab) |
+| `MacroFormalArgument` | ⬜ | — | preprocessor (no elab) |
+| `MacroUsage` | ⬜ | — | preprocessor (no elab) |
+| `NameValuePragmaExpression` | ⬜ | — | preprocessor (no elab) |
+| `NamedConditionalDirectiveExpression` | ⬜ | — | preprocessor (no elab) |
+| `NoUnconnectedDriveDirective` | ⬜ | — | preprocessor (no elab) |
+| `NumberPragmaExpression` | ⬜ | — | preprocessor (no elab) |
+| `ParenPragmaExpression` | ⬜ | — | preprocessor (no elab) |
+| `ParenthesizedConditionalDirectiveExpression` | ⬜ | — | preprocessor (no elab) |
+| `PragmaDirective` | ⬜ | — | preprocessor (no elab) |
+| `ProtectDirective` | ⬜ | — | preprocessor (no elab) |
+| `ProtectedDirective` | ⬜ | — | preprocessor (no elab) |
+| `ResetAllDirective` | ⬜ | — | preprocessor (no elab) |
+| `SimplePragmaExpression` | ⬜ | — | preprocessor (no elab) |
+| `TimeScaleDirective` | ⬜ | — | preprocessor (no elab) |
+| `UnaryConditionalDirectiveExpression` | ⬜ | — | preprocessor (no elab) |
+| `UnconnectedDriveDirective` | ⬜ | — | preprocessor (no elab) |
+| `UndefDirective` | ⬜ | — | preprocessor (no elab) |
+| `UndefineAllDirective` | ⬜ | — | preprocessor (no elab) |
+
+## OUT-OF-SCOPE (55 items)
+| SyntaxKind | Struct | Semantic | Owner |
+|--|--|--|--|
+| `AnsiUdpPortList` | ⬜ | — | out-of-scope |
+| `CellConfigRule` | ⬜ | — | out-of-scope |
+| `ChargeStrength` | ⬜ | — | out-of-scope |
+| `ColonExpressionClause` | ⬜ | — | out-of-scope |
+| `ConditionalPathDeclaration` | ⬜ | — | out-of-scope |
+| `ConfigCellIdentifier` | ⬜ | — | out-of-scope |
+| `ConfigDeclaration` | ⬜ | — | out-of-scope |
+| `ConfigInstanceIdentifier` | ⬜ | — | out-of-scope |
+| `ConfigLiblist` | ⬜ | — | out-of-scope |
+| `ConfigUseClause` | ⬜ | — | out-of-scope |
+| `Delay3` | ⬜ | — | out-of-scope |
+| `DividerClause` | ⬜ | — | out-of-scope |
+| `DriveStrength` | ⬜ | — | out-of-scope |
+| `EdgeControlSpecifier` | ⬜ | — | out-of-scope |
+| `EdgeDescriptor` | ⬜ | — | out-of-scope |
+| `EdgeSensitivePathSuffix` | ⬜ | — | out-of-scope |
+| `ElabSystemTask` | ⬜ | — | out-of-scope |
+| `IfNonePathDeclaration` | ⬜ | — | out-of-scope |
+| `LibraryDeclaration` | ⬜ | — | out-of-scope |
+| `LibraryIncDirClause` | ⬜ | — | out-of-scope |
+| `LibraryIncludeStatement` | ⬜ | — | out-of-scope |
+| `LibraryMap` | ⬜ | — | out-of-scope |
+| `NonAnsiUdpPortList` | ⬜ | — | out-of-scope |
+| `OneStepDelay` | ⬜ | — | out-of-scope |
+| `PathDeclaration` | ⬜ | — | out-of-scope |
+| `PathDescription` | ⬜ | — | out-of-scope |
+| `PullStrength` | ⬜ | — | out-of-scope |
+| `PulseStyleDeclaration` | ⬜ | — | out-of-scope |
+| `RandCaseItem` | ⬜ | — | out-of-scope |
+| `RandCaseStatement` | ⬜ | — | out-of-scope |
+| `RandSequenceStatement` | ⬜ | — | out-of-scope |
+| `RsCase` | ⬜ | — | out-of-scope |
+| `RsCodeBlock` | ⬜ | — | out-of-scope |
+| `RsElseClause` | ⬜ | — | out-of-scope |
+| `RsIfElse` | ⬜ | — | out-of-scope |
+| `RsProdItem` | ⬜ | — | out-of-scope |
+| `RsRepeat` | ⬜ | — | out-of-scope |
+| `RsRule` | ⬜ | — | out-of-scope |
+| `RsWeightClause` | ⬜ | — | out-of-scope |
+| `SimplePathSuffix` | ⬜ | — | out-of-scope |
+| `SpecifyBlock` | ⬜ | — | out-of-scope |
+| `SpecparamDeclaration` | ⬜ | — | out-of-scope |
+| `SpecparamDeclarator` | ⬜ | — | out-of-scope |
+| `SystemTimingCheck` | ⬜ | — | out-of-scope |
+| `TimingCheckEventArg` | ⬜ | — | out-of-scope |
+| `TimingCheckEventCondition` | ⬜ | — | out-of-scope |
+| `UdpBody` | ⬜ | — | out-of-scope |
+| `UdpDeclaration` | ⬜ | — | out-of-scope |
+| `UdpEdgeField` | ⬜ | — | out-of-scope |
+| `UdpEntry` | ⬜ | — | out-of-scope |
+| `UdpInitialStmt` | ⬜ | — | out-of-scope |
+| `UdpInputPortDecl` | ⬜ | — | out-of-scope |
+| `UdpOutputPortDecl` | ⬜ | — | out-of-scope |
+| `UdpSimpleField` | ⬜ | — | out-of-scope |
+| `WildcardUdpPortList` | ⬜ | — | out-of-scope |
+
+## How to drive this to 100%
+1. Every `PROMOTE` row's Semantic column must be `✅`.
+2. Every `Struct` column should be `✅` after expanding the test corpus until every relevant SyntaxKind has been parsed at least once and round-tripped — UDP/SDF/library kinds may legitimately stay `⬜` if we never write source that uses them.
+3. `DIRECTIVE` and `OUT-OF-SCOPE` rows are decisions, not gaps.
+4. The checklist is correct iff: the union of ✅ + ⏳ + ⬜ in the PROMOTE block accounts for every queryable concept; nothing in CONTAINER/BLOB/DIRECTIVE/OOS deserves a rule.

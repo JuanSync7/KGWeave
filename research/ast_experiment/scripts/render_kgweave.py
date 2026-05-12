@@ -71,7 +71,7 @@ def _build_semantic_graph():
     # and promoted into one shared graph (file-stem id prefixes keep node
     # ids unique; the shared semantic_name_index lets cross-tree references
     # like top.u_fifo --of_module--> fifo resolve correctly).
-    graph, _trees, _comp = build_kg([HERE / "top.sv", HERE / "fifo.sv"])
+    graph, _trees, _comp = build_kg([HERE / "fifo_pkg.sv", HERE / "fifo.sv", HERE / "top.sv"])
     return graph
 
 

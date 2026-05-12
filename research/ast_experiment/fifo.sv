@@ -1,4 +1,6 @@
-module fifo #(
+module fifo
+    import fifo_pkg::*;
+#(
     parameter int DEPTH = 8,
     parameter int WIDTH = 32
 ) (
@@ -10,7 +12,7 @@ module fifo #(
     output logic [WIDTH-1:0]  dout,
     output logic              full,
     output logic              empty,
-    output logic [1:0]        status
+    output fifo_status_e      status
 );
 
     logic [WIDTH-1:0] mem [DEPTH];
@@ -44,9 +46,9 @@ module fifo #(
     end
 
     always_comb begin
-        if (full)        status = 2'b10;
-        else if (empty)  status = 2'b00;
-        else             status = 2'b01;
+        if (full)        status = FULL;
+        else if (empty)  status = EMPTY;
+        else             status = NORMAL;
     end
 
 endmodule

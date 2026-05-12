@@ -16,23 +16,29 @@ from pathlib import Path
 import pytest
 
 HERE = Path(__file__).resolve().parent.parent
+PKG = HERE / "fifo_pkg.sv"
 FIFO = HERE / "fifo.sv"
 TOP = HERE / "top.sv"
 
 
-_CONTAINMENT_EDGES = {"has_port", "has_param", "has_net", "contains", "instantiates"}
+_CONTAINMENT_EDGES = {
+    "has_port", "has_param", "has_net", "contains", "instantiates",
+    "has_typedef", "has_enum_value",
+}
 _SEMANTIC_EDGES = {
     "drives", "reads", "sensitive_to",
     "connects", "instantiates", "of_module",
 }
-_CONTAINED_ROLES = {"port", "param", "net", "instance"}
+_CONTAINED_ROLES = {"port", "param", "net", "instance", "typedef", "enum_value"}
+# Roles whose `name` is treated as an owning namespace (top-level container).
+_OWNER_ROLES = {"module", "package"}
 
 
 @pytest.fixture(scope="module")
 def kg():
     from scripts.build import build_kg
 
-    graph, trees, comp = build_kg([FIFO, TOP])
+    graph, trees, comp = build_kg([PKG, FIFO, TOP])
     return graph, trees, comp
 
 
@@ -70,10 +76,10 @@ def test_inv1_containment_connectivity(graph):
 
     Catches: a module's port/net appearing disconnected because the cross-file
     merge dropped its containing module."""
-    modules = {n["id"] for n in _queryable(graph) if _role(n) == "module"}
-    assert modules, "no module nodes promoted"
+    modules = {n["id"] for n in _queryable(graph) if _role(n) in _OWNER_ROLES}
+    assert modules, "no module/package nodes promoted"
 
-    # BFS from every module along containment edges.
+    # BFS from every module/package along containment edges.
     reachable: set[str] = set(modules)
     frontier = list(modules)
     while frontier:
@@ -161,8 +167,8 @@ def test_inv4_param_containment(graph):
             bad.append(f"{_path(n)}: has_param(in)={len(incoming)}")
             continue
         owner = by_id.get(incoming[0]["src"])
-        if owner is None or _role(owner) != "module":
-            bad.append(f"{_path(n)}: has_param src is not a module")
+        if owner is None or _role(owner) not in _OWNER_ROLES:
+            bad.append(f"{_path(n)}: has_param src is not a module/package")
     assert not bad, "param containment broken: " + "; ".join(bad)
 
 
@@ -221,7 +227,7 @@ def test_inv6_hierarchical_path_consistency(graph):
         if e["type"] not in _CONTAINMENT_EDGES:
             continue
         owner_node = by_id.get(e["src"])
-        if owner_node is None or _role(owner_node) != "module":
+        if owner_node is None or _role(owner_node) not in _OWNER_ROLES:
             continue
         owner[e["dst"]] = owner_node["semantic"]["name"]
     # Also instance parents via 'instantiates' for the instance node itself.
@@ -229,9 +235,21 @@ def test_inv6_hierarchical_path_consistency(graph):
         if e["type"] != "instantiates":
             continue
         owner_node = by_id.get(e["src"])
-        if owner_node is None or _role(owner_node) != "module":
+        if owner_node is None or _role(owner_node) not in _OWNER_ROLES:
             continue
         owner.setdefault(e["dst"], owner_node["semantic"]["name"])
+    # Enum values' "owner" is their typedef, which itself sits under a
+    # package/module. Project the enum-value owner up to that container so
+    # the path-prefix check stays "first dotted component == container".
+    for e in graph["edges"]:
+        if e["type"] != "has_enum_value":
+            continue
+        td_node = by_id.get(e["src"])
+        if td_node is None or _role(td_node) != "typedef":
+            continue
+        td_owner = owner.get(td_node["id"])
+        if td_owner is not None:
+            owner.setdefault(e["dst"], td_owner)
 
     for n in _queryable(graph):
         if _role(n) not in _CONTAINED_ROLES:

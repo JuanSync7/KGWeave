@@ -17,7 +17,7 @@ from typing import Any
 import pyslang
 
 HERE = Path(__file__).resolve().parent.parent
-SRCS = [HERE / "fifo.sv", HERE / "top.sv"]
+SRCS = [HERE / "fifo_pkg.sv", HERE / "fifo.sv", HERE / "top.sv"]
 OUT = HERE / "elab_dump.json"
 CLASSES_OUT = HERE / "ast_classes.json"
 

@@ -16,6 +16,7 @@
   "DefaultCaseItemSyntax",
   "ElementSelectSyntax",
   "ElseClauseSyntax",
+  "EnumTypeSyntax",
   "EqualsValueClauseSyntax",
   "EventControlWithExpressionSyntax",
   "ExpressionStatementSyntax",
@@ -33,7 +34,11 @@
   "ModuleHeaderSyntax",
   "NamedParamAssignmentSyntax",
   "NamedPortConnectionSyntax",
+  "NamedTypeSyntax",
   "OrderedArgumentSyntax",
+  "PackageImportDeclarationSyntax",
+  "PackageImportItemSyntax",
+  "ParameterDeclarationStatementSyntax",
   "ParameterDeclarationSyntax",
   "ParameterPortListSyntax",
   "ParameterValueAssignmentSyntax",
@@ -51,6 +56,7 @@
   "SystemNameSyntax",
   "TimingControlStatementSyntax",
   "Token",
+  "TypedefDeclarationSyntax",
   "VariableDimensionSyntax",
   "VariablePortHeaderSyntax"
 ]

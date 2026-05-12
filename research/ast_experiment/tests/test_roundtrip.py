@@ -20,6 +20,7 @@ import pytest
 HERE = Path(__file__).resolve().parent.parent
 SRC = HERE / "fifo.sv"
 TOP = HERE / "top.sv"
+PKG = HERE / "fifo_pkg.sv"
 COVERED = HERE / "covered_classes.json"
 
 
@@ -380,3 +381,65 @@ def test_iter020_named_param_assignment(top_tree):
     reparsed, _ = _roundtrip(top_tree)
     _assert_class_roundtrip(top_tree.root, reparsed.root, "NamedParamAssignmentSyntax")
     _mark_covered({"NamedParamAssignmentSyntax"})
+
+
+@pytest.fixture(scope="module")
+def pkg_tree():
+    return pyslang.SyntaxTree.fromText(PKG.read_text())
+
+
+def test_pkg_parse_baseline(pkg_tree):
+    """Sanity: pyslang can parse fifo_pkg.sv with no diagnostics."""
+    diags = list(pkg_tree.diagnostics)
+    assert not diags, f"fifo_pkg.sv parse has diagnostics: {diags}"
+
+
+def test_pkg_full_token_text_stream(pkg_tree):
+    """Round-trip on fifo_pkg.sv: token text stream is byte-equal."""
+    reparsed, _ = _roundtrip(pkg_tree)
+    orig = _token_text_stream(pkg_tree.root)
+    rt = _token_text_stream(reparsed.root)
+    assert orig == rt, "fifo_pkg.sv token streams diverge"
+
+
+def test_iter021_typedef_declaration(pkg_tree):
+    """iter-021: TypedefDeclarationSyntax round-trips byte-equal."""
+    reparsed, _ = _roundtrip(pkg_tree)
+    _assert_class_roundtrip(pkg_tree.root, reparsed.root, "TypedefDeclarationSyntax")
+    _mark_covered({"TypedefDeclarationSyntax"})
+
+
+def test_iter022_enum_type(pkg_tree):
+    """iter-022: EnumTypeSyntax round-trips byte-equal."""
+    reparsed, _ = _roundtrip(pkg_tree)
+    _assert_class_roundtrip(pkg_tree.root, reparsed.root, "EnumTypeSyntax")
+    _mark_covered({"EnumTypeSyntax"})
+
+
+def test_iter023_parameter_declaration_statement(pkg_tree):
+    """iter-023: ParameterDeclarationStatementSyntax round-trips byte-equal."""
+    reparsed, _ = _roundtrip(pkg_tree)
+    _assert_class_roundtrip(pkg_tree.root, reparsed.root,
+                            "ParameterDeclarationStatementSyntax")
+    _mark_covered({"ParameterDeclarationStatementSyntax"})
+
+
+@pytest.fixture(scope="module")
+def fifo_tree_post_import():
+    """Re-parse fifo.sv now that it has `import fifo_pkg::*` + NamedType usage."""
+    return pyslang.SyntaxTree.fromText(SRC.read_text())
+
+
+def test_iter024_package_import(fifo_tree_post_import):
+    """iter-024: PackageImportDeclarationSyntax + PackageImportItemSyntax round-trip."""
+    reparsed, _ = _roundtrip(fifo_tree_post_import)
+    for cls in ("PackageImportDeclarationSyntax", "PackageImportItemSyntax"):
+        _assert_class_roundtrip(fifo_tree_post_import.root, reparsed.root, cls)
+    _mark_covered({"PackageImportDeclarationSyntax", "PackageImportItemSyntax"})
+
+
+def test_iter025_named_type(fifo_tree_post_import):
+    """iter-025: NamedTypeSyntax round-trips byte-equal (fifo_status_e port type)."""
+    reparsed, _ = _roundtrip(fifo_tree_post_import)
+    _assert_class_roundtrip(fifo_tree_post_import.root, reparsed.root, "NamedTypeSyntax")
+    _mark_covered({"NamedTypeSyntax"})

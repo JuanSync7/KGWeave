@@ -14,22 +14,17 @@ import pyslang
 import pytest
 
 HERE = Path(__file__).resolve().parent.parent
+PKG = HERE / "fifo_pkg.sv"
 FIFO = HERE / "fifo.sv"
 TOP = HERE / "top.sv"
 
 
 @pytest.fixture(scope="module")
 def gbundle():
-    combined = TOP.read_text() + "\n" + FIFO.read_text()
-    tree = pyslang.SyntaxTree.fromText(combined)
-    comp = pyslang.Compilation()
-    comp.addSyntaxTree(tree)
-    from scripts.lift import lift
-    from scripts.semantic import promote
+    from scripts.build import build_kg
 
-    graph = lift(tree)
-    promote(graph, tree, comp)
-    return tree, comp, graph
+    graph, trees, comp = build_kg([PKG, FIFO, TOP])
+    return trees[0], comp, graph
 
 
 def _by_role(graph, role):

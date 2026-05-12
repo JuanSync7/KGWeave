@@ -402,9 +402,11 @@ def promote(
     state = {
         "idx": 0,
         "module_stack": [],          # list[(gid, module_name)]
+        "typedef_stack": [],         # list[(gid, typedef_name, typedef_path)]
         "in_param": 0,
         "in_data": 0,
         "in_port": 0,
+        "in_typedef": 0,
     }
 
     def _cur_module():
@@ -419,15 +421,33 @@ def promote(
         popped_module = False
 
         if c == "ModuleDeclarationSyntax":
+            kind_name = str(getattr(node, "kind", "")).rsplit(".", 1)[-1]
+            is_package = kind_name == "PackageDeclaration"
             mname = _module_name_of(node)
             state["module_stack"].append((gid, mname))
             popped_module = True
-            _mark(nodes_list[node_offset + idx], role="module", name=mname, path=mname)
-            name_index["module:" + mname] = gid
-            # Also register the module's path as a top-level lookup so that
-            # ``find_by_name('top')`` resolves to the module node directly.
+            if is_package:
+                _mark(nodes_list[node_offset + idx], role="package", name=mname, path=mname)
+                name_index["package:" + mname] = gid
+            else:
+                _mark(nodes_list[node_offset + idx], role="module", name=mname, path=mname)
+                name_index["module:" + mname] = gid
+            # Also register the bare name as a top-level lookup so that
+            # ``find_by_name('top')`` / ``find_by_name('fifo_pkg')`` resolve.
             name_index[mname] = gid
             port_names_by_module.setdefault(mname, set())
+        elif c == "TypedefDeclarationSyntax":
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                tname = _typedef_name_of(node)
+                if tname:
+                    tpath = f"{mname}.{tname}"
+                    _mark(nodes_list[node_offset + idx], role="typedef",
+                          name=tname, path=tpath)
+                    _add_edge(graph, mod_gid, gid, "has_typedef")
+                    name_index[tpath] = gid
+                    state["typedef_stack"].append((gid, tname, tpath))
+                    pushed = "in_typedef"
         elif c == "ImplicitAnsiPortSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:
@@ -452,7 +472,16 @@ def promote(
                 if ids and state["in_port"] == 0:
                     dname = ids[0].valueText
                     dpath = f"{mname}.{dname}"
-                    if state["in_param"] > 0:
+                    if state["in_typedef"] > 0 and state["typedef_stack"]:
+                        # S9c: enum value declarator inside a typedef-enum.
+                        td_gid, tname, tpath = state["typedef_stack"][-1]
+                        epath = f"{tpath}.{dname}"
+                        _mark(nodes_list[node_offset + idx], role="enum_value",
+                              name=dname, path=epath)
+                        _add_edge(graph, td_gid, gid, "has_enum_value",
+                                  name=dname, typedef=tpath)
+                        name_index[epath] = gid
+                    elif state["in_param"] > 0:
                         _mark(nodes_list[node_offset + idx], role="param", name=dname, path=dpath)
                         _add_edge(graph, mod_gid, gid, "has_param")
                         name_index[dpath] = gid
@@ -472,6 +501,8 @@ def promote(
                 visit_pass1(ch)
         if pushed is not None:
             state[pushed] -= 1
+        if pushed == "in_typedef" and state["typedef_stack"]:
+            state["typedef_stack"].pop()
         if popped_module:
             state["module_stack"].pop()
 
@@ -522,6 +553,31 @@ def promote(
 
     visit_pass2(syntax_tree.root)
     graph["semantic_name_index"] = name_index
+
+
+def _typedef_name_of(td_syn: Any) -> str:
+    """Return the user-given name token of a TypedefDeclarationSyntax.
+
+    The grammar is ``typedef <type> <name> ;`` — the name is the LAST direct
+    Identifier Token child (after any EnumType/IntegerType/NamedType subtree
+    and before the trailing Semicolon)."""
+    last_id = ""
+    for ch in td_syn:
+        if _is_token(ch) and _token_kind_name(ch) == "Identifier":
+            last_id = ch.valueText
+    return last_id
+
+
+def _enum_value_names(enum_syn: Any) -> list[str]:
+    """Return the value-declarator names under an EnumTypeSyntax."""
+    out: list[str] = []
+    for d in _descendants(enum_syn):
+        if _cls(d) != "DeclaratorSyntax":
+            continue
+        toks = _identifier_tokens(d)
+        if toks:
+            out.append(toks[0].valueText)
+    return out
 
 
 def _module_name_of(module_syn: Any) -> str:
@@ -1154,6 +1210,24 @@ def port_connections(graph: dict[str, Any], instance_path: str) -> list[dict[str
         src_path = src.get("semantic", {}).get("path") or src.get("semantic", {}).get("name")
         out.append({"port": e["payload"].get("port"), "src_path": src_path})
     return out
+
+
+def package_of(graph: dict[str, Any], typedef_path: str) -> str | None:
+    """Return the package (or module) that owns a typedef, via the reverse
+    ``has_typedef`` edge. Returns ``None`` if the typedef has no enclosing
+    container in the graph."""
+    td = find_by_name(graph, typedef_path)
+    if td is None:
+        return None
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    for e in graph["edges"]:
+        if e["type"] != "has_typedef" or e["dst"] != td["id"]:
+            continue
+        owner = by_id.get(e["src"])
+        if owner is None:
+            continue
+        return owner.get("semantic", {}).get("name")
+    return None
 
 
 def param_overrides(graph: dict[str, Any], instance_path: str) -> dict[str, str]:

@@ -18,6 +18,7 @@ import pyslang
 import pytest
 
 HERE = Path(__file__).resolve().parent.parent
+PKG = HERE / "fifo_pkg.sv"
 FIFO = HERE / "fifo.sv"
 TOP = HERE / "top.sv"
 
@@ -30,7 +31,7 @@ def multi_bundle():
     # masked the cross-tree merge bug.
     from scripts.build import build_kg
 
-    graph, trees, comp = build_kg([TOP, FIFO])
+    graph, trees, comp = build_kg([PKG, FIFO, TOP])
     # Pick the first tree as the "round-trip representative" — round-trip
     # tests still exercise the per-tree lift+emit invariant.
     return trees[0], comp, graph
@@ -248,6 +249,36 @@ def test_graph_query_connects_edge_payload_filter(multi_bundle):
         "return": "path",
     })
     assert out == ["top.clk"]
+
+
+def test_s9_package_of_typedef(multi_bundle):
+    """S9: typedef + enum-value promotion under a package.
+
+    * fifo_pkg is queryable as a `package` role.
+    * fifo_status_e is a `typedef` under fifo_pkg (has_typedef edge).
+    * EMPTY/NORMAL/FULL are enum_value declarators under fifo_status_e
+      (has_enum_value edges with `name` payload).
+    """
+    _tree, _comp, graph = multi_bundle
+    from scripts.semantic import find_by_name, neighbors, package_of
+
+    pkg = find_by_name(graph, "fifo_pkg")
+    assert pkg is not None and pkg["semantic"]["role"] == "package"
+
+    td = find_by_name(graph, "fifo_pkg.fifo_status_e")
+    assert td is not None and td["semantic"]["role"] == "typedef"
+
+    # has_typedef edge from package to typedef.
+    typedefs = neighbors(graph, pkg["id"], edge_type="has_typedef", direction="out")
+    assert any(t["semantic"]["name"] == "fifo_status_e" for t in typedefs)
+
+    # package_of() helper.
+    assert package_of(graph, "fifo_pkg.fifo_status_e") == "fifo_pkg"
+
+    # Enum values listable via has_enum_value edges.
+    evs = neighbors(graph, td["id"], edge_type="has_enum_value", direction="out")
+    names = {e["semantic"]["name"] for e in evs}
+    assert names == {"EMPTY", "NORMAL", "FULL"}
 
 
 def test_s8_always_comb_cone_of_status(multi_bundle):

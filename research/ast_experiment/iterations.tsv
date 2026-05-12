@@ -43,3 +43,10 @@ S08	sem	pending	S7 ParameterValueAssignmentSyntax promotion: param_override edge
 INV08	invariants	pending	8th invariant: every param_override target is a param node on the instance's of_module side	0	pass	test_inv8_param_override_target_is_param green
 corpus-02	corpus	pending	add status output port + always_comb decoder to fifo.sv (no new AST class — ProceduralBlockSyntax already covered, kind=AlwaysCombBlock)	0	pass	score unchanged at 0; test_queries A2 + S1-port-set tests updated for new status port
 S09	sem	pending	S8 ProceduralBlockSyntax(always_comb) promotion: role=always_comb, drives/reads, no sensitive_to	0	pass	cone_of_influence('fifo.status') reaches fifo.count and fifo.DEPTH; sensitivity_of(always_comb)==[]
+corpus-03	corpus	pending	add fifo_pkg.sv (package + typedef-enum + parameter); import in fifo.sv; status port re-typed to fifo_status_e; gbundle migrated to build_kg	6	pass	score=6 with new classes TypedefDeclarationSyntax/EnumTypeSyntax/NamedTypeSyntax/PackageImportDeclarationSyntax/PackageImportItemSyntax/ParameterDeclarationStatementSyntax
+S10	sem	pending	S9 PackageDeclaration → role=package; TypedefDeclarationSyntax → role=typedef with has_typedef edge; EnumTypeSyntax declarators → role=enum_value with has_enum_value edges	0	pass	package_of('fifo_pkg.fifo_status_e')=='fifo_pkg'; enum value set {EMPTY,NORMAL,FULL} reachable via has_enum_value; invariants extended to treat package as owner role
+021	struct	pending	cover TypedefDeclarationSyntax round-trip on fifo_pkg.sv	5	pass	per-class assertion green
+022	struct	pending	cover EnumTypeSyntax round-trip on fifo_pkg.sv	4	pass	per-class assertion green
+023	struct	pending	cover ParameterDeclarationStatementSyntax round-trip on fifo_pkg.sv	3	pass	per-class assertion green
+024	struct	pending	cover PackageImportDeclarationSyntax + PackageImportItemSyntax round-trip on fifo.sv	1	pass	per-class assertion green
+025	struct	pending	cover NamedTypeSyntax round-trip on fifo.sv (fifo_status_e port type)	0	pass	score back to 0; covered=60/60
