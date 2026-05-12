@@ -22,6 +22,7 @@ SRC = HERE / "fifo.sv"
 TOP = HERE / "top.sv"
 PKG = HERE / "fifo_pkg.sv"
 IFACE = HERE / "fifo_if.sv"
+TB = HERE / "tb_fifo.sv"
 COVERED = HERE / "covered_classes.json"
 
 
@@ -368,6 +369,37 @@ def test_iter018_named_port_connection(top_tree):
     reparsed, _ = _roundtrip(top_tree)
     _assert_class_roundtrip(top_tree.root, reparsed.root, "NamedPortConnectionSyntax")
     _mark_covered({"NamedPortConnectionSyntax"})
+
+
+@pytest.fixture(scope="module")
+def tb_tree():
+    return pyslang.SyntaxTree.fromText(TB.read_text())
+
+
+def test_tb_parse_baseline(tb_tree):
+    """Sanity: pyslang parses tb_fifo.sv with no diagnostics."""
+    diags = list(tb_tree.diagnostics)
+    assert not diags, f"tb_fifo.sv parse diagnostics: {diags}"
+
+
+def test_tb_full_token_text_stream(tb_tree):
+    """Round-trip on tb_fifo.sv: token text stream byte-equal."""
+    reparsed, _ = _roundtrip(tb_tree)
+    assert _token_text_stream(reparsed.root) == _token_text_stream(tb_tree.root)
+
+
+def test_iter029_tb_delay_and_forever(tb_tree):
+    """iter-029: DelaySyntax + ForeverStatementSyntax round-trip byte-equal.
+
+    The testbench exercises initial blocks, delay controls (``#5``), and the
+    free-running clock generator (``forever #5 clk = ~clk;``). Most of the
+    structural-blob still flows through the class-generic emitter; these two
+    leaves are the only previously-uncovered classes the testbench introduces.
+    """
+    reparsed, _ = _roundtrip(tb_tree)
+    for cls in ("DelaySyntax", "ForeverStatementSyntax"):
+        _assert_class_roundtrip(tb_tree.root, reparsed.root, cls)
+    _mark_covered({"DelaySyntax", "ForeverStatementSyntax"})
 
 
 def test_iter028_generate_region(top_tree):

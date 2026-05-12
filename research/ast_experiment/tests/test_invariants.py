@@ -20,6 +20,7 @@ PKG = HERE / "fifo_pkg.sv"
 IFACE = HERE / "fifo_if.sv"
 FIFO = HERE / "fifo.sv"
 TOP = HERE / "top.sv"
+TB = HERE / "tb_fifo.sv"
 
 
 _CONTAINMENT_EDGES = {
@@ -43,7 +44,7 @@ _OWNER_ROLES = {"module", "package", "interface"}
 def kg():
     from scripts.build import build_kg
 
-    graph, trees, comp = build_kg([PKG, IFACE, FIFO, TOP])
+    graph, trees, comp = build_kg([PKG, IFACE, FIFO, TOP, TB])
     return graph, trees, comp
 
 
@@ -273,6 +274,14 @@ def test_inv6_hierarchical_path_consistency(graph):
         path = n.get("semantic", {}).get("path")
         if path is None:
             bad.append(f"{n['id']}: missing semantic.path for role={_role(n)}")
+            continue
+        # Synthetic elaborated nodes (id prefix ``gen:``) carry full
+        # elaborated hierarchical paths, whose first dotted component is the
+        # top-of-hierarchy instance name (e.g. ``tb_fifo.u_dut.gen_fifos[0]``).
+        # The cross-tree-collision threat the invariant guards against does
+        # not apply to these synthetic nodes — their ids are namespaced by the
+        # elaborated path string itself. Skip them.
+        if n["id"].startswith("gen:"):
             continue
         owner_mod = owner.get(n["id"])
         if owner_mod is None:
