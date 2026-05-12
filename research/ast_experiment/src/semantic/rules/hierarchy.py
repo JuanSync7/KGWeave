@@ -41,6 +41,36 @@ def _s1_param_decl(*args, **kwargs):
     return
 
 
+def _s1_variable_port_header(*args, **kwargs):
+    """VariablePortHeader — sub-element of ImplicitAnsiPort handled in pass 1."""
+    return
+
+
+def _s1_declarator(*args, **kwargs):
+    """Declarator — pass 1 (params/nets/enum-values bind here)."""
+    return
+
+
+def _s11_modport_explicit_port(*args, **kwargs):
+    return
+
+
+def _s11_modport_clocking_port(*args, **kwargs):
+    return
+
+
+def _s11_modport_subroutine_port(*args, **kwargs):
+    return
+
+
+def _s11_modport_simple_port_list(*args, **kwargs):
+    return
+
+
+def _s11_modport_subroutine_port_list(*args, **kwargs):
+    return
+
+
 def _s11_interface(*args, **kwargs):
     """InterfaceDeclaration — pass 1 (handled by the same module branch)."""
     return
@@ -64,10 +94,17 @@ def _s11_modport_named_port(*args, **kwargs):
 _s1_module_decl.__rule_id__ = "S1"
 _s1_port.__rule_id__ = "S1"
 _s1_param_decl.__rule_id__ = "S1"
+_s1_variable_port_header.__rule_id__ = "S1"
+_s1_declarator.__rule_id__ = "S1"
 _s11_interface.__rule_id__ = "S11a"
 _s11_modport_decl.__rule_id__ = "S11b"
 _s11_modport_item.__rule_id__ = "S11b"
 _s11_modport_named_port.__rule_id__ = "S11b"
+_s11_modport_explicit_port.__rule_id__ = "S11b"
+_s11_modport_clocking_port.__rule_id__ = "S11b"
+_s11_modport_subroutine_port.__rule_id__ = "S11b"
+_s11_modport_simple_port_list.__rule_id__ = "S11b"
+_s11_modport_subroutine_port_list.__rule_id__ = "S11b"
 
 
 # --- Active pass-2 rules ----------------------------------------------------
@@ -471,10 +508,19 @@ _s12_generate_region.__rule_id__ = "S12c"
 
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ModuleDeclaration, _s1_module_decl),
+    (pyslang.SyntaxKind.ImplicitAnsiPort, _s1_port),
+    (pyslang.SyntaxKind.VariablePortHeader, _s1_variable_port_header),
+    (pyslang.SyntaxKind.ParameterDeclaration, _s1_param_decl),
+    (pyslang.SyntaxKind.Declarator, _s1_declarator),
     (pyslang.SyntaxKind.InterfaceDeclaration, _s11_interface),
     (pyslang.SyntaxKind.ModportDeclaration, _s11_modport_decl),
     (pyslang.SyntaxKind.ModportItem, _s11_modport_item),
     (pyslang.SyntaxKind.ModportNamedPort, _s11_modport_named_port),
+    (pyslang.SyntaxKind.ModportExplicitPort, _s11_modport_explicit_port),
+    (pyslang.SyntaxKind.ModportClockingPort, _s11_modport_clocking_port),
+    (pyslang.SyntaxKind.ModportSubroutinePort, _s11_modport_subroutine_port),
+    (pyslang.SyntaxKind.ModportSimplePortList, _s11_modport_simple_port_list),
+    (pyslang.SyntaxKind.ModportSubroutinePortList, _s11_modport_subroutine_port_list),
     (pyslang.SyntaxKind.HierarchyInstantiation, rule_s6),
     (pyslang.SyntaxKind.HierarchicalInstance, _s6_hierarchical_instance),
     (pyslang.SyntaxKind.InstanceName, _s6_instance_name),

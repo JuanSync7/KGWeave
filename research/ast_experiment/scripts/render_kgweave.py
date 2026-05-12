@@ -39,8 +39,8 @@ from kgweave.knowledge_graph.backends.networkx_backend import NetworkXBackend  #
 from kgweave.knowledge_graph.common.schemas import Entity, Triple  # noqa: E402
 from kgweave.knowledge_graph.export import export_html  # noqa: E402
 
-from research.ast_experiment.scripts.build import build_kg  # noqa: E402
-from research.ast_experiment.scripts.semantic import queryable_nodes  # noqa: E402
+from research.ast_experiment.src.build import build_kg  # noqa: E402
+from research.ast_experiment.src.semantic import queryable_nodes  # noqa: E402
 
 OUT_HTML = HERE / "render" / "kgweave_graph.html"
 OUT_HTML.parent.mkdir(exist_ok=True)

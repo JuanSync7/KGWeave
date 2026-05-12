@@ -6,8 +6,10 @@ For each of pyslang's 536 SyntaxKinds, mark:
   - Semantic: ✅ promoted by an S-rule / ⏳ in flight / — not applicable / ⬜ future
   - Owner:    which S-rule promotes it, or "structural lift only" for BLOB/CONTAINER
 
-Reads `research/ast_experiment/ast_classes.json` (test-corpus coverage) and the
-hardcoded promotion map below (kept in sync with semantic.py rules).
+Reads `research/ast_experiment/ast_classes.json` (test-corpus coverage) and
+derives the promotion map directly from
+``research.ast_experiment.src.semantic.dispatch.RULE_TABLE`` — there is no
+hand-maintained duplicate.
 
 Run:  uv run python research/ast_experiment/scripts/build_bucket1_checklist.py
 """
@@ -25,60 +27,20 @@ HERE = Path(__file__).resolve().parent.parent
 OUT = HERE / "BUCKET_1_CHECKLIST.md"
 COVERED = HERE / "ast_classes.json"
 
-# --- Active S-rule promotion map (keep in sync with semantic.py) ---------------------
-PROMOTE_NOW = {
-    # S1 — ModuleDeclaration → module + has_port/has_param/has_net
-    "ModuleDeclaration": "S1",
-    "ImplicitAnsiPort": "S1",
-    "VariablePortHeader": "S1",
-    "ParameterDeclaration": "S1",
-    "Declarator": "S1",
-    # S2 — ContinuousAssign → drives/reads
-    "ContinuousAssign": "S2",
-    # S3 — AlwaysFF → sensitive_to/drives/reads
-    "AlwaysFFBlock": "S3",
-    # S4 — IdentifierSelectName → reads(base)
-    "IdentifierSelectName": "S4",
-    "IdentifierName": "S4",  # leaf identifier becomes reads-source
-    # S5 — SystemName ($clog2 etc.) → reads(arg)
-    "SystemName": "S5",
-    "InvocationExpression": "S5",
-    # S6 — HierarchyInstantiation → instantiates/of_module/connects
-    "HierarchyInstantiation": "S6",
-    "HierarchicalInstance": "S6",
-    "InstanceName": "S6",
-    "NamedPortConnection": "S6",
-    # S7 — ParameterValueAssignment → param_override (Phase 1 — shipped)
-    "ParameterValueAssignment": "S7",
-    "NamedParamAssignment": "S7",
-    "OrderedParamAssignment": "S7",
-    # S8 — AlwaysComb → drives/reads (no sensitive_to) (Phase 2 — shipped)
-    "AlwaysCombBlock": "S8",
-    # S9 — Package/typedef/enum (Phase 3 — shipped)
-    "PackageDeclaration": "S9a",
-    "TypedefDeclaration": "S9b",
-    "EnumType": "S9c",
-    # S10 — Function/task + calls (Phase 4 — shipped)
-    "FunctionDeclaration": "S10",
-    "TaskDeclaration": "S10",
-    # S11 — Interface/modport (Phase 5 — shipped)
-    "InterfaceDeclaration": "S11a",
-    "ModportDeclaration": "S11b",
-    "ModportItem": "S11b",
-    "ModportNamedPort": "S11b",
-    "ModportExplicitPort": "S11b",
-    "ModportClockingPort": "S11b",
-    "ModportSubroutinePort": "S11b",
-    "ModportSimplePortList": "S11b",
-    "ModportSubroutinePortList": "S11b",
-    # S12 — Generate (Phase 6 — shipped)
-    "LoopGenerate": "S12a",
-    "GenerateBlock": "S12b",
-    "IfGenerate": "S12c",
-    "CaseGenerate": "S12c",
-    "GenerateRegion": "S12c",
-    # S13 — Bind directive (Phase 7 — shipped)
-    "BindDirective": "S13",
+# Ensure repo root is on sys.path so the registry import resolves under both
+# `uv run python …` (script mode) and pytest (which adds cwd automatically).
+_REPO_ROOT = HERE.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+# --- Active S-rule promotion map (registry-derived) ----------------------------------
+# Single source of truth: src/semantic/dispatch.py's RULE_TABLE. Each rule
+# callable carries a ``__rule_id__`` attribute ("S1".."S13") used here.
+from research.ast_experiment.src.semantic.dispatch import RULE_TABLE  # noqa: E402
+
+PROMOTE_NOW: dict[str, str] = {
+    kind.name: getattr(fn, "__rule_id__", "?")
+    for kind, fn in RULE_TABLE.items()
 }
 
 # All current in-flight work has shipped. Reserve for the next wave of S-rules.

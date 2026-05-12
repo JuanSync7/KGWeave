@@ -23,8 +23,8 @@ sys.path.insert(0, str(HERE.parent.parent))
 
 import pyslang  # noqa: E402
 
-from research.ast_experiment.scripts.lift import lift  # noqa: E402
-from research.ast_experiment.scripts.semantic import (  # noqa: E402
+from research.ast_experiment.src.lift import lift  # noqa: E402
+from research.ast_experiment.src.semantic import (  # noqa: E402
     promote,
     queryable_nodes,
 )
