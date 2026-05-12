@@ -18,3 +18,34 @@ produces, and the rule the reverse engine uses to recover the SV text.
 | `wr_ptr + 1'b1`                                   | BinaryExpressionSyntax + IntegerVectorExpressionSyntax                  | binary op with sized vector literal on Token leaf                                                                                | structural emit                                                              |
 | `$clog2(DEPTH)`                                   | InvocationExpressionSyntax + SystemNameSyntax + ArgumentListSyntax + OrderedArgumentSyntax + IdentifierNameSyntax | system-name Token leaf carries `$clog2` text; argument list mapped 1:1                                                            | structural emit                                                              |
 | comments / whitespace                              | trivia on adjacent Tokens                                              | `node.payload.trivia` ordered list of `{kind, text}`                                                                              | emitted before each Token's rawText                                          |
+
+## Semantic projection (rules S1..S5)
+
+For each construct above, the table below shows the **semantic projection** the
+promote-on-demand layer applies on top of the structural graph fragment. The
+reverse rule for every projected node remains *the structural rule* — the
+semantic layer never mutates token payloads, so emit() always reconstructs the
+original SV text.
+
+| Construct (fifo.sv)                              | pyslang class                          | Semantic role         | Edges drawn                                                                                                  | Anchor resolution                                                              |
+|--------------------------------------------------|----------------------------------------|------------------------|--------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
+| `module fifo`                                    | `ModuleDeclarationSyntax`              | `module`               | outbound `has_port` × 8, `has_param` × 2, `has_net` × 4                                                      | name = `ModuleHeader → Identifier.valueText` ("fifo")                          |
+| `input logic clk,` etc.                          | `ImplicitAnsiPortSyntax`               | `port`                 | inbound `has_port` from module                                                                               | name from inner DeclaratorSyntax's Identifier token                            |
+| `parameter int DEPTH = 8`                        | `DeclaratorSyntax` (under ParameterDecl)| `param`               | inbound `has_param` from module                                                                              | name from Declarator's Identifier token                                        |
+| `logic [WIDTH-1:0] mem [DEPTH];` etc.            | `DeclaratorSyntax` (under DataDecl)    | `net`                  | inbound `has_net` from module (only if name is not already a port)                                           | name from Declarator's Identifier token                                        |
+| `assign full = (count == DEPTH);`                | `ContinuousAssignSyntax`               | `continuous_assign`    | outbound `drives` → `full`(port), outbound `reads` → `count`(net), `DEPTH`(param)                            | LHS via `_split_around_eq` on inner AssignmentExpression; RHS = identifiers DFS|
+| `assign dout = mem[rd_ptr[$clog2(DEPTH)-1:0]];`  | `ContinuousAssignSyntax`               | `continuous_assign`    | `drives`(dout), `reads`(mem,rd_ptr,DEPTH)                                                                    | identifiers inside IdentifierSelectName are picked up by S2 + S4               |
+| `always_ff @(posedge clk or negedge rst_n)`      | `ProceduralBlockSyntax` (kw=always_ff) | `always_ff`            | `sensitive_to` clk(posedge), rst_n(negedge); `drives` wr_ptr, rd_ptr, count; `reads` push, pop, rst_n, …    | sensitivity from descendant `SignalEventExpressionSyntax` + edge keyword token |
+| `if (!rst_n)` / `case ({push&&!full, pop&&!empty})` | inside always_ff                    | n/a (read-flow only)  | adds `reads` from always_ff to identifiers in `ConditionalPredicateSyntax` / case-head expression           | descendant walk inside always_ff                                                |
+| `mem[wr_ptr[...]]` / `rd_ptr[...]`               | `IdentifierSelectNameSyntax`           | `identifier_select`    | outbound `reads` → base symbol (`mem` / `wr_ptr` / `rd_ptr`)                                                 | base = first Identifier token under the SelectName                             |
+| `$clog2(DEPTH)`                                  | `InvocationExpressionSyntax` over `SystemNameSyntax` | `system_call` (`name=$clog2`) | outbound `reads` → DEPTH                                                                | callee Token (`SystemIdentifier` kind) gives sysname; args from ArgumentList   |
+
+### Reverse rule (semantic layer)
+
+Identical to the structural one: emit children in DFS order, tokens emit
+trivia+rawText. The semantic layer adds **only** flags (`queryable`,
+`semantic.role`, `semantic.name`, …) and new edges of types `has_port`,
+`has_param`, `has_net`, `drives`, `reads`, `sensitive_to`. None of the original
+`child` edges or token payloads is altered, so the structural emit is a strict
+inverse of the structural lift regardless of which rules have fired.
+
