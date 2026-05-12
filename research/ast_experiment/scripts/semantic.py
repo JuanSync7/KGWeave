@@ -141,9 +141,24 @@ def _all_module_scopes(compilation: Any) -> list[Any]:
         seen.add(key)
         out.append(scope)
 
+    def descend(body: Any) -> None:
+        if body is None:
+            return
+        visit(body)
+        # InstanceBodySymbol exposes its child symbols via iteration; descend
+        # through any InstanceSymbol children to reach nested instance bodies.
+        try:
+            members = list(body)
+        except TypeError:
+            members = []
+        for sym in members:
+            sub_body = getattr(sym, "body", None)
+            if sub_body is not None and id(sub_body) not in seen:
+                descend(sub_body)
+
     for inst in compilation.getRoot().topInstances:
         body = getattr(inst, "body", None)
-        visit(body)
+        descend(body)
     return out
 
 
@@ -322,7 +337,9 @@ def promote(graph: dict[str, Any], syntax_tree: Any, compilation: Any) -> None:
     module_scope_by_name: dict[str, Any] = {}
     try:
         for scope in _all_module_scopes(compilation):
-            nm = _scope_path_of(scope).split(".")[-1] if _scope_path_of(scope) else ""
+            # An elaborated InstanceBodySymbol's ``.name`` is the module
+            # definition name (e.g. "fifo"), regardless of instance path.
+            nm = getattr(scope, "name", "") or ""
             if nm and nm not in module_scope_by_name:
                 module_scope_by_name[nm] = scope
     except Exception:
@@ -358,6 +375,9 @@ def promote(graph: dict[str, Any], syntax_tree: Any, compilation: Any) -> None:
             popped_module = True
             _mark(nodes_list[idx], role="module", name=mname, path=mname)
             name_index["module:" + mname] = gid
+            # Also register the module's path as a top-level lookup so that
+            # ``find_by_name('top')`` resolves to the module node directly.
+            name_index[mname] = gid
             port_names_by_module.setdefault(mname, set())
         elif c == "ImplicitAnsiPortSyntax":
             mod_gid, mname = _cur_module()
@@ -435,7 +455,9 @@ def promote(graph: dict[str, Any], syntax_tree: Any, compilation: Any) -> None:
             _rule_s4(graph, node, gid, nodes_list[idx], scope, name_index, leaks, scope_path)
         elif c == "InvocationExpressionSyntax":
             _rule_s5(graph, node, gid, nodes_list[idx], scope, name_index, leaks, scope_path)
-        # S6 (HierarchyInstantiationSyntax) is wired in sem-07.
+        elif c == "HierarchyInstantiationSyntax":
+            _rule_s6(graph, node, gid, nodes_list[idx], scope, name_index, leaks,
+                     scope_path, mod_gid)
         if not _is_token(node):
             try:
                 children = list(node)
@@ -634,15 +656,22 @@ def _rule_s6(graph, node, gid, gnode, scope, name_index, leaks,
       * for each named port connection: ``<scope_path>.<connected_net>``
         --connects-->  ``<scope_path>.<inst>.<port>``
     """
-    # First non-token child is the module-type IdentifierName.
+    # The module-type identifier appears as a direct Identifier Token child
+    # of HierarchyInstantiationSyntax (e.g. ``fifo`` in ``fifo u_fifo(...)``).
+    # Fall back to scanning non-token children for an embedded identifier.
     type_name = None
     for ch in node:
-        if _is_token(ch):
-            continue
-        toks = _identifier_tokens(ch)
-        if toks:
-            type_name = toks[0].valueText
+        if _is_token(ch) and _token_kind_name(ch) == "Identifier":
+            type_name = ch.valueText
             break
+    if type_name is None:
+        for ch in node:
+            if _is_token(ch):
+                continue
+            toks = _identifier_tokens(ch)
+            if toks:
+                type_name = toks[0].valueText
+                break
     if type_name is None:
         return
     type_node_id = name_index.get("module:" + type_name)
@@ -688,15 +717,27 @@ def _rule_s6(graph, node, gid, gnode, scope, name_index, leaks,
         for npc in _descendants(d):
             if _cls(npc) != "NamedPortConnectionSyntax":
                 continue
-            # Port: first identifier token after the '.'.
+            # Children: SyntaxNode(empty?), '.', Identifier(portName), '(', expr, ')'.
+            children = list(npc)
             port_name = None
-            for ch in npc:
-                if _is_token(ch):
+            expr_node = None
+            saw_dot = False
+            for ch in children:
+                if _is_token(ch) and _token_kind_name(ch) == "Dot":
+                    saw_dot = True
                     continue
-                toks = _identifier_tokens(ch)
-                if toks:
-                    port_name = toks[0].valueText
-                    break
+                if saw_dot and _is_token(ch) and _token_kind_name(ch) == "Identifier" and port_name is None:
+                    port_name = ch.valueText
+                    continue
+                if port_name is not None and not _is_token(ch):
+                    # Skip empty wrapper nodes.
+                    try:
+                        sub_kids = list(ch)
+                    except TypeError:
+                        sub_kids = []
+                    if sub_kids or _identifier_tokens(ch):
+                        expr_node = ch
+                        break
             if port_name is None:
                 continue
             port_path = f"{inst_path}.{port_name}"
@@ -705,22 +746,12 @@ def _rule_s6(graph, node, gid, gnode, scope, name_index, leaks,
             if child_port_id is not None:
                 # Anchor the port-connection through a path key for queryability.
                 name_index[port_path] = child_port_id
-            # RHS expression: collect identifier tokens, take the first as the
-            # connected net name in the parent scope.
-            # The expression is the first non-token child after the port-name
-            # IdentifierName wrapper. Walk all descendant identifier tokens
-            # excluding the port-name itself.
+            # RHS expression: collect identifier tokens from the connection
+            # expression only (post the port-name token).
             rhs_names: list[str] = []
-            # Locate the parenthesized expression child (ParenthesizedExpression-
-            # like wrapper). For simplicity collect every identifier token in
-            # the connection that is not the port name.
-            seen_first_id = False
-            for tok in _identifier_tokens(npc):
-                if not seen_first_id:
-                    # first identifier in a NamedPortConnection is the port name
-                    seen_first_id = True
-                    continue
-                rhs_names.append(tok.valueText)
+            if expr_node is not None:
+                for tok in _identifier_tokens(expr_node):
+                    rhs_names.append(tok.valueText)
             for rname in rhs_names:
                 # Resolve in parent scope.
                 src_id = name_index.get(f"{scope_path}.{rname}")
@@ -847,7 +878,8 @@ def reads_of(graph: dict[str, Any], name: str) -> list[dict[str, Any]]:
 
 def cone_of_influence(graph: dict[str, Any], name: str) -> set[str]:
     """Backward reachability: from ``name``, follow drivers; from drivers,
-    follow what they read; repeat. Returns the set of visited node ids."""
+    follow what they read; cross hierarchy boundaries via incoming ``connects``
+    edges (parent-net → child-port). Returns the set of visited node ids."""
     target = find_by_name(graph, name)
     if target is None:
         return set()
@@ -865,5 +897,9 @@ def cone_of_influence(graph: dict[str, Any], name: str) -> set[str]:
                 for r in neighbors(graph, driver["id"], edge_type="reads", direction="out"):
                     if r["id"] not in seen:
                         nxt.append(r["id"])
+            # Cross hierarchy: a parent net `connects` to this node (child port).
+            for parent in neighbors(graph, nid, edge_type="connects", direction="in"):
+                if parent["id"] not in seen:
+                    nxt.append(parent["id"])
         frontier = nxt
     return seen
