@@ -223,6 +223,14 @@ def test_conditional_family(original_tree):
     })
 
 
+def test_case_family(original_tree):
+    """iter-009: case statement + standard case item + default case item round-trip."""
+    reparsed, _ = _roundtrip(original_tree)
+    for cls in ("CaseStatementSyntax", "StandardCaseItemSyntax", "DefaultCaseItemSyntax"):
+        _assert_class_roundtrip(original_tree.root, reparsed.root, cls)
+    _mark_covered({"CaseStatementSyntax", "StandardCaseItemSyntax", "DefaultCaseItemSyntax"})
+
+
 def test_full_token_text_stream(original_tree):
     """Strongest oracle: every Token's rawText survives the round-trip in DFS
     order (modulo trivia after the final token, which pyslang drops upstream)."""

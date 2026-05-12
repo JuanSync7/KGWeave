@@ -8,3 +8,4 @@ iteration	layer	commit	hypothesis	score	status	summary
 006	struct	pending	continuous assign + expression statement round-trip	33	pass	covered ContinuousAssign/ExpressionStatement
 007	struct	pending	procedural block + timing control + event expression family round-trip	27	pass	covered ProceduralBlock/TimingControlStatement/EventControlWithExpression/Binary+Signal+ParenEvent
 008	struct	pending	block stmt + conditional stmt + else clause + predicate + pattern round-trip	22	pass	covered BlockStatement/ConditionalStatement/ElseClause/ConditionalPredicate/ConditionalPattern
+009	struct	pending	case statement + standard case item + default case item round-trip	19	pass	covered CaseStatement/StandardCaseItem/DefaultCaseItem
