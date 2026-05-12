@@ -67,7 +67,6 @@ def test_s1_module_promotes_ports_params_nets(fixture_bundle):
     assert {n["semantic"]["name"] for n in nets} == {"mem", "wr_ptr", "rd_ptr", "count"}
 
 
-@pytest.mark.skip(reason="enabled in sem-02")
 def test_s2_continuous_assign_drives_and_reads(fixture_bundle):
     """S2: who_drives('dout') yields exactly one continuous_assign node."""
     _tree, _comp, graph = fixture_bundle

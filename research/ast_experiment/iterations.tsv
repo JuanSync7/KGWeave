@@ -15,3 +15,4 @@ iteration	layer	commit	hypothesis	score	status	summary
 013	struct	pending	system name + invocation + argument list + ordered argument round-trip	4	pass	covered SystemName/InvocationExpression/ArgumentList/OrderedArgument
 014	struct	pending	simple property/sequence + universal SyntaxNode + Token round-trip	0	pass	covered SimplePropertyExpr/SimpleSequenceExpr/SyntaxNode/Token — structural score=0
 S01	sem	pending	S1 ModuleDeclaration promotion: module + has_port/has_param/has_net edges; round-trip preserved	0	pass	scripts/semantic.py + tests/test_queries.py; S2..S5 skipped pending
+S02	sem	pending	S2 ContinuousAssign promotion: drives(lhs) + reads(rhs identifiers) edges	0	pass	who_drives('dout')/who_drives('full')+reads(count) green; round-trip preserved
