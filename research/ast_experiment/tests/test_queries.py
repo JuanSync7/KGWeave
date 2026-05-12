@@ -86,7 +86,6 @@ def test_s2_continuous_assign_drives_and_reads(fixture_bundle):
     assert "count" in read_names
 
 
-@pytest.mark.skip(reason="enabled in sem-03")
 def test_s3_always_ff_sensitivity_and_drives(fixture_bundle):
     """S3: the always_ff has sensitive_to clk(posedge) and rst_n(negedge);
     cone_of_influence('full') reaches push, pop, rst_n."""
