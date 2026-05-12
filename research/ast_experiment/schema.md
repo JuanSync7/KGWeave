@@ -81,6 +81,10 @@ since container nodes have no own text — all source bytes belong to Tokens).
 | SimpleSequenceExprSyntax            | type=`SimpleSequenceExprSyntax`          | emit children in order                         |
 | SyntaxNode                          | type=`SyntaxNode` (list/null wrappers)   | emit children in order                         |
 | Token                               | type=`Token`, payload={rawText, trivia}  | emit join(trivia.text) + rawText                |
+| HierarchyInstantiationSyntax        | type=`HierarchyInstantiationSyntax`      | emit children in order                         |
+| HierarchicalInstanceSyntax          | type=`HierarchicalInstanceSyntax`        | emit children in order                         |
+| InstanceNameSyntax                  | type=`InstanceNameSyntax`                | emit children in order                         |
+| NamedPortConnectionSyntax           | type=`NamedPortConnectionSyntax`         | emit children in order                         |
 
 ## Semantic layer (projection)
 
@@ -107,12 +111,15 @@ the `type` field. Both layers share the same underlying node id space.
 | `drives`       | (continuous assign \| always_ff) → LHS symbol anchor           | S2, S3     |
 | `reads`        | (assign \| always_ff \| id-select \| sys call) → RHS anchor    | S2, S3, S4, S5 |
 | `sensitive_to` | always_ff → clock/reset symbol; payload `{"edge": "posedge"…}` | S3         |
+| `instantiates` | parent module → child instance node                            | S6         |
+| `of_module`    | instance node → module-definition node it elaborates           | S6         |
+| `connects`     | parent net/port → child instance's port; payload `{"instance", "port"}` | S6 |
 
-### Semantic rule table (S1..S5)
+### Semantic rule table (S1..S6)
 
 | Rule | Syntax trigger                              | Promoted node role    | Edges drawn                              |
 |------|----------------------------------------------|------------------------|-------------------------------------------|
-| S1   | `ModuleDeclarationSyntax`                    | `module`               | `has_port` × ports, `has_param` × params, `has_net` × variables |
+| S1   | `ModuleDeclarationSyntax`                    | `module`               | `has_port` × ports, `has_param` × params, `has_net` × variables. Fires once **per module declaration** in the syntax tree, not just on the top-level instance. |
 | S1   | `ImplicitAnsiPortSyntax`                     | `port`                 | inbound `has_port` from module            |
 | S1   | `DeclaratorSyntax` ∈ ParameterDeclaration    | `param`                | inbound `has_param` from module           |
 | S1   | `DeclaratorSyntax` ∈ DataDeclaration         | `net`                  | inbound `has_net` from module             |
@@ -120,20 +127,36 @@ the `type` field. Both layers share the same underlying node id space.
 | S3   | `ProceduralBlockSyntax` (kw=`always_ff`)     | `always_ff`            | `sensitive_to`, `drives`, `reads` (incl. predicate + case head) |
 | S4   | `IdentifierSelectNameSyntax`                 | `identifier_select`    | `reads`(base symbol)                       |
 | S5   | `InvocationExpressionSyntax` over SystemName | `system_call`          | `reads`(argument identifiers)              |
+| S6   | `HierarchyInstantiationSyntax`               | `instance` (anchored at the `HierarchicalInstanceSyntax`) | parent `instantiates` instance; instance `of_module` definition; parent-net `connects` child-port for each `NamedPortConnectionSyntax` |
 
-### Identifier resolution
+### Identifier resolution — hierarchical-path keys
 
-The semantic layer resolves a name by:
+`semantic_name_index` keys are **hierarchical paths**, never bare names:
 
-1. `pyslang.Compilation.find(name)` on the enclosing module's `InstanceBodySymbol`
-   (handles single-module scoping; we also try `lookupName` for upward search).
-2. Mapping the symbol's declaration syntax to the graph-id of the corresponding
-   promoted `DeclaratorSyntax` / `ImplicitAnsiPortSyntax`, via the `semantic_name_index`
-   built during S1.
+* `fifo.count`, `fifo.DEPTH`, `top.u_fifo`, `top.u_fifo.count`.
+* The leaf path component is the local symbol name (port, net, param, instance).
+* The path prefix is the chain of enclosing scopes, sourced from pyslang's
+  elaborated `InstanceBodySymbol.name` chain.
+* `type` (`module` / `port` / `param` / `net` / `instance` / `continuous_assign`
+  / `always_ff` / `identifier_select` / `system_call`) lives on
+  `node["semantic"]["role"]` as **metadata** — it never participates in the
+  lookup key. Filter on it at query time.
 
-If step 1 returns nothing we fall back to pure name-string matching in the
-module's name index and append a record to `graph["semantic_leaks"]` so
-`RESULT.md` can surface the slippage. For `fifo.sv` no leaks fire.
+Resolution algorithm for a name appearing inside module `M`:
+
+1. Try `name_index[f"{M}.{name}"]` (the hierarchical-path key).
+2. If absent, fall back to a bare-name scan: `[v for k,v in idx.items() if k == name or k.endswith("." + name)]`.
+   Accept only if exactly **one** match exists. Ambiguous bare names fail closed.
+3. Confirm the symbol exists in pyslang's elaborated scope via
+   `InstanceBodySymbol.find(name)` / `lookupName`. The pyslang scope is keyed
+   by module **definition name** (so a `top.u_fifo` body resolves under `fifo`).
+4. If pyslang returns `None`, append `graph["semantic_leaks"]` with the
+   context, name, and reason.
+
+For both `fifo.sv` and `top.sv` no leaks fire.
+
+`find_by_name(graph, name)` accepts either a full path or a bare leaf name and
+applies rules 1–2 in that order.
 
 ### Snip-and-ref invariant
 

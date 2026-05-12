@@ -1,118 +1,108 @@
 # Result — lossless SV round-trip + promote-on-demand semantic layer
 
 Branch: `autoresearch/ast-roundtrip-2026-05-12`
-Source under test: `research/ast_experiment/fifo.sv` (45 lines, single module).
+Sources under test:
+* `research/ast_experiment/fifo.sv` (45 lines, single module).
+* `research/ast_experiment/top.sv` (23 lines, instantiates `fifo` once as `u_fifo`).
 
 ## Final scores
 
-| Oracle                  | Score | Target | Status |
-|-------------------------|-------|--------|--------|
-| Structural (`score.py`) | 0     | 0      | met    |
-| Semantic (S1..S5 tests) | 0 failing | 0  | met    |
-| Round-trip after promote| green | green  | met    |
+| Oracle                           | Score | Target | Status |
+|----------------------------------|-------|--------|--------|
+| Structural (`score.py`, combined)| 0     | 0      | met    |
+| Semantic (S1..S5 fifo-only)      | 0 failing | 0  | met    |
+| Multi-module S6 queries          | 0 failing | 0  | met    |
+| Round-trip after promote (both)  | green | green  | met    |
+| `semantic_leaks` (both files)    | 0     | 0      | met    |
 
-Total pytest run: **22 passed, 0 failed, 0 skipped** (`uv run python -m pytest research/ast_experiment/tests/ -x -q`).
+Total pytest run: **34 passed, 0 failed, 0 skipped**
+(`uv run -- python -m pytest research/ast_experiment/tests/ -x -q`).
 
-## Round-trip proof statement
+## Round-trip proof statement (combined corpus)
 
-For every pyslang `SyntaxNode` class touched by `fifo.sv` (48 classes — see
-`ast_classes.json`), the assertion
+For every pyslang `SyntaxNode` class touched by `fifo.sv` **or** `top.sv` (52
+classes — see `ast_classes.json`, including the four hierarchy classes added
+this loop), the assertion
 
 ```
-"".join(token_text_stream(parse(emit(unlift(lift(parse(fifo.sv))))))) ==
-"".join(token_text_stream(parse(fifo.sv)))
+"".join(token_text_stream(parse(emit(unlift(lift(parse(src))))))) ==
+"".join(token_text_stream(parse(src)))
 ```
 
-holds, and `_assert_class_roundtrip` enforces it **per class**, byte-equal at
-the token level (modulo trivia after the final token, which pyslang drops
-upstream regardless). Token leading trivia is preserved on the originating
-Token payload, so whitespace, comments, and macro-style markers also round-trip.
+holds for `src ∈ {fifo.sv, top.sv}`, and `_assert_class_roundtrip` enforces it
+**per class**, byte-equal at the token level (modulo trivia after the final
+token, which pyslang drops upstream regardless). The same property holds for
+the concatenated multi-module source used by `test_queries_multi.py`'s
+`test_multi_roundtrip_after_promote`.
 
-After the semantic layer fires (rules S1..S5), `test_roundtrip_after_promote`
-re-emits from the mutated graph and reasserts the same byte-level equivalence —
-proving promotion is non-destructive.
+After the semantic layer fires (rules S1..S6), `test_roundtrip_after_promote`
+and `test_multi_roundtrip_after_promote` re-emit from the mutated graph and
+reassert the same byte-level equivalence — proving promotion is non-destructive
+in both the single-module and multi-module cases.
 
-## Structural iterations (iter-001..014)
+## Structural iterations (iter-001..018)
 
-* iter-001..006 (predecessor): built universal class-agnostic lift/unlift and
-  covered ModuleDeclaration, header, port lists, port headers, parameter and
-  data declarations, continuous assigns, dimensions — score reached 33.
-* iter-007: ProceduralBlock + TimingControlStatement + event-expression family
-  (score 27).
-* iter-008: BlockStatement / Conditional / ElseClause / ConditionalPredicate /
-  ConditionalPattern (score 22).
-* iter-009: CaseStatement / StandardCaseItem / DefaultCaseItem (score 19).
-* iter-010: BinaryExpression / PrefixUnaryExpression / ParenthesizedExpression
-  / ConcatenationExpression (score 15).
-* iter-011: IntegerVectorExpression / LiteralExpression / IdentifierName /
-  IdentifierSelectName (score 11).
-* iter-012: BitSelect / ElementSelect / RangeSelect (score 8).
-* iter-013: SystemName / Invocation / ArgumentList / OrderedArgument (score 4).
-* iter-014: SimplePropertyExpr / SimpleSequenceExpr / SyntaxNode / Token —
-  **structural score = 0**.
+* iter-001..014 (previous loop): universal class-agnostic lift/unlift covering
+  every class in `fifo.sv` — score reached 0.
+* iter-015: cover `HierarchyInstantiationSyntax` from `top.sv` (score 3).
+* iter-016: cover `HierarchicalInstanceSyntax` (score 2).
+* iter-017: cover `InstanceNameSyntax` (score 1).
+* iter-018: cover `NamedPortConnectionSyntax` — **combined structural score
+  = 0** over `fifo.sv + top.sv`.
 
-## Semantic iterations (sem-01..05)
+Because lift/unlift is class-agnostic, no code change to the structural backbone
+was required for any iter-015..018; each iter added a per-class round-trip
+assertion in `tests/test_roundtrip.py` and the existing universal emit covered
+it byte-for-byte.
 
-* sem-01 (S1) — `ModuleDeclarationSyntax` → `has_port` × 8, `has_param` × 2,
-  `has_net` × 4. Module + every port/param/net is promoted to queryable.
-* sem-02 (S2) — `ContinuousAssignSyntax` → `drives` (LHS port/net) + `reads`
-  (RHS identifiers). `who_drives('dout')` returns one continuous-assign node;
-  `who_drives('full')` reaches `count`.
-* sem-03 (S3) — `ProceduralBlockSyntax(always_ff)` → `sensitive_to`
-  (clk posedge, rst_n negedge) + `drives` (wr_ptr, rd_ptr, count) + `reads`
-  (push, pop, rst_n, plus everything appearing inside predicates and case
-  heads).
-* sem-04 (S4) — `IdentifierSelectNameSyntax` → `reads`(base symbol). Resolves
-  the bit-select-inside-index case from iter-013 by surfacing the base
-  identifier as a queryable read target.
-* sem-05 (S5) — `InvocationExpressionSyntax` over `SystemNameSyntax` → callee
-  is `$clog2`; `reads`(argument identifier). Every `$clog2(DEPTH)` invocation
-  has an outbound `reads` edge to `DEPTH`.
+## Semantic iterations (sem-01..07)
 
-## Leaks recorded
+* sem-01..05 (previous loop): S1..S5 on `fifo.sv`.
+* sem-06: replace bare-name keys in `semantic_name_index` with **hierarchical
+  paths** sourced from `InstanceBodySymbol`. S1..S5 now fire per
+  `ModuleDeclarationSyntax`, with `scope_path = module.name`. `find_by_name`
+  accepts full paths and (unambiguous) bare leaf names.
+* sem-07: S6 — `HierarchyInstantiationSyntax` promotion. Each hierarchical
+  instance is promoted to a `instance`-role node at path
+  `<parent>.<inst_name>`. Edges drawn:
+  * `top --instantiates--> top.u_fifo`
+  * `top.u_fifo --of_module--> fifo` (module definition)
+  * `top.<net> --connects--> fifo.<port>` for each `NamedPortConnectionSyntax`
+    (payload carries `{instance, port}` for queryability).
+  * `cone_of_influence` extended to traverse incoming `connects` edges, so a
+    cone rooted at the child module's `count` reaches the parent module's
+    driver inputs through the hierarchy.
 
-`graph["semantic_leaks"]` is **empty** for `fifo.sv` — every identifier the
-semantic rules resolve also appears in the module's promoted `name_index`. The
-fallback path (name-string anchor with leak record) is in place but did not
-fire on this input.
+## Leaks
 
-Latent caveats worth noting, even though they did not produce leaks here:
+`graph["semantic_leaks"]` is **empty** for both `fifo.sv` alone and for the
+combined `top.sv + fifo.sv` compilation. Every identifier the rules resolve
+matches a promoted hierarchical-path key AND a live `Symbol` in the elaborated
+`InstanceBodySymbol` for the enclosing module.
 
-1. **Symbol anchor identity.** `_resolve` calls `Compilation.find(name)` and
-   `lookupName(name)` to confirm the symbol exists, but the graph edge is
-   anchored at the **promoted `DeclaratorSyntax` / `ImplicitAnsiPortSyntax`
-   node**, located via a name-keyed index. The Python binding for pyslang
-   exposes `Symbol.syntax`, but mapping that wrapper to a graph-node id is
-   not stable across iterations (Python wrappers are short-lived and `id()`
-   is unreliable), so name-keyed lookup is used as the final step. If two
-   constructs share a name in distinct scopes this will collide — but
-   `fifo.sv` is a single module with disjoint identifiers.
+## Caveats — status
 
-2. **Snip-and-ref placeholder.** REDIRECT.md called for an `_node_ref`
-   placeholder when a rule snips a subtree out of its parent's payload. The
-   structural lift stores empty payloads on container nodes (token text lives
-   on Token leaves), so no snipping was required for S1..S5. The mechanism is
-   reserved in `unlift.emit`'s contract but currently unused; documented in
-   `schema.md` so the next rule that needs to relocate a subtree knows to
-   teach `emit` to deref `_node_ref` slots first.
+| Prior caveat                           | Status     | Notes                                                                              |
+|----------------------------------------|------------|------------------------------------------------------------------------------------|
+| #1 Name-anchored symbol identity       | resolved   | Identity is now `(<scope_path>.<leaf>)`. Collisions between scopes are impossible. |
+| #2 Snip-and-ref placeholder unused     | unchanged  | S1..S6 still project in place; no rule needs to relocate a subtree.                |
+| #3 Single-top-module scope             | resolved   | S1..S5 fire per `ModuleDeclarationSyntax`; S6 covers cross-module instantiation.   |
 
-3. **Scope.** The rules assume a single top-level module and resolve
-   identifiers within `topInstances[0].body`. Generate blocks, nested
-   interfaces, classes, packages, and multi-module hierarchical instantiation
-   are explicitly out of scope per REDIRECT.md §H and are not exercised by
-   `fifo.sv`.
+The remaining open item (snip-and-ref) is still latent — the mechanism is
+reserved in `unlift.emit`'s contract but no rule currently requires it.
+Documented in `schema.md` so the next rule that needs to relocate a subtree
+knows to teach `emit` to deref `{"_node_ref": "<id>"}` slots first.
 
 ## Deferred items
 
-* Multi-module / hierarchical instantiation (out of scope per REDIRECT.md).
-* Generate blocks, interfaces, classes (out of scope).
-* Symbol-anchored edges that survive renaming — currently edges are
-  name-anchored (via the graph's `semantic_name_index`), not pointer-anchored
-  to a `Symbol*`. Achievable once pyslang Python bindings expose a stable
-  symbol-id / syntax-node-id we can store alongside graph nodes.
-* Snip-and-ref relocation: only needed if a future rule wants to move a
-  subtree under a different parent (e.g. lifting a port's range expression up
-  to its declarator). Today every rule projects in place.
+* Generate blocks, interfaces, classes, packages (out of scope per REDIRECT.md).
+* Parameter overrides on instantiation (`#(.DEPTH(16))`) — `top.sv` currently
+  takes the child module's defaults. The connection logic does not yet attempt
+  to track override-resolution.
+* Symbol-pointer-anchored edges that survive renaming — superseded by
+  hierarchical-path keying (the redirect explicitly rules these out).
+* Snip-and-ref relocation: only needed if a future rule wants to move a subtree
+  under a different parent.
 
 ## How to reproduce
 
@@ -123,19 +113,25 @@ uv run -- python -m pytest research/ast_experiment/tests/ -x -q
 uv run python research/ast_experiment/scripts/score.py
 ```
 
-Both should report `22 passed` and `score = 0`.
+Both should report `34 passed` and `score = 0` over the combined corpus.
 
 ## Artefacts
 
-* `scripts/lift.py`, `scripts/unlift.py` — universal structural backbone.
-* `scripts/semantic.py` — promote-on-demand semantic layer (S1..S5,
-  `queryable_nodes`, `neighbors`, `find_drivers`, `reads_of`,
-  `cone_of_influence`).
+* `scripts/lift.py`, `scripts/unlift.py` — universal structural backbone
+  (class-agnostic; covered every new hierarchy class with no code change).
+* `scripts/semantic.py` — promote-on-demand semantic layer with hierarchical-
+  path keying. Rules: S1..S6, helpers `find_by_name`, `find_drivers`,
+  `reads_of`, `cone_of_influence` (cross-hierarchy), `queryable_nodes`,
+  `neighbors`, `_all_module_scopes`, `_scope_path_of`, `_rule_s6`.
 * `tests/test_roundtrip.py` — structural fidelity oracle (per-class +
-  full-token-stream).
-* `tests/test_queries.py` — semantic query oracle (S1..S5) plus
-  `test_roundtrip_after_promote` which keeps both oracles tied together.
+  full-token-stream) for both `fifo.sv` and `top.sv`.
+* `tests/test_queries.py` — semantic query oracle (S1..S5) for fifo.sv plus
+  `test_roundtrip_after_promote`.
+* `tests/test_queries_multi.py` — multi-module S6 oracle:
+  `instantiates_of('top')`, `module_of('top.u_fifo')`,
+  `port_connections('top.u_fifo')`, `cone_of_influence('fifo.count')` reaches
+  `top.push / top.pop / top.rst_n`, plus per-module S1 firing.
 * `schema.md`, `docs/code_elab_graph_mapping.md` — graph schema and
-  per-construct mapping including the semantic projection.
+  per-construct mapping including the multi-module semantic projection.
 * `iterations.tsv` — full iteration log with a `layer` column distinguishing
-  `struct` (iter-001..014) from `sem` (sem-01..05).
+  `struct` (iter-001..018) from `sem` (sem-01..07).

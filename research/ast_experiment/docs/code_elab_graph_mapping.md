@@ -1,8 +1,9 @@
-# Code ↔ elab ↔ graph mapping (per construct in fifo.sv)
+# Code ↔ elab ↔ graph mapping (per construct in fifo.sv + top.sv)
 
-One row per source-level construct present in `fifo.sv`. Each row gives the
-exact snippet, the pyslang class that hosts it, the graph fragment the lift
-produces, and the rule the reverse engine uses to recover the SV text.
+One row per source-level construct present in `fifo.sv` (single module) and
+`top.sv` (instantiates `fifo` once). Each row gives the exact snippet, the
+pyslang class that hosts it, the graph fragment the lift produces, and the
+rule the reverse engine uses to recover the SV text.
 
 | Snippet from fifo.sv                              | pyslang class(es)                                                       | Graph fragment                                                                                                                  | Reverse rule                                                                 |
 |---------------------------------------------------|-------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------|
@@ -18,8 +19,9 @@ produces, and the rule the reverse engine uses to recover the SV text.
 | `wr_ptr + 1'b1`                                   | BinaryExpressionSyntax + IntegerVectorExpressionSyntax                  | binary op with sized vector literal on Token leaf                                                                                | structural emit                                                              |
 | `$clog2(DEPTH)`                                   | InvocationExpressionSyntax + SystemNameSyntax + ArgumentListSyntax + OrderedArgumentSyntax + IdentifierNameSyntax | system-name Token leaf carries `$clog2` text; argument list mapped 1:1                                                            | structural emit                                                              |
 | comments / whitespace                              | trivia on adjacent Tokens                                              | `node.payload.trivia` ordered list of `{kind, text}`                                                                              | emitted before each Token's rawText                                          |
+| `fifo u_fifo (.clk(clk), .rst_n(rst_n), …);`       | HierarchyInstantiationSyntax + HierarchicalInstanceSyntax + InstanceNameSyntax + NamedPortConnectionSyntax | type-name Token (`fifo`) + InstanceName(`u_fifo`) + named connections, each with port-name Token after the `.` and an expression child | structural emit                                                              |
 
-## Semantic projection (rules S1..S5)
+## Semantic projection (rules S1..S6)
 
 For each construct above, the table below shows the **semantic projection** the
 promote-on-demand layer applies on top of the structural graph fragment. The
@@ -39,13 +41,15 @@ original SV text.
 | `if (!rst_n)` / `case ({push&&!full, pop&&!empty})` | inside always_ff                    | n/a (read-flow only)  | adds `reads` from always_ff to identifiers in `ConditionalPredicateSyntax` / case-head expression           | descendant walk inside always_ff                                                |
 | `mem[wr_ptr[...]]` / `rd_ptr[...]`               | `IdentifierSelectNameSyntax`           | `identifier_select`    | outbound `reads` → base symbol (`mem` / `wr_ptr` / `rd_ptr`)                                                 | base = first Identifier token under the SelectName                             |
 | `$clog2(DEPTH)`                                  | `InvocationExpressionSyntax` over `SystemNameSyntax` | `system_call` (`name=$clog2`) | outbound `reads` → DEPTH                                                                | callee Token (`SystemIdentifier` kind) gives sysname; args from ArgumentList   |
+| `fifo u_fifo (.clk(clk), …);` (top.sv)           | `HierarchyInstantiationSyntax` + `HierarchicalInstanceSyntax` + `NamedPortConnectionSyntax` | `instance` (anchored at HierarchicalInstance, `path="top.u_fifo"`, `of_module="fifo"`) | parent module `instantiates` instance; instance `of_module` fifo; for each named connection, parent net/port `connects` to child port with payload `{instance,port}` | type-name from direct Identifier Token of HierarchyInstantiation; instance name from InstanceName Identifier Token; child port resolved via `name_index["fifo.<port>"]` |
 
 ### Reverse rule (semantic layer)
 
 Identical to the structural one: emit children in DFS order, tokens emit
 trivia+rawText. The semantic layer adds **only** flags (`queryable`,
-`semantic.role`, `semantic.name`, …) and new edges of types `has_port`,
-`has_param`, `has_net`, `drives`, `reads`, `sensitive_to`. None of the original
-`child` edges or token payloads is altered, so the structural emit is a strict
-inverse of the structural lift regardless of which rules have fired.
+`semantic.role`, `semantic.name`, `semantic.path`, …) and new edges of types
+`has_port`, `has_param`, `has_net`, `drives`, `reads`, `sensitive_to`,
+`instantiates`, `of_module`, `connects`. None of the original `child` edges or
+token payloads is altered, so the structural emit is a strict inverse of the
+structural lift regardless of which rules have fired.
 

@@ -19,3 +19,9 @@ S02	sem	pending	S2 ContinuousAssign promotion: drives(lhs) + reads(rhs identifie
 S03	sem	pending	S3 ProceduralBlock(always_ff) promotion: sensitive_to + drives + reads (incl predicate/case head)	0	pass	clk/rst_n sensitivity, wr_ptr/rd_ptr/count drives, push/pop/rst_n reads
 S04	sem	pending	S4 IdentifierSelectName promotion: reads(base symbol) — bit-select inside index resolved	0	pass	mem/rd_ptr/wr_ptr select bases recovered; reads edge to mem verified
 S05	sem	pending	S5 SystemName($clog2) promotion: reads(argument identifier)	0	pass	all $clog2(DEPTH) invocations promoted; reads(DEPTH) edge present
+015	struct	pending	add top.sv + cover HierarchyInstantiationSyntax over combined corpus	3	pass	new top.sv; inventory now combines fifo.sv + top.sv; class-agnostic emit covers HierarchyInstantiationSyntax with no code change
+016	struct	pending	cover HierarchicalInstanceSyntax	2	pass	per-class assertion green on top.sv
+017	struct	pending	cover InstanceNameSyntax	1	pass	per-class assertion green on top.sv
+018	struct	pending	cover NamedPortConnectionSyntax — combined structural score=0	0	pass	combined corpus structural score reaches 0
+S06	sem	pending	hierarchical-path keying for semantic_name_index; S1..S5 per-module	0	pass	keys become "<module>.<name>"; find_by_name accepts paths or unambiguous bare names; module_scope_by_name resolved via InstanceBodySymbol.name
+S07	sem	pending	S6 HierarchyInstantiation promotion: instance + of_module + connects; cone_of_influence crosses connects	0	pass	test_queries_multi.py: instantiates_of(top), module_of(top.u_fifo), port_connections, cross-hierarchy cone (fifo.count → top.push/pop/rst_n)
