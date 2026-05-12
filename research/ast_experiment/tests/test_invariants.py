@@ -321,6 +321,41 @@ def test_inv7_no_orphan_semantic_edges(graph):
 # ---------------------------------------------------------------------------
 
 
+def test_inv9_bound_into_endpoints_resolve(graph):
+    """Every ``bound_into`` edge has both endpoints promoted as ``module``
+    nodes; the corpus must contain at least one such edge.
+
+    Catches: a bind directive whose binder or target name failed to resolve
+    against the cross-file ``semantic_name_index`` (e.g. because the bind
+    target lives in a different SyntaxTree and pass1 didn't reach it before
+    pass2 fired S13). Also catches anyone reanchoring ``bound_into`` at a
+    non-module node, which would break downstream "bound_into reaches a
+    module" queries."""
+    by_id = _id_to_node(graph)
+    edges = [e for e in graph["edges"] if e["type"] == "bound_into"]
+    assert edges, (
+        "no bound_into edges in the multi-file graph — fifo_asserts.sv "
+        "should contribute at least one bind directive"
+    )
+    bad = []
+    for e in edges:
+        src = by_id.get(e["src"])
+        dst = by_id.get(e["dst"])
+        if src is None or _role(src) != "module":
+            bad.append(f"src not module: {e['src']} role={_role(src) if src else None}")
+            continue
+        if dst is None or _role(dst) != "module":
+            bad.append(f"dst not module: {e['dst']} role={_role(dst) if dst else None}")
+            continue
+        # Payload sanity — instance_name and scope are required by S13.
+        payload = e.get("payload", {}) or {}
+        if not payload.get("instance_name"):
+            bad.append(f"{src['semantic']['name']}→{dst['semantic']['name']}: missing instance_name")
+        if "scope" not in payload:
+            bad.append(f"{src['semantic']['name']}→{dst['semantic']['name']}: missing scope")
+    assert not bad, "bound_into endpoint-resolution invariant broken: " + "; ".join(bad)
+
+
 def test_inv8_param_override_target_is_param(graph):
     """Every ``param_override`` edge runs from an instance node to a ``param``
     node owned by the instance's ``of_module``. Catches: overrides resolved
