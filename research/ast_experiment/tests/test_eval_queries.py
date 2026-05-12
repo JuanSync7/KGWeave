@@ -15,6 +15,7 @@ import pytest
 
 HERE = Path(__file__).resolve().parent.parent
 PKG = HERE / "fifo_pkg.sv"
+IFACE = HERE / "fifo_if.sv"
 FIFO = HERE / "fifo.sv"
 TOP = HERE / "top.sv"
 
@@ -23,7 +24,7 @@ TOP = HERE / "top.sv"
 def gbundle():
     from scripts.build import build_kg
 
-    graph, trees, comp = build_kg([PKG, FIFO, TOP])
+    graph, trees, comp = build_kg([PKG, IFACE, FIFO, TOP])
     return trees[0], comp, graph
 
 
@@ -300,7 +301,7 @@ class TestGroupG:
         top = find_by_name(g, "top")
         insts = neighbors(g, top["id"], edge_type="instantiates", direction="out")
         paths = [i["semantic"]["path"] for i in insts]
-        assert set(paths) == {"top.u_fifo", "top.u_fifo_a", "top.u_fifo_b"}
+        assert set(paths) == {"top.u_fifo", "top.u_fifo_a", "top.u_fifo_b", "top.u_if"}
 
     def test_G2_u_fifo_is_of_module_fifo(self, gbundle):
         """G2: top.u_fifo's of_module edge points at module `fifo`."""

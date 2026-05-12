@@ -104,6 +104,16 @@ OOS_EXTRA = {
     "EndProtectedDirective", "DefaultTriregStrengthDirective",
     "DefaultDecayTimeDirective", "Delay3", "DividerClause",
     "ColonExpressionClause", "OneStepDelay",
+    # Reviewer additions: randsequence + config-rule kinds that fell to
+    # CONTAINER because they don't match OOS_RE's prefix anchors.
+    "Production", "DefaultConfigRule", "InstanceConfigRule",
+}
+
+# Reviewer-flagged extras: payload-only kinds the BLOB regex misses.
+BLOB_EXTRA = {
+    "FilePathSpec",
+    "BinSelectWithFilterExpr", "BinsSelectConditionExpr", "BinsSelection",
+    "WithFunctionSample",
 }
 
 # Expressions, types, literals, operators → BLOB (payload-only by default).
@@ -179,6 +189,10 @@ PROMOTE_FUTURE = {
     "ExternInterfaceMethod", "PackageHeader", "InterfaceHeader",
     "InterfacePortHeader", "ProgramHeader",
     "ModuleHeader",  # also container; keep as PROMOTE because it carries module identity
+    # Reviewer additions: first-class constructs that fell to CONTAINER default.
+    "DPIImport", "DPIExport",
+    "PrimitiveInstantiation",
+    "DefaultFunctionPort",
 }
 
 
@@ -189,7 +203,7 @@ def classify(kind: str) -> str:
         return "DIRECTIVE"
     if OOS_RE.match(kind) or kind in OOS_EXTRA:
         return "OUT-OF-SCOPE"
-    if BLOB_RE.search(kind):
+    if BLOB_RE.search(kind) or kind in BLOB_EXTRA:
         return "BLOB"
     if CONTAINER_RE.search(kind):
         return "CONTAINER"
@@ -198,6 +212,10 @@ def classify(kind: str) -> str:
         return "CONTAINER"
     if kind.endswith("Name") or kind.endswith("Reference"):
         return "BLOB"
+    # Silent CONTAINER catch-all removed: anything reaching here is a kind
+    # we never classified explicitly. Surface it so a new pyslang release
+    # can't quietly land mis-bucketed.
+    print(f"WARN: unclassified SyntaxKind fell to CONTAINER default: {kind}", file=sys.stderr)
     return "CONTAINER"
 
 

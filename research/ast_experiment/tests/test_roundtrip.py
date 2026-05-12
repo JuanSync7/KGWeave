@@ -21,6 +21,7 @@ HERE = Path(__file__).resolve().parent.parent
 SRC = HERE / "fifo.sv"
 TOP = HERE / "top.sv"
 PKG = HERE / "fifo_pkg.sv"
+IFACE = HERE / "fifo_if.sv"
 COVERED = HERE / "covered_classes.json"
 
 
@@ -436,6 +437,42 @@ def test_iter024_package_import(fifo_tree_post_import):
     for cls in ("PackageImportDeclarationSyntax", "PackageImportItemSyntax"):
         _assert_class_roundtrip(fifo_tree_post_import.root, reparsed.root, cls)
     _mark_covered({"PackageImportDeclarationSyntax", "PackageImportItemSyntax"})
+
+
+@pytest.fixture(scope="module")
+def iface_tree():
+    return pyslang.SyntaxTree.fromText(IFACE.read_text())
+
+
+def test_iface_parse_baseline(iface_tree):
+    """Sanity: pyslang parses fifo_if.sv with no diagnostics."""
+    diags = list(iface_tree.diagnostics)
+    assert not diags, f"fifo_if.sv parse diagnostics: {diags}"
+
+
+def test_iface_full_token_text_stream(iface_tree):
+    """Round-trip on fifo_if.sv: token text stream byte-equal."""
+    reparsed, _ = _roundtrip(iface_tree)
+    assert _token_text_stream(reparsed.root) == _token_text_stream(iface_tree.root)
+
+
+def test_iter027_modport_declaration(iface_tree):
+    """iter-027: ModportDeclarationSyntax + ModportItemSyntax +
+    ModportSimplePortListSyntax + ModportNamedPortSyntax round-trip."""
+    reparsed, _ = _roundtrip(iface_tree)
+    for cls in (
+        "ModportDeclarationSyntax",
+        "ModportItemSyntax",
+        "ModportSimplePortListSyntax",
+        "ModportNamedPortSyntax",
+    ):
+        _assert_class_roundtrip(iface_tree.root, reparsed.root, cls)
+    _mark_covered({
+        "ModportDeclarationSyntax",
+        "ModportItemSyntax",
+        "ModportSimplePortListSyntax",
+        "ModportNamedPortSyntax",
+    })
 
 
 def test_iter026_function_declaration(fifo_tree_post_import):

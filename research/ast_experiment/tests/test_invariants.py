@@ -17,28 +17,32 @@ import pytest
 
 HERE = Path(__file__).resolve().parent.parent
 PKG = HERE / "fifo_pkg.sv"
+IFACE = HERE / "fifo_if.sv"
 FIFO = HERE / "fifo.sv"
 TOP = HERE / "top.sv"
 
 
 _CONTAINMENT_EDGES = {
     "has_port", "has_param", "has_net", "contains", "instantiates",
-    "has_typedef", "has_enum_value",
+    "has_typedef", "has_enum_value", "has_modport", "has_function",
 }
 _SEMANTIC_EDGES = {
     "drives", "reads", "sensitive_to",
     "connects", "instantiates", "of_module",
 }
-_CONTAINED_ROLES = {"port", "param", "net", "instance", "typedef", "enum_value"}
+_CONTAINED_ROLES = {
+    "port", "param", "net", "instance", "typedef", "enum_value",
+    "modport", "function",
+}
 # Roles whose `name` is treated as an owning namespace (top-level container).
-_OWNER_ROLES = {"module", "package"}
+_OWNER_ROLES = {"module", "package", "interface"}
 
 
 @pytest.fixture(scope="module")
 def kg():
     from scripts.build import build_kg
 
-    graph, trees, comp = build_kg([PKG, FIFO, TOP])
+    graph, trees, comp = build_kg([PKG, IFACE, FIFO, TOP])
     return graph, trees, comp
 
 
@@ -144,8 +148,8 @@ def test_inv3_port_containment(graph):
             bad.append(f"{_path(n)}: has_port(in)={len(incoming)}")
             continue
         owner = by_id.get(incoming[0]["src"])
-        if owner is None or _role(owner) != "module":
-            bad.append(f"{_path(n)}: has_port src is not a module")
+        if owner is None or _role(owner) not in _OWNER_ROLES:
+            bad.append(f"{_path(n)}: has_port src is not a module/interface")
     assert not bad, "port containment broken: " + "; ".join(bad)
 
 

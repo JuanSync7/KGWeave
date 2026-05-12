@@ -423,20 +423,60 @@ def promote(
 
         if c == "ModuleDeclarationSyntax":
             kind_name = str(getattr(node, "kind", "")).rsplit(".", 1)[-1]
-            is_package = kind_name == "PackageDeclaration"
             mname = _module_name_of(node)
             state["module_stack"].append((gid, mname))
             popped_module = True
-            if is_package:
-                _mark(nodes_list[node_offset + idx], role="package", name=mname, path=mname)
-                name_index["package:" + mname] = gid
+            if kind_name == "PackageDeclaration":
+                role_name = "package"
+                key_prefix = "package:"
+            elif kind_name == "InterfaceDeclaration":
+                role_name = "interface"
+                key_prefix = "interface:"
             else:
-                _mark(nodes_list[node_offset + idx], role="module", name=mname, path=mname)
-                name_index["module:" + mname] = gid
+                role_name = "module"
+                key_prefix = "module:"
+            _mark(nodes_list[node_offset + idx], role=role_name, name=mname, path=mname)
+            name_index[key_prefix + mname] = gid
             # Also register the bare name as a top-level lookup so that
-            # ``find_by_name('top')`` / ``find_by_name('fifo_pkg')`` resolve.
+            # ``find_by_name('top')`` / ``find_by_name('fifo_pkg')`` /
+            # ``find_by_name('fifo_if')`` all resolve.
             name_index[mname] = gid
             port_names_by_module.setdefault(mname, set())
+        elif c == "ModportItemSyntax":
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                # Children: Identifier(name) + AnsiPortListSyntax with
+                # ModportSimplePortList[direction, named-ports].
+                mport_name = None
+                for ch in node:
+                    if _is_token(ch) and _token_kind_name(ch) == "Identifier":
+                        mport_name = ch.valueText
+                        break
+                if mport_name is not None:
+                    mpath = f"{mname}.{mport_name}"
+                    directions: dict[str, str] = {}
+                    for d in _descendants(node):
+                        if _cls(d) != "ModportSimplePortListSyntax":
+                            continue
+                        # Find direction keyword + the named-port identifiers.
+                        dir_tok = None
+                        for ch in d:
+                            if _is_token(ch) and _token_kind_name(ch) in {
+                                "InputKeyword", "OutputKeyword", "InOutKeyword",
+                                "RefKeyword",
+                            }:
+                                dir_tok = ch.valueText
+                                break
+                        for mnp in _descendants(d):
+                            if _cls(mnp) != "ModportNamedPortSyntax":
+                                continue
+                            toks = _identifier_tokens(mnp)
+                            if toks and dir_tok is not None:
+                                directions[toks[0].valueText] = dir_tok
+                    _mark(nodes_list[node_offset + idx], role="modport",
+                          name=mport_name, path=mpath, directions=directions)
+                    _add_edge(graph, mod_gid, gid, "has_modport")
+                    name_index[mpath] = gid
         elif c == "FunctionDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:
@@ -887,7 +927,9 @@ def _rule_s6(graph, node, gid, gnode, scope, name_index, leaks,
                 break
     if type_name is None:
         return
-    type_node_id = name_index.get("module:" + type_name)
+    type_node_id = (name_index.get("module:" + type_name)
+                    or name_index.get("interface:" + type_name)
+                    or name_index.get(type_name))
     # S7: extract ParameterValueAssignmentSyntax (param override block), if any.
     # The block is a direct child of the HierarchyInstantiationSyntax and
     # applies to every HierarchicalInstance under this declaration.
@@ -1305,6 +1347,25 @@ def port_connections(graph: dict[str, Any], instance_path: str) -> list[dict[str
         src_path = src.get("semantic", {}).get("path") or src.get("semantic", {}).get("name")
         out.append({"port": e["payload"].get("port"), "src_path": src_path})
     return out
+
+
+def modports_of(graph: dict[str, Any], interface_name: str) -> list[str]:
+    """Return the sorted list of modport names declared in an interface."""
+    iface = find_by_name(graph, interface_name)
+    if iface is None:
+        return []
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    out: list[str] = []
+    for e in graph["edges"]:
+        if e["type"] != "has_modport" or e["src"] != iface["id"]:
+            continue
+        dst = by_id.get(e["dst"])
+        if dst is None:
+            continue
+        nm = dst.get("semantic", {}).get("name")
+        if nm:
+            out.append(nm)
+    return sorted(out)
 
 
 def package_of(graph: dict[str, Any], typedef_path: str) -> str | None:

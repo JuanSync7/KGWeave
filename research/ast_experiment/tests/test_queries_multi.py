@@ -19,6 +19,7 @@ import pytest
 
 HERE = Path(__file__).resolve().parent.parent
 PKG = HERE / "fifo_pkg.sv"
+IFACE = HERE / "fifo_if.sv"
 FIFO = HERE / "fifo.sv"
 TOP = HERE / "top.sv"
 
@@ -31,7 +32,7 @@ def multi_bundle():
     # masked the cross-tree merge bug.
     from scripts.build import build_kg
 
-    graph, trees, comp = build_kg([PKG, FIFO, TOP])
+    graph, trees, comp = build_kg([PKG, IFACE, FIFO, TOP])
     # Pick the first tree as the "round-trip representative" — round-trip
     # tests still exercise the per-tree lift+emit invariant.
     return trees[0], comp, graph
@@ -68,7 +69,7 @@ def test_instantiates_of_top(multi_bundle):
     assert top is not None and top["semantic"]["role"] == "module"
     insts = neighbors(graph, top["id"], edge_type="instantiates", direction="out")
     paths = [i["semantic"]["path"] for i in insts]
-    assert set(paths) == {"top.u_fifo", "top.u_fifo_a", "top.u_fifo_b"}
+    assert set(paths) == {"top.u_fifo", "top.u_fifo_a", "top.u_fifo_b", "top.u_if"}
 
 
 def test_module_of_top_u_fifo(multi_bundle):
@@ -249,6 +250,31 @@ def test_graph_query_connects_edge_payload_filter(multi_bundle):
         "return": "path",
     })
     assert out == ["top.clk"]
+
+
+def test_s11_modports_of_interface(multi_bundle):
+    """S11: interface + modport promotion.
+
+    * fifo_if is queryable with role=interface.
+    * It has three modports: producer, consumer, dut, each with per-signal
+      direction info in semantic.directions payload.
+    """
+    _tree, _comp, graph = multi_bundle
+    from scripts.semantic import find_by_name, neighbors, modports_of
+
+    iface = find_by_name(graph, "fifo_if")
+    assert iface is not None and iface["semantic"]["role"] == "interface"
+
+    mps = neighbors(graph, iface["id"], edge_type="has_modport", direction="out")
+    assert {m["semantic"]["name"] for m in mps} == {"producer", "consumer", "dut"}
+
+    # Helper.
+    assert modports_of(graph, "fifo_if") == ["consumer", "dut", "producer"]
+
+    # Direction payload check.
+    producer = find_by_name(graph, "fifo_if.producer")
+    assert producer["semantic"]["directions"]["push"] == "output"
+    assert producer["semantic"]["directions"]["full"] == "input"
 
 
 def test_s10_function_calls_and_cone(multi_bundle):

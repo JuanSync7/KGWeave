@@ -43,6 +43,11 @@ module top (
         .empty (empty_a)
     );
 
+    fifo_if #(.WIDTH(32)) u_if (
+        .clk   (clk),
+        .rst_n (rst_n)
+    );
+
     fifo #(.DEPTH(8), .WIDTH(8)) u_fifo_b (
         .clk   (clk),
         .rst_n (rst_n),
