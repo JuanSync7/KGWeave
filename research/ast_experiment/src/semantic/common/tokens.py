@@ -398,6 +398,62 @@ def _cover_cross_members(node: Any) -> list[str]:
     return members
 
 
+def _class_name_of(cls_syn: Any) -> str:
+    """Return the class name from a ClassDeclarationSyntax.
+
+    Grammar: ``[virtual|interface] class <Identifier> [#(params)]
+    [extends ...] [implements ...] ; <items> endclass``. The name is the
+    first direct Identifier Token child following the ``ClassKeyword``
+    token. Walking direct children only avoids descending into the class
+    body (where Identifier tokens belong to members and references).
+    """
+    saw_class_kw = False
+    for ch in cls_syn:
+        if _is_token(ch):
+            kind = _token_kind_name(ch)
+            if kind == "ClassKeyword":
+                saw_class_kw = True
+                continue
+            if saw_class_kw and kind == "Identifier":
+                return ch.valueText
+    return ""
+
+
+def _class_modifiers_of(cls_syn: Any) -> dict[str, bool]:
+    """Return structural modifiers of a ClassDeclarationSyntax.
+
+    Grammar: ``[virtual] [interface] [final] class <Identifier>
+    [#(params)] ...``. Modifier keywords appear as direct Token children
+    before the ``ClassKeyword``. The parameter-port list (``#(...)``)
+    appears as a ``ParameterPortListSyntax`` direct child after the
+    identifier. Detect structurally — no regex on source text.
+    """
+    out = {
+        "virtual": False,
+        "interface_class": False,
+        "final": False,
+        "parameterized": False,
+    }
+    saw_class_kw = False
+    for ch in cls_syn:
+        if _is_token(ch):
+            kind = _token_kind_name(ch)
+            if kind == "ClassKeyword":
+                saw_class_kw = True
+                continue
+            if not saw_class_kw:
+                if kind == "VirtualKeyword":
+                    out["virtual"] = True
+                elif kind == "InterfaceKeyword":
+                    out["interface_class"] = True
+                elif kind == "FinalKeyword":
+                    out["final"] = True
+            continue
+        if saw_class_kw and _cls(ch) == "ParameterPortListSyntax":
+            out["parameterized"] = True
+    return out
+
+
 def _typedef_name_of(td_syn: Any) -> str:
     """The user-given name token of a TypedefDeclarationSyntax — the LAST
     direct Identifier Token child."""

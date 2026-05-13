@@ -74,6 +74,7 @@ def _build_semantic_graph():
     graph, _trees, _comp = build_kg([
         HERE / "fifo_pkg.sv", HERE / "fifo_if.sv",
         HERE / "fifo.sv", HERE / "fifo_asserts.sv", HERE / "top.sv",
+        HERE / "cls_corpus.sv",
     ])
     return graph
 

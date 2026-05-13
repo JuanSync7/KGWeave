@@ -65,6 +65,7 @@ _ACTIVE_RULE_KINDS = {
     "BlockingEventTriggerStatement", "NonblockingEventTriggerStatement",
     "CovergroupDeclaration",
     "Coverpoint", "CoverCross",
+    "ClassDeclaration",
 }
 
 
@@ -113,7 +114,7 @@ def test_active_rule_kinds_present():
     assert not missing, f"RULE_TABLE missing kinds: {sorted(missing)}"
 
 
-@pytest.mark.parametrize("name", ["classes", "constraints"])
+@pytest.mark.parametrize("name", ["constraints"])
 def test_stub_modules_export_empty_rules(name):
     """The four planned-but-not-yet-implemented rule modules each export
     RULES = [] and document their planned kinds in a header comment."""
@@ -151,15 +152,14 @@ _TARGET_RULES_FILES = [
 _TARGET_ACTIVE_MODULES = [
     "structure", "instantiation", "interfaces", "generate",
     "dataflow", "types", "behavior", "properties", "assertions",
-    "clocking", "procedural", "coverage",
+    "clocking", "procedural", "coverage", "classes",
 ]
 
 _TARGET_STUB_MODULES = [
-    "classes", "constraints", "checkers", "extern",
+    "constraints", "checkers", "extern",
 ]
 
 _STUB_PLANNED_KIND_HINTS = {
-    "classes": ["ClassDeclaration"],
     "constraints": ["ConstraintDeclaration", "ConstraintBlock"],
     "checkers": ["CheckerDeclaration", "CheckerInstantiation"],
     "extern": ["ExternModuleDecl", "ProgramDeclaration"],

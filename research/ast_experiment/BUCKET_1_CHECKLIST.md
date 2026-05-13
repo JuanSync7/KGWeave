@@ -13,12 +13,12 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 33 | 60 | 0 | 75 |
-| CONTAINER | 88 | 17 | 0 | 0 | 0 |
-| BLOB | 213 | 17 | 0 | 0 | 0 |
+| PROMOTE | 135 | 49 | 61 | 0 | 74 |
+| CONTAINER | 88 | 23 | 0 | 0 | 0 |
+| BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
-| OUT-OF-SCOPE | 58 | 0 | 0 | 0 | 0 |
-| **Total** | **536** | **67** | | | |
+| OUT-OF-SCOPE | 58 | 1 | 0 | 0 | 0 |
+| **Total** | **536** | **98** | | | |
 
 ## PROMOTE (135 items)
 | SyntaxKind | Struct | Semantic | Owner |
@@ -40,25 +40,25 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `CheckerDeclaration` | ⬜ | ⬜ | future |
 | `CheckerInstanceStatement` | ⬜ | ⬜ | future |
 | `CheckerInstantiation` | ⬜ | ⬜ | future |
-| `ClassDeclaration` | ⬜ | ⬜ | future |
+| `ClassDeclaration` | ✅ | ✅ | S24 |
 | `ClassMethodDeclaration` | ⬜ | ⬜ | future |
-| `ClassMethodPrototype` | ⬜ | ⬜ | future |
-| `ClassPropertyDeclaration` | ⬜ | ⬜ | future |
+| `ClassMethodPrototype` | ✅ | ⬜ | future |
+| `ClassPropertyDeclaration` | ✅ | ⬜ | future |
 | `ClassSpecifier` | ⬜ | ⬜ | future |
-| `ClockingDeclaration` | ⬜ | ✅ | S18 |
-| `ClockingItem` | ⬜ | ⬜ | future |
-| `ConcurrentAssertionMember` | ⬜ | ⬜ | future |
+| `ClockingDeclaration` | ✅ | ✅ | S18 |
+| `ClockingItem` | ✅ | ⬜ | future |
+| `ConcurrentAssertionMember` | ✅ | ⬜ | future |
 | `ConstraintBlock` | ⬜ | ⬜ | future |
 | `ConstraintDeclaration` | ⬜ | ⬜ | future |
 | `ConstraintPrototype` | ⬜ | ⬜ | future |
 | `ConstructorName` | ⬜ | ⬜ | future |
 | `ContinuousAssign` | ✅ | ✅ | S2 |
-| `CoverCross` | ⬜ | ✅ | S23 |
+| `CoverCross` | ✅ | ✅ | S23 |
 | `CoverPropertyStatement` | ⬜ | ✅ | S16 |
 | `CoverSequenceStatement` | ⬜ | ✅ | S16 |
 | `CoverageBins` | ⬜ | ⬜ | future |
-| `CovergroupDeclaration` | ⬜ | ✅ | S22 |
-| `Coverpoint` | ⬜ | ✅ | S23 |
+| `CovergroupDeclaration` | ✅ | ✅ | S22 |
+| `Coverpoint` | ✅ | ✅ | S23 |
 | `DPIExport` | ⬜ | ⬜ | future |
 | `DPIImport` | ⬜ | ⬜ | future |
 | `Declarator` | ✅ | ✅ | S1 |
@@ -67,12 +67,12 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `DefaultClockingReference` | ⬜ | ⬜ | future |
 | `DefaultDisableDeclaration` | ⬜ | ⬜ | future |
 | `DefaultFunctionPort` | ⬜ | ⬜ | future |
-| `DeferredAssertion` | ⬜ | ⬜ | future |
+| `DeferredAssertion` | ✅ | ⬜ | future |
 | `EnumType` | ✅ | ✅ | S9c |
 | `ExpectPropertyStatement` | ⬜ | ✅ | S16 |
 | `ExplicitAnsiPort` | ⬜ | ⬜ | future |
 | `ExplicitNonAnsiPort` | ⬜ | ⬜ | future |
-| `ExtendsClause` | ⬜ | ⬜ | future |
+| `ExtendsClause` | ✅ | ⬜ | future |
 | `ExternInterfaceMethod` | ⬜ | ⬜ | future |
 | `ExternModuleDecl` | ⬜ | ⬜ | future |
 | `ExternUdpDecl` | ⬜ | ⬜ | future |
@@ -138,21 +138,21 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `PortDeclaration` | ⬜ | ⬜ | future |
 | `PortReference` | ⬜ | ⬜ | future |
 | `PrimitiveInstantiation` | ⬜ | ⬜ | future |
-| `ProceduralAssignStatement` | ⬜ | ✅ | S19 |
-| `ProceduralDeassignStatement` | ⬜ | ✅ | S19 |
+| `ProceduralAssignStatement` | ✅ | ✅ | S19 |
+| `ProceduralDeassignStatement` | ✅ | ✅ | S19 |
 | `ProceduralForceStatement` | ⬜ | ✅ | S20 |
 | `ProceduralReleaseStatement` | ⬜ | ✅ | S20 |
 | `ProgramDeclaration` | ⬜ | ⬜ | future |
 | `ProgramHeader` | ⬜ | ⬜ | future |
-| `PropertyDeclaration` | ⬜ | ✅ | S14 |
+| `PropertyDeclaration` | ✅ | ✅ | S14 |
 | `RestrictPropertyStatement` | ⬜ | ✅ | S16 |
-| `SequenceDeclaration` | ⬜ | ✅ | S15 |
+| `SequenceDeclaration` | ✅ | ✅ | S15 |
 | `StructType` | ⬜ | ⬜ | future |
 | `StructUnionMember` | ⬜ | ⬜ | future |
 | `SystemName` | ✅ | ✅ | S5 |
 | `TaskDeclaration` | ⬜ | ✅ | S10 |
 | `TimeUnitsDeclaration` | ⬜ | ⬜ | future |
-| `TypeParameterDeclaration` | ⬜ | ⬜ | future |
+| `TypeParameterDeclaration` | ✅ | ⬜ | future |
 | `TypedefDeclaration` | ✅ | ✅ | S9b |
 | `UnionType` | ⬜ | ⬜ | future |
 | `UserDefinedNetDeclaration` | ⬜ | ⬜ | future |
@@ -162,7 +162,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## CONTAINER (88 items)
 | SyntaxKind | Struct | Semantic | Owner |
 |--|--|--|--|
-| `ActionBlock` | ⬜ | — | structural lift only |
+| `ActionBlock` | ✅ | — | structural lift only |
 | `AnsiPortList` | ✅ | — | structural lift only |
 | `ArgumentList` | ✅ | — | structural lift only |
 | `ArrayAndMethod` | ⬜ | — | structural lift only |
@@ -172,7 +172,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `AscendingRangeSelect` | ⬜ | — | structural lift only |
 | `AssignmentPatternItem` | ⬜ | — | structural lift only |
 | `AttributeInstance` | ⬜ | — | structural lift only |
-| `AttributeSpec` | ⬜ | — | structural lift only |
+| `AttributeSpec` | ✅ | — | structural lift only |
 | `BitSelect` | ✅ | — | structural lift only |
 | `CaseStatement` | ✅ | — | structural lift only |
 | `CompilationUnit` | ✅ | — | structural lift only |
@@ -184,9 +184,9 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `DefaultCaseItem` | ✅ | — | structural lift only |
 | `DefaultPropertyCaseItem` | ⬜ | — | structural lift only |
 | `DefaultRsCaseItem` | ⬜ | — | structural lift only |
-| `DefaultSkewItem` | ⬜ | — | structural lift only |
+| `DefaultSkewItem` | ✅ | — | structural lift only |
 | `DelayControl` | ⬜ | — | structural lift only |
-| `DelayedSequenceElement` | ⬜ | — | structural lift only |
+| `DelayedSequenceElement` | ✅ | — | structural lift only |
 | `DescendingRangeSelect` | ⬜ | — | structural lift only |
 | `DisableForkStatement` | ⬜ | — | structural lift only |
 | `DisableIff` | ⬜ | — | structural lift only |
@@ -197,7 +197,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `EmptyMember` | ⬜ | — | structural lift only |
 | `EmptyNonAnsiPort` | ⬜ | — | structural lift only |
 | `EmptyPortConnection` | ⬜ | — | structural lift only |
-| `EmptyStatement` | ⬜ | — | structural lift only |
+| `EmptyStatement` | ✅ | — | structural lift only |
 | `EmptyTimingCheckArg` | ⬜ | — | structural lift only |
 | `EventControl` | ⬜ | — | structural lift only |
 | `ExpressionStatement` | ✅ | — | structural lift only |
@@ -214,7 +214,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `MacroActualArgumentList` | ⬜ | — | structural lift only |
 | `MacroFormalArgumentList` | ⬜ | — | structural lift only |
 | `NamedArgument` | ⬜ | — | structural lift only |
-| `NamedLabel` | ⬜ | — | structural lift only |
+| `NamedLabel` | ✅ | — | structural lift only |
 | `NamedStructurePatternMember` | ⬜ | — | structural lift only |
 | `NetPortHeader` | ⬜ | — | structural lift only |
 | `NonAnsiPortList` | ⬜ | — | structural lift only |
@@ -287,10 +287,10 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `CasePropertyExpr` | ⬜ | — | structural lift only |
 | `CastExpression` | ⬜ | — | structural lift only |
 | `ClassName` | ⬜ | — | structural lift only |
-| `ClockingDirection` | ⬜ | — | structural lift only |
+| `ClockingDirection` | ✅ | — | structural lift only |
 | `ClockingPropertyExpr` | ⬜ | — | structural lift only |
-| `ClockingSequenceExpr` | ⬜ | — | structural lift only |
-| `ClockingSkew` | ⬜ | — | structural lift only |
+| `ClockingSequenceExpr` | ✅ | — | structural lift only |
+| `ClockingSkew` | ✅ | — | structural lift only |
 | `ConcatenationExpression` | ✅ | — | structural lift only |
 | `ConditionalConstraint` | ⬜ | — | structural lift only |
 | `ConditionalExpression` | ⬜ | — | structural lift only |
@@ -303,7 +303,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `DefaultDistItem` | ⬜ | — | structural lift only |
 | `DefaultExtendsClauseArg` | ⬜ | — | structural lift only |
 | `DefaultPatternKeyExpression` | ⬜ | — | structural lift only |
-| `DelayedSequenceExpr` | ⬜ | — | structural lift only |
+| `DelayedSequenceExpr` | ✅ | — | structural lift only |
 | `DisableConstraint` | ⬜ | — | structural lift only |
 | `DistConstraintList` | ⬜ | — | structural lift only |
 | `DistItem` | ⬜ | — | structural lift only |
@@ -319,7 +319,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `EmptyQueueExpression` | ⬜ | — | structural lift only |
 | `EqualityExpression` | ⬜ | — | structural lift only |
 | `EqualsAssertionArgClause` | ⬜ | — | structural lift only |
-| `EqualsTypeClause` | ⬜ | — | structural lift only |
+| `EqualsTypeClause` | ✅ | — | structural lift only |
 | `EqualsValueClause` | ✅ | — | structural lift only |
 | `EventControlWithExpression` | ✅ | — | structural lift only |
 | `EventType` | ⬜ | — | structural lift only |
@@ -337,7 +337,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `IffPropertyExpr` | ⬜ | — | structural lift only |
 | `ImplicationConstraint` | ⬜ | — | structural lift only |
 | `ImplicationPropertyExpr` | ⬜ | — | structural lift only |
-| `ImplicitType` | ⬜ | — | structural lift only |
+| `ImplicitType` | ✅ | — | structural lift only |
 | `ImpliesPropertyExpr` | ⬜ | — | structural lift only |
 | `InequalityExpression` | ⬜ | — | structural lift only |
 | `InsideExpression` | ⬜ | — | structural lift only |
@@ -386,7 +386,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `PostincrementExpression` | ⬜ | — | structural lift only |
 | `PowerExpression` | ⬜ | — | structural lift only |
 | `PrimaryBlockEventExpression` | ⬜ | — | structural lift only |
-| `PropertySpec` | ⬜ | — | structural lift only |
+| `PropertySpec` | ✅ | — | structural lift only |
 | `PropertyType` | ⬜ | — | structural lift only |
 | `QueueDimensionSpecifier` | ⬜ | — | structural lift only |
 | `RandJoinClause` | ⬜ | — | structural lift only |
@@ -432,7 +432,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `TransRange` | ⬜ | — | structural lift only |
 | `TransRepeatRange` | ⬜ | — | structural lift only |
 | `TransSet` | ⬜ | — | structural lift only |
-| `TypeAssignment` | ⬜ | — | structural lift only |
+| `TypeAssignment` | ✅ | — | structural lift only |
 | `TypeReference` | ⬜ | — | structural lift only |
 | `UnaryBinsSelectExpr` | ⬜ | — | structural lift only |
 | `UnaryBitwiseAndExpression` | ⬜ | — | structural lift only |
@@ -542,7 +542,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `LibraryIncludeStatement` | ⬜ | — | out-of-scope |
 | `LibraryMap` | ⬜ | — | out-of-scope |
 | `NonAnsiUdpPortList` | ⬜ | — | out-of-scope |
-| `OneStepDelay` | ⬜ | — | out-of-scope |
+| `OneStepDelay` | ✅ | — | out-of-scope |
 | `PathDeclaration` | ⬜ | — | out-of-scope |
 | `PathDescription` | ⬜ | — | out-of-scope |
 | `Production` | ⬜ | — | out-of-scope |

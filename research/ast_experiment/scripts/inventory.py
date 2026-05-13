@@ -21,6 +21,7 @@ SRCS = [
     HERE / "fifo_pkg.sv", HERE / "fifo_if.sv",
     HERE / "fifo.sv", HERE / "top.sv", HERE / "tb_fifo.sv",
     HERE / "fifo_asserts.sv",
+    HERE / "cls_corpus.sv",
 ]
 OUT = HERE / "elab_dump.json"
 CLASSES_OUT = HERE / "ast_classes.json"

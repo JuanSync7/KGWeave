@@ -24,6 +24,7 @@ PKG = HERE / "fifo_pkg.sv"
 IFACE = HERE / "fifo_if.sv"
 TB = HERE / "tb_fifo.sv"
 BIND = HERE / "fifo_asserts.sv"
+CLS = HERE / "cls_corpus.sv"
 COVERED = HERE / "covered_classes.json"
 
 
@@ -571,6 +572,30 @@ def test_bind_full_token_text_stream(bind_tree):
     """Round-trip on fifo_asserts.sv: token text stream is byte-equal."""
     reparsed, _ = _roundtrip(bind_tree)
     assert _token_text_stream(reparsed.root) == _token_text_stream(bind_tree.root)
+
+
+@pytest.fixture(scope="module")
+def cls_tree():
+    return pyslang.SyntaxTree.fromText(CLS.read_text())
+
+
+def test_cls_parse_baseline(cls_tree):
+    """Sanity: pyslang parses cls_corpus.sv with no diagnostics."""
+    diags = list(cls_tree.diagnostics)
+    assert not diags, f"cls_corpus.sv parse diagnostics: {diags}"
+
+
+def test_cls_full_token_text_stream(cls_tree):
+    """Round-trip on cls_corpus.sv: token text stream is byte-equal."""
+    reparsed, _ = _roundtrip(cls_tree)
+    assert _token_text_stream(reparsed.root) == _token_text_stream(cls_tree.root)
+
+
+def test_iter041_class_declaration(cls_tree):
+    """iter-041: ClassDeclarationSyntax round-trips byte-equal."""
+    reparsed, _ = _roundtrip(cls_tree)
+    _assert_class_roundtrip(cls_tree.root, reparsed.root, "ClassDeclarationSyntax")
+    _mark_covered({"ClassDeclarationSyntax"})
 
 
 def test_iter030_bind_directive(bind_tree):

@@ -23,6 +23,8 @@ from .common.graph import _add_edge, _has_edge, _mark
 from .common.resolve import _all_module_scopes
 from .common.tokens import (
     _assertion_label_of,
+    _class_modifiers_of,
+    _class_name_of,
     _clocking_modifier_of,
     _clocking_name_of,
     _cls,
@@ -162,6 +164,11 @@ def promote(
         # so Coverpoint/CoverCross children can resolve their parent path
         # without a top-down rewalk. Entries are (gid, cgpath) tuples.
         "covergroup_stack": [],
+        # S24: class_stack tracks the enclosing ClassDeclaration so future
+        # S25 (Extends/Implements) and S26 (ClassMethod/ClassProperty)
+        # children can resolve their parent path without a top-down rewalk.
+        # Entries are (gid, class_path) tuples.
+        "class_stack": [],
         "in_param": 0,
         "in_data": 0,
         "in_port": 0,
@@ -180,6 +187,7 @@ def promote(
         pushed = None
         popped_module = False
         pushed_covergroup = False
+        pushed_class = False
 
         if c == "ModuleDeclarationSyntax":
             kind_name = str(getattr(node, "kind", "")).rsplit(".", 1)[-1]
@@ -560,6 +568,39 @@ def promote(
                       attributes={"members": members})
                 _add_edge(graph, parent_gid, gid, "has_cross")
                 name_index[cx_path] = gid
+        elif c == "ClassDeclarationSyntax":
+            # S24 — promote ``[virtual|interface] [final] class <name>
+            # [#(params)] [extends ...] [implements ...] ; <items> endclass``
+            # as a queryable node. Parent is the enclosing module / package /
+            # interface (the ``module_stack`` top). Compilation-unit-scope
+            # classes (no enclosing scope) become root-anchored: path is the
+            # bare class name and no containment edge is emitted, mirroring
+            # how top-level modules / packages are handled by S1.
+            #
+            # Modifiers (virtual / interface_class / final / parameterized)
+            # are detected structurally via direct-child Token / SyntaxNode
+            # scanning — no regex on source text. Class body (members,
+            # methods, properties, extends/implements clauses) stays BLOB
+            # at S24; S25 and S26 will promote those sub-elements.
+            #
+            # ``class_stack`` is pushed unconditionally so S25/S26 children
+            # can resolve their enclosing class without a top-down rewalk,
+            # even for cu-scope classes that have no module parent.
+            cname = _class_name_of(node)
+            if cname:
+                mod_gid, mname = _cur_module()
+                if mod_gid is not None:
+                    cpath = f"{mname}.{cname}"
+                else:
+                    cpath = cname
+                attrs = _class_modifiers_of(node)
+                _mark(nodes_list[node_offset + idx], role="class",
+                      name=cname, path=cpath, attributes=attrs)
+                if mod_gid is not None:
+                    _add_edge(graph, mod_gid, gid, "has_class")
+                name_index[cpath] = gid
+                state["class_stack"].append((gid, cpath))
+                pushed_class = True
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:
@@ -630,6 +671,8 @@ def promote(
             state["typedef_stack"].pop()
         if pushed_covergroup and state["covergroup_stack"]:
             state["covergroup_stack"].pop()
+        if pushed_class and state["class_stack"]:
+            state["class_stack"].pop()
         if popped_module:
             state["module_stack"].pop()
 
