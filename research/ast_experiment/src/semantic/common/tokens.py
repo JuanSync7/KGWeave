@@ -552,6 +552,216 @@ def _implements_clause_targets(ic_syn: Any) -> list[str]:
     return out
 
 
+_CLASS_PROPERTY_QUALIFIER_KEYWORDS: dict[str, str] = {
+    "StaticKeyword": "static",
+    "ConstKeyword": "const",
+    "RandKeyword": "rand",
+    "RandCKeyword": "randc",
+    "ProtectedKeyword": "protected",
+    "LocalKeyword": "local",
+}
+
+
+_CLASS_METHOD_QUALIFIER_KEYWORDS: dict[str, str] = {
+    "VirtualKeyword": "virtual",
+    "PureKeyword": "pure",
+    "ExternKeyword": "extern",
+    "StaticKeyword": "static",
+    "ProtectedKeyword": "protected",
+    "LocalKeyword": "local",
+}
+
+
+def _qualifier_tokens_of(node: Any, mapping: dict[str, str]) -> dict[str, bool]:
+    """Walk direct children of ``node`` looking for a TokenList SyntaxNode
+    that holds class-member qualifier tokens (``static``/``virtual``/``rand``
+    etc.). Returns a dict mapping every key in ``mapping.values()`` to a bool
+    indicating presence. Direct-child Token siblings are also inspected for
+    robustness (some pyslang grammar variants surface qualifiers loose rather
+    than wrapped in a TokenList).
+    """
+    out = {label: False for label in mapping.values()}
+    for ch in node:
+        if _is_token(ch):
+            kind = _token_kind_name(ch)
+            if kind in mapping:
+                out[mapping[kind]] = True
+            continue
+        # Walk one level into TokenList wrappers (surfaced as generic SyntaxNode).
+        try:
+            kids = list(ch)
+        except TypeError:
+            continue
+        for sub in kids:
+            if _is_token(sub):
+                kind = _token_kind_name(sub)
+                if kind in mapping:
+                    out[mapping[kind]] = True
+    return out
+
+
+def _class_method_name_and_kind(method_node: Any) -> tuple[str, str, str | None]:
+    """Return (name, kind, return_type) for a ClassMethodDeclarationSyntax or
+    ClassMethodPrototypeSyntax.
+
+    kind is one of ``"function"`` / ``"task"`` / ``"new"`` / ``"prototype"``
+    (the last is the role hint for an inner ``FunctionPrototypeSyntax``-only
+    body — i.e. a method prototype declaration).
+    return_type is the textual return type for functions (``"void"``,
+    ``"int"``, a NamedType identifier, ...) or ``None`` for tasks /
+    constructors / implicit-return forms.
+    """
+    inner = None
+    for ch in method_node:
+        if _is_token(ch):
+            continue
+        cn = _cls(ch)
+        if cn in {"FunctionDeclarationSyntax", "TaskDeclarationSyntax",
+                  "FunctionPrototypeSyntax"}:
+            inner = ch
+            break
+    if inner is None:
+        return "", "function", None
+
+    inner_cls = _cls(inner)
+    if inner_cls == "TaskDeclarationSyntax":
+        # Task: name is in the inner FunctionPrototypeSyntax (yes, pyslang
+        # reuses the prototype class for tasks too).
+        proto = next((c for c in inner if _cls(c) == "FunctionPrototypeSyntax"), None)
+        if proto is None:
+            return "", "task", None
+        name, _rt = _function_proto_name_and_return(proto)
+        return name, "task", None
+
+    if inner_cls == "FunctionDeclarationSyntax":
+        proto = next((c for c in inner if _cls(c) == "FunctionPrototypeSyntax"), None)
+        if proto is None:
+            return "", "function", None
+        name, rt = _function_proto_name_and_return(proto)
+        if _is_constructor(proto):
+            return "new", "new", None
+        return name, "function", rt
+
+    # FunctionPrototypeSyntax direct (no enclosing decl) — prototype-only form.
+    name, rt = _function_proto_name_and_return(inner)
+    if _is_constructor(inner):
+        return "new", "new", None
+    # The caller (ClassMethodPrototype branch) overrides kind to "prototype"
+    # if this is a pure-virtual / extern declaration.
+    return name, "function", rt
+
+
+def _is_constructor(proto: Any) -> bool:
+    """True if a FunctionPrototypeSyntax's name child is a KeywordNameSyntax
+    holding a ``new`` keyword (ConstructorName)."""
+    for ch in proto:
+        if _is_token(ch):
+            continue
+        if _cls(ch) == "KeywordNameSyntax":
+            for sub in ch:
+                if _is_token(sub) and _token_kind_name(sub) == "NewKeyword":
+                    return True
+    return False
+
+
+def _function_proto_name_and_return(proto: Any) -> tuple[str, str | None]:
+    """Extract (name, return_type_text) from a FunctionPrototypeSyntax.
+
+    Grammar: ``function [lifetime] <return_type_or_void> <name> ( ports )``.
+    The return type is the first non-token, non-SyntaxList child after the
+    ``FunctionKeyword`` token; the name is the next non-token child after
+    that (an IdentifierName / KeywordName / ScopedName). For implicit return
+    (``ImplicitTypeSyntax``) we return ``None`` for the return type.
+    """
+    return_node = None
+    name_node = None
+    saw_fn_kw = False
+    for ch in proto:
+        if _is_token(ch):
+            if _token_kind_name(ch) == "FunctionKeyword":
+                saw_fn_kw = True
+            continue
+        if not saw_fn_kw:
+            continue
+        cn = _cls(ch)
+        # Skip SyntaxList wrappers (lifetime / attributes).
+        if cn == "SyntaxNode":
+            try:
+                kids = list(ch)
+            except TypeError:
+                kids = []
+            # An empty SyntaxList is the lifetime placeholder; skip.
+            if not kids:
+                continue
+        if cn == "FunctionPortListSyntax":
+            break
+        if return_node is None:
+            return_node = ch
+        else:
+            name_node = ch
+            break
+    name = ""
+    if name_node is not None:
+        if _cls(name_node) == "KeywordNameSyntax":
+            for sub in name_node:
+                if _is_token(sub) and _token_kind_name(sub) == "NewKeyword":
+                    name = "new"
+                    break
+        if not name:
+            toks = _identifier_tokens(name_node)
+            if toks:
+                name = toks[0].valueText
+    return_type: str | None = None
+    if return_node is not None:
+        cn = _cls(return_node)
+        if cn == "ImplicitTypeSyntax":
+            return_type = None
+        elif cn == "KeywordTypeSyntax":
+            for sub in return_node:
+                if _is_token(sub):
+                    return_type = sub.valueText
+                    break
+        else:
+            return_type = _expression_text(return_node)
+    return name, return_type
+
+
+def _class_property_declarators(prop_node: Any) -> list[Any]:
+    """Return the list of DeclaratorSyntax children belonging to a
+    ClassPropertyDeclarationSyntax.
+
+    The property declaration wraps an inner declaration (DataDeclaration or
+    ParameterDeclaration); the declarators live under a SeparatedList child
+    of that inner declaration.
+    """
+    inner = None
+    for ch in prop_node:
+        if _is_token(ch):
+            continue
+        cn = _cls(ch)
+        if cn in {"DataDeclarationSyntax", "ParameterDeclarationStatementSyntax",
+                  "TypedefDeclarationSyntax"}:
+            inner = ch
+            break
+    if inner is None:
+        return []
+    out: list[Any] = []
+    for ch in inner:
+        if _is_token(ch):
+            continue
+        # SeparatedList wrapper.
+        try:
+            kids = list(ch)
+        except TypeError:
+            continue
+        for sub in kids:
+            if _is_token(sub):
+                continue
+            if _cls(sub) == "DeclaratorSyntax":
+                out.append(sub)
+    return out
+
+
 def _typedef_name_of(td_syn: Any) -> str:
     """The user-given name token of a TypedefDeclarationSyntax — the LAST
     direct Identifier Token child."""

@@ -219,6 +219,162 @@ def test_s25_unresolved_extends_target():
     assert orphan["semantic"]["attributes"]["extends_name"] == "unknown_base"
 
 
+def test_s26_method_nodes_promoted(cls_graph):
+    """ClassMethodDeclaration bodies promote to role=method with paths
+    ``<class_path>.<method_name>`` under their enclosing class."""
+    methods = _by_role(cls_graph, "method")
+    paths = sorted(m["semantic"]["path"] for m in methods)
+    assert paths == [
+        "cls_pkg.data_xact.new",
+        "cls_pkg.data_xact.print",
+        "cls_pkg.printable_xact.print",
+    ], paths
+
+
+def test_s26_method_prototype(cls_graph):
+    """``pure virtual function void print();`` inside an ``interface class``
+    surfaces as ClassMethodPrototypeSyntax with role=method_prototype and
+    pure_virtual=True."""
+    protos = _by_role(cls_graph, "method_prototype")
+    assert len(protos) == 1
+    p = protos[0]
+    assert p["semantic"]["path"] == "cls_pkg.printable.print"
+    attrs = p["semantic"]["attributes"]
+    assert attrs["pure_virtual"] is True
+    assert attrs["virtual"] is True
+    assert attrs["prototype"] is True
+    assert attrs["kind"] == "prototype"
+    assert attrs["return_type"] == "void"
+
+
+def test_s26_constructor_method_kind(cls_graph):
+    """The ``function new();`` constructor is detected as kind="new" and has
+    return_type=None."""
+    methods = {m["semantic"]["path"]: m for m in _by_role(cls_graph, "method")}
+    new_m = methods["cls_pkg.data_xact.new"]
+    assert new_m["semantic"]["attributes"]["kind"] == "new"
+    assert new_m["semantic"]["attributes"]["return_type"] is None
+
+
+def test_s26_virtual_function_attributes(cls_graph):
+    """``virtual function void print();`` has virtual=True and return_type=void."""
+    methods = {m["semantic"]["path"]: m for m in _by_role(cls_graph, "method")}
+    pr = methods["cls_pkg.data_xact.print"]
+    attrs = pr["semantic"]["attributes"]
+    assert attrs["virtual"] is True
+    assert attrs["pure_virtual"] is False
+    assert attrs["kind"] == "function"
+    assert attrs["return_type"] == "void"
+    assert attrs["static"] is False
+
+
+def test_s26_has_method_edges(cls_graph):
+    """Every method / method_prototype has exactly one inbound has_method
+    edge from its enclosing class."""
+    classes = {c["semantic"]["path"]: c for c in _by_role(cls_graph, "class")}
+    members = _by_role(cls_graph, "method") + _by_role(cls_graph, "method_prototype")
+    for m in members:
+        parent_path = m["semantic"]["path"].rsplit(".", 1)[0]
+        parent = classes[parent_path]
+        edges = [e for e in cls_graph["edges"]
+                 if e["type"] == "has_method"
+                 and e["src"] == parent["id"]
+                 and e["dst"] == m["id"]]
+        assert len(edges) == 1, (
+            f"{m['semantic']['path']}: expected 1 has_method edge from "
+            f"{parent_path}, got {len(edges)}"
+        )
+
+
+def test_s26_class_property_nodes_promoted(cls_graph):
+    """Class data members promote to role=class_property under their
+    enclosing class. Multi-declarator declarations (``int a, b, c;``) fan
+    out to one node per name."""
+    props = _by_role(cls_graph, "class_property")
+    paths = sorted(p["semantic"]["path"] for p in props)
+    assert paths == [
+        "cls_pkg.base_xact.id",
+        "cls_pkg.data_xact.a",
+        "cls_pkg.data_xact.b",
+        "cls_pkg.data_xact.c",
+        "cls_pkg.data_xact.instance_count",
+        "cls_pkg.data_xact.payload",
+        "cls_pkg.data_xact.rnd_field",
+        "cls_pkg.para_xact.value",
+    ], paths
+
+
+def test_s26_class_property_modifiers(cls_graph):
+    """Static / rand qualifiers detected structurally from the property's
+    TokenList of qualifier keywords."""
+    props = {p["semantic"]["path"]: p for p in _by_role(cls_graph, "class_property")}
+    ic = props["cls_pkg.data_xact.instance_count"]
+    assert ic["semantic"]["attributes"]["static"] is True
+    assert ic["semantic"]["attributes"]["rand"] is False
+    rf = props["cls_pkg.data_xact.rnd_field"]
+    assert rf["semantic"]["attributes"]["rand"] is True
+    assert rf["semantic"]["attributes"]["static"] is False
+    # Plain ``bit [7:0] payload`` carries no qualifiers.
+    pl = props["cls_pkg.data_xact.payload"]
+    assert pl["semantic"]["attributes"]["static"] is False
+    assert pl["semantic"]["attributes"]["rand"] is False
+
+
+def test_s26_has_class_property_edges(cls_graph):
+    """Every class_property node has exactly one inbound has_class_property
+    edge from its enclosing class."""
+    classes = {c["semantic"]["path"]: c for c in _by_role(cls_graph, "class")}
+    props = _by_role(cls_graph, "class_property")
+    for p in props:
+        parent_path = p["semantic"]["path"].rsplit(".", 1)[0]
+        parent = classes[parent_path]
+        edges = [e for e in cls_graph["edges"]
+                 if e["type"] == "has_class_property"
+                 and e["src"] == parent["id"]
+                 and e["dst"] == p["id"]]
+        assert len(edges) == 1
+
+
+def test_s26_declarator_fanout(cls_graph):
+    """``int a, b, c;`` becomes three distinct class_property nodes (one per
+    Declarator), all carrying matching modifier attributes."""
+    props = {p["semantic"]["path"]: p for p in _by_role(cls_graph, "class_property")}
+    for name in ("a", "b", "c"):
+        path = f"cls_pkg.data_xact.{name}"
+        assert path in props, f"missing fanned-out node {path}"
+        assert props[path]["semantic"]["name"] == name
+
+
+def test_s26_function_role_not_misassigned_to_methods(cls_graph):
+    """When a FunctionDeclarationSyntax is the body of a
+    ClassMethodDeclarationSyntax, it must NOT be promoted as a free
+    ``role=function`` under the enclosing package — only as ``role=method``
+    under the class."""
+    funcs = _by_role(cls_graph, "function")
+    paths = [f["semantic"]["path"] for f in funcs]
+    # Free functions at package scope would have a 2-segment path like
+    # ``cls_pkg.foo``. The corpus has no such free function — every function
+    # in cls_corpus.sv lives inside a class. So we expect zero.
+    assert paths == [], f"unexpected function promotions: {paths}"
+
+
+def test_s26_name_index_registers_member_paths(cls_graph):
+    """Class methods and properties register their hierarchical paths in
+    the shared semantic_name_index so downstream rules can resolve them."""
+    idx = cls_graph.get("semantic_name_index", {})
+    for nm in (
+        "cls_pkg.data_xact.payload",
+        "cls_pkg.data_xact.instance_count",
+        "cls_pkg.data_xact.rnd_field",
+        "cls_pkg.data_xact.a", "cls_pkg.data_xact.b", "cls_pkg.data_xact.c",
+        "cls_pkg.data_xact.new",
+        "cls_pkg.data_xact.print",
+        "cls_pkg.printable.print",
+        "cls_pkg.printable_xact.print",
+    ):
+        assert nm in idx, f"missing name-index entry {nm!r}"
+
+
 def test_s24_name_index_registers_paths(cls_graph):
     """All four class hierarchical paths are registered in the shared
     semantic_name_index so downstream rules (S25/S26) can resolve them by

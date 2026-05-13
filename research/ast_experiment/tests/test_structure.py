@@ -67,6 +67,7 @@ _ACTIVE_RULE_KINDS = {
     "Coverpoint", "CoverCross",
     "ClassDeclaration",
     "ExtendsClause", "ImplementsClause",
+    "ClassMethodDeclaration", "ClassMethodPrototype", "ClassPropertyDeclaration",
 }
 
 

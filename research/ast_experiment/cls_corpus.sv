@@ -6,6 +6,15 @@ package cls_pkg;
 
   class data_xact extends base_xact;
     bit [7:0] payload;
+    static int instance_count = 0;
+    rand int rnd_field;
+    int a, b, c;
+    function new();
+      instance_count++;
+    endfunction
+    virtual function void print();
+      $display("data_xact id=%0d", id);
+    endfunction
   endclass
 
   interface class printable;

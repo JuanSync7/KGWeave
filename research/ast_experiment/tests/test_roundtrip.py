@@ -598,6 +598,26 @@ def test_iter041_class_declaration(cls_tree):
     _mark_covered({"ClassDeclarationSyntax"})
 
 
+def test_iter043_class_members(cls_tree):
+    """iter-043 (S26): ClassMethodDeclarationSyntax, ClassMethodPrototypeSyntax,
+    and ClassPropertyDeclarationSyntax round-trip byte-equal for cls_corpus.sv.
+    The corpus exercises constructor (``function new();``), virtual function,
+    pure-virtual prototype, plain / static / rand / multi-declarator
+    properties."""
+    reparsed, _ = _roundtrip(cls_tree)
+    for cls in (
+        "ClassMethodDeclarationSyntax",
+        "ClassMethodPrototypeSyntax",
+        "ClassPropertyDeclarationSyntax",
+    ):
+        _assert_class_roundtrip(cls_tree.root, reparsed.root, cls)
+    _mark_covered({
+        "ClassMethodDeclarationSyntax",
+        "ClassMethodPrototypeSyntax",
+        "ClassPropertyDeclarationSyntax",
+    })
+
+
 def test_iter030_bind_directive(bind_tree):
     """iter-030: BindDirectiveSyntax + CompilationUnitSyntax round-trip byte-equal.
 

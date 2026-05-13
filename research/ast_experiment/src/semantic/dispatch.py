@@ -22,15 +22,20 @@ from typing import Any
 from .common.graph import _add_edge, _has_edge, _mark
 from .common.resolve import _all_module_scopes
 from .common.tokens import (
+    _CLASS_METHOD_QUALIFIER_KEYWORDS,
+    _CLASS_PROPERTY_QUALIFIER_KEYWORDS,
     _assertion_label_of,
+    _class_method_name_and_kind,
     _class_modifiers_of,
     _class_name_of,
+    _class_property_declarators,
     _class_ref_name_of,  # noqa: F401  (re-export-friendly; used by classes.py)
     _extends_clause_target,
     _implements_clause_targets,
     _clocking_modifier_of,
     _clocking_name_of,
     _cls,
+    _qualifier_tokens_of,
     _cover_cross_members,
     _covergroup_has_clocking_event,
     _covergroup_name_of,
@@ -256,8 +261,15 @@ def promote(
                     _add_edge(graph, mod_gid, gid, "has_modport")
                     name_index[mpath] = gid
         elif c == "FunctionDeclarationSyntax":
+            # S10 promotes a module-scope ``function/task`` as role="function".
+            # When the FunctionDeclarationSyntax is the body of a
+            # ClassMethodDeclarationSyntax, the class_stack is non-empty and
+            # the enclosing S26 branch handles promotion as ``role=method``
+            # against the class — skip the module-level promotion here to
+            # avoid double-promoting the method under the package as a free
+            # function.
             mod_gid, mname = _cur_module()
-            if mod_gid is not None:
+            if mod_gid is not None and not state["class_stack"]:
                 fname = _function_name_of(node)
                 if fname:
                     fpath = f"{mname}.{fname}"
@@ -665,6 +677,98 @@ def promote(
 
                 state["class_stack"].append((gid, cpath))
                 pushed_class = True
+        elif c in ("ClassMethodDeclarationSyntax",
+                   "ClassMethodPrototypeSyntax"):
+            # S26 — promote class methods (function/task bodies inside a
+            # class) and method prototypes (pure-virtual / extern declarations
+            # surfaced as ClassMethodPrototypeSyntax). Parent is the
+            # enclosing class (``class_stack`` top); fall back to a silent
+            # skip if somehow reached outside a class.
+            #
+            # Modifiers (``virtual``/``pure``/``extern``/``static``/
+            # ``protected``/``local``) are detected structurally by walking
+            # the direct-child TokenList. The method name and return type
+            # come from the inner FunctionPrototypeSyntax — the helper
+            # disambiguates constructor (``new``) / task / function and
+            # extracts the return-type text only for functions.
+            if state["class_stack"]:
+                cls_gid, cls_path = state["class_stack"][-1]
+                name, kind_label, return_type = _class_method_name_and_kind(node)
+                if name:
+                    is_prototype = (c == "ClassMethodPrototypeSyntax")
+                    quals = _qualifier_tokens_of(node, _CLASS_METHOD_QUALIFIER_KEYWORDS)
+                    pure_virtual = quals["pure"] and quals["virtual"]
+                    attrs: dict[str, Any] = {
+                        "kind": "prototype" if is_prototype else kind_label,
+                        "static": quals["static"],
+                        "virtual": quals["virtual"],
+                        "pure_virtual": pure_virtual,
+                        "extern": quals["extern"],
+                        "protected": quals["protected"],
+                        "local": quals["local"],
+                        "return_type": return_type,
+                        "prototype": is_prototype,
+                    }
+                    mpath = f"{cls_path}.{name}"
+                    role_label = "method_prototype" if is_prototype else "method"
+                    _mark(nodes_list[node_offset + idx], role=role_label,
+                          name=name, path=mpath, attributes=attrs)
+                    _add_edge(graph, cls_gid, gid, "has_method")
+                    name_index[mpath] = gid
+        elif c == "ClassPropertyDeclarationSyntax":
+            # S26 — promote class data members. The declaration may carry
+            # multiple comma-separated declarators (``int a, b, c;``); we
+            # emit one ``class_property`` node per declarator. Parent is the
+            # enclosing class (``class_stack`` top).
+            #
+            # We attach the role marker + has_class_property edge to the
+            # outermost ClassPropertyDeclarationSyntax (one node per
+            # declaration), and ALSO emit a separate marker on each inner
+            # DeclaratorSyntax — but the canonical promoted node is the
+            # ClassPropertyDeclaration itself (one per source declaration).
+            #
+            # Declarator fan-out rule: when the SeparatedList contains more
+            # than one DeclaratorSyntax, the ClassPropertyDeclaration node
+            # itself carries the FIRST declarator's name; the remaining
+            # declarators are stamped on their own DeclaratorSyntax nodes
+            # below via a deferred re-promotion in the Declarator branch.
+            # We use a per-declaration "declarator_names" attribute to
+            # surface the full list to consumers.
+            if state["class_stack"]:
+                cls_gid, cls_path = state["class_stack"][-1]
+                quals = _qualifier_tokens_of(node, _CLASS_PROPERTY_QUALIFIER_KEYWORDS)
+                declarators = _class_property_declarators(node)
+                names: list[str] = []
+                for d in declarators:
+                    ids = _identifier_tokens(d)
+                    if ids:
+                        names.append(ids[0].valueText)
+                # Stash the declarator metadata on the per-declaration node
+                # so DeclaratorSyntax children can emit per-name property
+                # nodes when they are visited next.
+                state["class_property_pending"] = {
+                    "cls_gid": cls_gid,
+                    "cls_path": cls_path,
+                    "quals": quals,
+                    "decl_gid": gid,
+                    "names": set(names),
+                }
+                if names:
+                    first = names[0]
+                    attrs = {
+                        "static": quals["static"],
+                        "const": quals["const"],
+                        "rand": quals["rand"],
+                        "randc": quals["randc"],
+                        "protected": quals["protected"],
+                        "local": quals["local"],
+                        "declarator_names": list(names),
+                    }
+                    ppath = f"{cls_path}.{first}"
+                    _mark(nodes_list[node_offset + idx], role="class_property",
+                          name=first, path=ppath, attributes=attrs)
+                    _add_edge(graph, cls_gid, gid, "has_class_property")
+                    name_index[ppath] = gid
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:
@@ -696,8 +800,49 @@ def promote(
             pushed = "in_data"
         elif c == "DeclaratorSyntax":
             mod_gid, mname = _cur_module()
-            if mod_gid is not None:
-                ids = _identifier_tokens(node)
+            ids = _identifier_tokens(node)
+            # S26 declarator fan-out: when this Declarator is the 2nd+ name
+            # under a ClassPropertyDeclaration (``int a, b, c;``), emit a
+            # separate class_property node + has_class_property edge so each
+            # variable name surfaces as a distinct queryable node. The first
+            # declarator name is already promoted by the enclosing
+            # ClassPropertyDeclaration branch above (canonical node).
+            pending = state.get("class_property_pending")
+            if (pending is not None
+                    and ids
+                    and ids[0].valueText in pending["names"]
+                    and gid != pending["decl_gid"]):
+                dname = ids[0].valueText
+                # First declarator in the source order is the canonical node
+                # already promoted on the ClassPropertyDeclaration itself;
+                # skip it here to avoid duplicating the (cls_path).first edge.
+                # We detect "first" by removing the name from the pending set
+                # the first time we see it (the canonical promotion already
+                # consumed it implicitly — track via a "seen" sub-set).
+                seen = pending.setdefault("_seen", set())
+                if dname not in seen:
+                    seen.add(dname)
+                    if len(seen) > 1:
+                        # 2nd+ declarator: emit a sibling class_property node.
+                        quals = pending["quals"]
+                        attrs = {
+                            "static": quals["static"],
+                            "const": quals["const"],
+                            "rand": quals["rand"],
+                            "randc": quals["randc"],
+                            "protected": quals["protected"],
+                            "local": quals["local"],
+                        }
+                        ppath = f"{pending['cls_path']}.{dname}"
+                        _mark(nodes_list[node_offset + idx],
+                              role="class_property", name=dname, path=ppath,
+                              attributes=attrs)
+                        _add_edge(graph, pending["cls_gid"], gid,
+                                  "has_class_property")
+                        name_index[ppath] = gid
+                # In either case the Declarator inside a class belongs to a
+                # class property — do NOT fall through to net/param promotion.
+            elif mod_gid is not None and not state["class_stack"]:
                 if ids and state["in_port"] == 0:
                     dname = ids[0].valueText
                     dpath = f"{mname}.{dname}"
@@ -722,6 +867,10 @@ def promote(
 
         if pushed is not None:
             state[pushed] += 1
+        # S26: scope ``class_property_pending`` to this declaration's subtree.
+        pending_snapshot = None
+        if c == "ClassPropertyDeclarationSyntax":
+            pending_snapshot = state.get("class_property_pending")
         if not _is_token(node):
             try:
                 children = list(node)
@@ -729,6 +878,14 @@ def promote(
                 children = []
             for ch in children:
                 visit_pass1(ch)
+        if c == "ClassPropertyDeclarationSyntax":
+            # Restore (or clear) the pending pointer to whatever it was before
+            # this declaration so nested class declarations do not leak
+            # qualifier metadata to sibling subtrees.
+            if pending_snapshot is None:
+                state.pop("class_property_pending", None)
+            else:
+                state["class_property_pending"] = pending_snapshot
         if pushed is not None:
             state[pushed] -= 1
         if pushed == "in_typedef" and state["typedef_stack"]:
