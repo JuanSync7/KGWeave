@@ -35,6 +35,7 @@ _CONTAINMENT_EDGES = {
     "has_class",
     "has_method", "has_class_property",
     "has_constraint",
+    "has_checker", "has_checker_instance",
     "has_generate", "contains_block",
 }
 _SEMANTIC_EDGES = {
@@ -50,6 +51,7 @@ _CONTAINED_ROLES = {
     "covergroup", "coverpoint", "cross",
     "class", "method", "method_prototype", "class_property",
     "constraint",
+    "checker", "checker_instance",
     "generate_loop", "generate_block",
 }
 # Roles whose `name` is treated as an owning namespace (top-level container).

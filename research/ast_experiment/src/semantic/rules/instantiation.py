@@ -97,6 +97,50 @@ def rule_s6(graph, node, gid, gnode, scope, name_index, leaks,
                 break
     if type_name is None:
         return
+    # S28 — a HierarchyInstantiationSyntax whose type name resolves to a
+    # promoted checker (not a module/interface) is a checker instantiation
+    # at module body scope. Pyslang parses it as HierarchyInstantiation
+    # because the parser cannot disambiguate from module instantiation at
+    # parse time; pass-1 marked the checker declaration with a
+    # ``checker:<name>`` name-index entry. When that lookup hits, emit
+    # ``has_checker_instance`` (from the enclosing module) and ``of_checker``
+    # (from the instance to the checker definition) and stamp the
+    # HierarchicalInstance as role=checker_instance — keeping checker-style
+    # queries cleanly separated from module-instance queries.
+    checker_target_id = name_index.get("checker:" + type_name)
+    if checker_target_id is not None:
+        for d in _descendants(node):
+            if _cls(d) != "HierarchicalInstanceSyntax":
+                continue
+            inst_name = None
+            for ch in d:
+                if _cls(ch) == "InstanceNameSyntax":
+                    toks = _identifier_tokens(ch)
+                    if toks:
+                        inst_name = toks[0].valueText
+                    break
+            if inst_name is None:
+                continue
+            inst_path = f"{scope_path}.{inst_name}" if scope_path else inst_name
+            hi_gid = _gid_for_subtree(graph, gid, "HierarchicalInstanceSyntax",
+                                      target_inst=inst_name)
+            if hi_gid is None:
+                continue
+            idx = _node_index_by_id(graph, hi_gid)
+            if idx is None:
+                continue
+            _mark(graph["nodes"][idx], role="checker_instance",
+                  name=inst_name, path=inst_path,
+                  attributes={"checker_name": type_name})
+            name_index[inst_path] = hi_gid
+            if module_gid is not None and not _has_edge(
+                graph, module_gid, hi_gid, "has_checker_instance"
+            ):
+                _add_edge(graph, module_gid, hi_gid, "has_checker_instance")
+            if not _has_edge(graph, hi_gid, checker_target_id, "of_checker"):
+                _add_edge(graph, hi_gid, checker_target_id, "of_checker",
+                          name=type_name)
+        return
     type_node_id = (name_index.get("module:" + type_name)
                     or name_index.get("interface:" + type_name)
                     or name_index.get(type_name))

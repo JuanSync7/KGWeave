@@ -795,6 +795,64 @@ def _class_property_declarators(prop_node: Any) -> list[Any]:
     return out
 
 
+def _checker_name_of(chk_syn: Any) -> str:
+    """Return the checker name from a CheckerDeclarationSyntax.
+
+    Grammar: ``checker <Identifier> [( <ports> )] ; <items> endchecker``.
+    The checker name is the first direct Identifier Token child following
+    the ``CheckerKeyword`` token. Walking direct children only avoids
+    descending into the body where Identifier tokens refer to signals.
+    """
+    saw_checker_kw = False
+    for ch in chk_syn:
+        if _is_token(ch):
+            kind = _token_kind_name(ch)
+            if kind == "CheckerKeyword":
+                saw_checker_kw = True
+                continue
+            if saw_checker_kw and kind == "Identifier":
+                return ch.valueText
+    return ""
+
+
+def _checker_instantiation_type_name(ci_syn: Any) -> str:
+    """Return the checker-type identifier from a CheckerInstantiationSyntax.
+
+    Grammar: ``<CheckerType> <inst_name> ( <connections> ) ;``. The type
+    name is the first Identifier-bearing direct child. We probe direct
+    Identifier tokens first, then walk one level into the first non-token
+    child looking for an identifier (mirrors how ``rule_s6`` resolves
+    HierarchyInstantiation type names).
+    """
+    for ch in ci_syn:
+        if _is_token(ch) and _token_kind_name(ch) == "Identifier":
+            return ch.valueText
+    for ch in ci_syn:
+        if _is_token(ch):
+            continue
+        toks = _identifier_tokens(ch)
+        if toks:
+            return toks[0].valueText
+    return ""
+
+
+def _checker_instance_name(ci_syn: Any) -> str:
+    """Return the instance-name identifier from a CheckerInstantiationSyntax.
+
+    The instance name lives inside an ``InstanceNameSyntax`` direct child
+    (or the first Identifier token under it). Returns ``""`` if absent.
+    """
+    for ch in ci_syn:
+        if _is_token(ch):
+            continue
+        if _cls(ch) == "InstanceNameSyntax":
+            toks = _identifier_tokens(ch)
+            if toks:
+                return toks[0].valueText
+            return ""
+    return ""
+
+
 def _typedef_name_of(td_syn: Any) -> str:
     """The user-given name token of a TypedefDeclarationSyntax — the LAST
     direct Identifier Token child."""

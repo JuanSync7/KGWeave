@@ -25,6 +25,7 @@ IFACE = HERE / "fifo_if.sv"
 TB = HERE / "tb_fifo.sv"
 BIND = HERE / "fifo_asserts.sv"
 CLS = HERE / "cls_corpus.sv"
+CHK = HERE / "checker_corpus.sv"
 COVERED = HERE / "covered_classes.json"
 
 
@@ -630,3 +631,27 @@ def test_iter030_bind_directive(bind_tree):
     for cls in ("BindDirectiveSyntax", "CompilationUnitSyntax"):
         _assert_class_roundtrip(bind_tree.root, reparsed.root, cls)
     _mark_covered({"BindDirectiveSyntax", "CompilationUnitSyntax"})
+
+
+@pytest.fixture(scope="module")
+def chk_tree():
+    return pyslang.SyntaxTree.fromText(CHK.read_text())
+
+
+def test_chk_parse_baseline(chk_tree):
+    """Sanity: pyslang parses checker_corpus.sv with no diagnostics."""
+    diags = list(chk_tree.diagnostics)
+    assert not diags, f"checker_corpus.sv parse diagnostics: {diags}"
+
+
+def test_chk_full_token_text_stream(chk_tree):
+    """Round-trip on checker_corpus.sv: token text stream is byte-equal."""
+    reparsed, _ = _roundtrip(chk_tree)
+    assert _token_text_stream(reparsed.root) == _token_text_stream(chk_tree.root)
+
+
+def test_iter045_checker_declaration(chk_tree):
+    """iter-045 (S28): CheckerDeclarationSyntax round-trips byte-equal."""
+    reparsed, _ = _roundtrip(chk_tree)
+    _assert_class_roundtrip(chk_tree.root, reparsed.root, "CheckerDeclarationSyntax")
+    _mark_covered({"CheckerDeclarationSyntax"})

@@ -69,6 +69,7 @@ _ACTIVE_RULE_KINDS = {
     "ExtendsClause", "ImplementsClause",
     "ClassMethodDeclaration", "ClassMethodPrototype", "ClassPropertyDeclaration",
     "ConstraintDeclaration", "ConstraintPrototype",
+    "CheckerDeclaration", "CheckerInstantiation",
 }
 
 
@@ -158,14 +159,14 @@ _TARGET_ACTIVE_MODULES = [
     "structure", "instantiation", "interfaces", "generate",
     "dataflow", "types", "behavior", "properties", "assertions",
     "clocking", "procedural", "coverage", "classes", "constraints",
+    "checkers",
 ]
 
 _TARGET_STUB_MODULES = [
-    "checkers", "extern",
+    "extern",
 ]
 
 _STUB_PLANNED_KIND_HINTS = {
-    "checkers": ["CheckerDeclaration", "CheckerInstantiation"],
     "extern": ["ExternModuleDecl", "ProgramDeclaration"],
 }
 

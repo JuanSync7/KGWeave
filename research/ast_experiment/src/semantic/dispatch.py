@@ -27,6 +27,9 @@ from .common.tokens import (
     _CONSTRAINT_QUALIFIER_KEYWORDS,
     _constraint_name_of,
     _assertion_label_of,
+    _checker_name_of,
+    _checker_instance_name,
+    _checker_instantiation_type_name,
     _class_method_name_and_kind,
     _class_modifiers_of,
     _class_name_of,
@@ -179,6 +182,14 @@ def promote(
         # children can resolve their parent path without a top-down rewalk.
         # Entries are (gid, class_path) tuples.
         "class_stack": [],
+        # S28: checker_stack tracks the enclosing CheckerDeclaration so its
+        # internal property / sequence / assertion children resolve their
+        # parent path against the checker (not against the surrounding
+        # module). Entries are (gid, checker_path) tuples. The checker is
+        # additionally pushed onto ``module_stack`` while active so the
+        # existing S14/S15/S16 promote-against-cur_module logic attaches
+        # them to the checker without further changes.
+        "checker_stack": [],
         "in_param": 0,
         "in_data": 0,
         "in_port": 0,
@@ -804,6 +815,67 @@ def promote(
                           name=cname, path=cpath, attributes=attrs)
                     _add_edge(graph, cls_gid, gid, "has_constraint")
                     name_index[cpath] = gid
+        elif c == "CheckerDeclarationSyntax":
+            # S28 — promote ``checker <name> [(ports)]; <items> endchecker``
+            # as a queryable node. Parent is the enclosing module / package /
+            # interface (the ``module_stack`` top). Compilation-unit-scope
+            # checkers (no enclosing scope) become root-anchored: path is the
+            # bare checker name and no containment edge is emitted, mirroring
+            # how cu-scope classes are handled by S24.
+            #
+            # ``checker_stack`` is pushed for symmetry with class_stack /
+            # covergroup_stack so future S-rules can resolve the enclosing
+            # checker without a top-down rewalk. The checker is ALSO pushed
+            # onto ``module_stack`` while active so the existing S14
+            # (Property), S15 (Sequence), S16 (ConcurrentAssertion), and S18
+            # (Clocking) pass-1 branches — which all key off ``_cur_module()``
+            # — attach property / sequence / assertion / clocking children
+            # to the checker by hierarchical path, e.g. ``c_mutex.p_mutex``.
+            chk_name = _checker_name_of(node)
+            if chk_name:
+                mod_gid, mname = _cur_module()
+                if mod_gid is not None:
+                    cpath = f"{mname}.{chk_name}"
+                else:
+                    cpath = chk_name
+                _mark(nodes_list[node_offset + idx], role="checker",
+                      name=chk_name, path=cpath)
+                if mod_gid is not None:
+                    _add_edge(graph, mod_gid, gid, "has_checker")
+                # Register both the qualified path and a ``checker:<name>``
+                # key so S6 in pass-2 can distinguish checker types from
+                # module / interface types when resolving an instantiation.
+                name_index[cpath] = gid
+                name_index["checker:" + chk_name] = gid
+                state["checker_stack"].append((gid, cpath))
+                # Push as a synthetic module-scope so child SVA / clocking
+                # items attach with the checker as parent.
+                state["module_stack"].append((gid, cpath))
+                popped_module = True
+        elif c == "CheckerInstantiationSyntax":
+            # S28 — promote a checker instantiation that surfaces with its own
+            # dedicated SyntaxKind (the procedural-context form, wrapped by
+            # CheckerInstanceStatementSyntax). The module-body form parses as
+            # a HierarchyInstantiationSyntax and is reclassified by rule_s6 in
+            # pass-2 against the checker name index.
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                ctype = _checker_instantiation_type_name(node)
+                iname = _checker_instance_name(node)
+                if iname and ctype:
+                    ipath = f"{mname}.{iname}"
+                    _mark(nodes_list[node_offset + idx], role="checker_instance",
+                          name=iname, path=ipath,
+                          attributes={"checker_name": ctype})
+                    _add_edge(graph, mod_gid, gid, "has_checker_instance")
+                    name_index[ipath] = gid
+                    # Optional of_checker edge — resolve against the
+                    # checker-prefixed name-index entry registered by the
+                    # CheckerDeclaration branch above.
+                    tgt = name_index.get("checker:" + ctype)
+                    if tgt is not None and tgt != gid:
+                        _add_edge(graph, gid, tgt, "of_checker",
+                                  name=ctype)
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:
@@ -929,6 +1001,11 @@ def promote(
             state["covergroup_stack"].pop()
         if pushed_class and state["class_stack"]:
             state["class_stack"].pop()
+        # S28: pop the checker_stack entry the CheckerDeclaration branch
+        # pushed. ``popped_module`` was set True alongside the checker push,
+        # so the module_stack pop below removes the synthetic checker scope.
+        if c == "CheckerDeclarationSyntax" and state["checker_stack"]:
+            state["checker_stack"].pop()
         if popped_module:
             state["module_stack"].pop()
 
