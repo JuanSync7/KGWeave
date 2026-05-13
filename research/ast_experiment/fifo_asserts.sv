@@ -55,4 +55,22 @@ module fifo_asserts(
     end
 endmodule
 
+// S19 — procedural continuous assign/deassign. These are statement-level
+// constructs inside an always block (distinct from S2's module-level
+// continuous assign). The corpus must include a writable variable that
+// is the target of both forms so the LHS-extraction path is exercised.
+module proc_assign_demo (
+    input  logic       clk,
+    input  logic       load,
+    input  logic [7:0] din,
+    output logic [7:0] q
+);
+    logic [7:0] r;
+    always @(posedge clk) begin
+        if (load) assign r = din;
+        else      deassign r;
+    end
+    assign q = r;
+endmodule
+
 bind fifo fifo_asserts u_asserts(.clk(clk), .full(full), .push(push));

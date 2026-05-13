@@ -29,6 +29,7 @@ from .common.tokens import (
     _function_name_of,
     _identifier_tokens,
     _is_token,
+    _lhs_target_name,
     _module_name_of,
     _property_name_of,
     _sequence_name_of,
@@ -131,6 +132,9 @@ def promote(
     # S18: per-module counter for anonymous clocking blocks (rare; the LRM
     # requires an identifier, but synthesize a fallback for robustness).
     clocking_counters: dict[str, int] = {}
+    # S19: per-module counter for procedural-assign / procedural-deassign
+    # statements (these have no name in source; synthesize a path index).
+    proc_assign_counters: dict[str, int] = {}
     state = {
         "idx": 0,
         "module_stack": [],
@@ -316,6 +320,45 @@ def promote(
                       name=cname, path=cpath, attributes=attrs)
                 _add_edge(graph, mod_gid, gid, "has_clocking")
                 name_index[cpath] = gid
+        elif c in ("ProceduralAssignStatementSyntax",
+                   "ProceduralDeassignStatementSyntax"):
+            # S19 — promote ``assign lhs = rhs;`` and ``deassign lhs;``
+            # statements that appear inside procedural blocks (always /
+            # initial). These are distinct from S2's module-level
+            # ContinuousAssign — they override / release procedural drivers.
+            # Parent is the nearest enclosing module (NOT the always block).
+            # The LHS target is extracted structurally: ``_lhs_target_name``
+            # finds the first Identifier token under the statement, which
+            # in both grammars is the LHS variable (assign: ``lhs = rhs``;
+            # deassign: ``lhs``). No regex on source text. If the LHS
+            # resolves to a known net via the shared name index, emit an
+            # optional ``drives`` edge; otherwise skip silently.
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                if c == "ProceduralAssignStatementSyntax":
+                    role_label = "procedural_assign"
+                else:
+                    role_label = "procedural_deassign"
+                n_seen = proc_assign_counters.get(mname, 0)
+                proc_name = f"proc_assign_{n_seen}"
+                proc_assign_counters[mname] = n_seen + 1
+                ppath = f"{mname}.{proc_name}"
+                lhs_name = _lhs_target_name(node) or ""
+                _mark(nodes_list[node_offset + idx], role=role_label,
+                      name=proc_name, path=ppath,
+                      attributes={"lhs": lhs_name})
+                _add_edge(graph, mod_gid, gid, "has_procedural_assign")
+                name_index[ppath] = gid
+                # Optional drives edge — only if the LHS resolves to an
+                # existing semantic node in the shared name index. We try
+                # the qualified path first (mname.lhs), then the bare name
+                # (cross-scope fallback). If neither resolves, skip.
+                if lhs_name:
+                    tgt_id = name_index.get(f"{mname}.{lhs_name}")
+                    if tgt_id is None:
+                        tgt_id = name_index.get(lhs_name)
+                    if tgt_id is not None and tgt_id != gid:
+                        _add_edge(graph, gid, tgt_id, "drives")
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:

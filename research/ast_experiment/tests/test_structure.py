@@ -60,6 +60,7 @@ _ACTIVE_RULE_KINDS = {
     "CoverSequenceStatement", "RestrictPropertyStatement", "ExpectPropertyStatement",
     "ImmediateAssertStatement", "ImmediateAssumeStatement", "ImmediateCoverStatement",
     "ClockingDeclaration",
+    "ProceduralAssignStatement", "ProceduralDeassignStatement",
 }
 
 
@@ -146,16 +147,14 @@ _TARGET_RULES_FILES = [
 _TARGET_ACTIVE_MODULES = [
     "structure", "instantiation", "interfaces", "generate",
     "dataflow", "types", "behavior", "properties", "assertions",
-    "clocking",
+    "clocking", "procedural",
 ]
 
 _TARGET_STUB_MODULES = [
-    "procedural",
     "coverage", "classes", "constraints", "checkers", "extern",
 ]
 
 _STUB_PLANNED_KIND_HINTS = {
-    "procedural": ["AlwaysBlock", "InitialBlock", "FinalBlock"],
     "coverage": ["CovergroupDeclaration", "Coverpoint", "CoverCross"],
     "classes": ["ClassDeclaration"],
     "constraints": ["ConstraintDeclaration", "ConstraintBlock"],
