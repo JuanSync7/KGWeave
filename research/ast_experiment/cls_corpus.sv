@@ -16,4 +16,9 @@ package cls_pkg;
     T value;
   endclass
 
+  class printable_xact extends base_xact implements printable;
+    virtual function void print();
+    endfunction
+  endclass
+
 endpackage

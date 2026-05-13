@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 49 | 61 | 0 | 74 |
+| PROMOTE | 135 | 49 | 63 | 0 | 72 |
 | CONTAINER | 88 | 23 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -72,7 +72,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ExpectPropertyStatement` | ⬜ | ✅ | S16 |
 | `ExplicitAnsiPort` | ⬜ | ⬜ | future |
 | `ExplicitNonAnsiPort` | ⬜ | ⬜ | future |
-| `ExtendsClause` | ✅ | ⬜ | future |
+| `ExtendsClause` | ✅ | ✅ | S25 |
 | `ExternInterfaceMethod` | ⬜ | ⬜ | future |
 | `ExternModuleDecl` | ⬜ | ⬜ | future |
 | `ExternUdpDecl` | ⬜ | ⬜ | future |
@@ -95,7 +95,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ImmediateAssertionMember` | ⬜ | ⬜ | future |
 | `ImmediateAssumeStatement` | ⬜ | ✅ | S17 |
 | `ImmediateCoverStatement` | ⬜ | ✅ | S17 |
-| `ImplementsClause` | ⬜ | ⬜ | future |
+| `ImplementsClause` | ⬜ | ✅ | S25 |
 | `ImplicitAnsiPort` | ✅ | ✅ | S1 |
 | `ImplicitNonAnsiPort` | ⬜ | ⬜ | future |
 | `InitialBlock` | ⬜ | ⬜ | future |

@@ -454,6 +454,104 @@ def _class_modifiers_of(cls_syn: Any) -> dict[str, bool]:
     return out
 
 
+def _class_ref_name_of(name_syn: Any) -> str:
+    """Return the bare class/interface name from an extends/implements
+    reference. The reference is either an ``IdentifierNameSyntax`` (simple
+    ``base``), a ``ClassNameSyntax`` (``base #(.T(...))``), or a
+    ``ScopedNameSyntax`` (``pkg::base``). In every case the meaningful
+    name is the LAST direct ``Identifier`` token discovered in a
+    depth-first walk that descends into nested ScopedName / ClassName
+    nodes but not into ParameterValueAssignment payloads.
+
+    Returns the empty string if no identifier is found.
+    """
+    if name_syn is None:
+        return ""
+    if _is_token(name_syn):
+        return name_syn.valueText if _token_kind_name(name_syn) == "Identifier" else ""
+    cls_name = _cls(name_syn)
+    # For ClassNameSyntax: first direct Identifier token IS the class name;
+    # any later identifiers belong to the parameter-value-assignment payload.
+    if cls_name == "ClassNameSyntax":
+        for ch in name_syn:
+            if _is_token(ch) and _token_kind_name(ch) == "Identifier":
+                return ch.valueText
+        return ""
+    # For ScopedNameSyntax: take the right-most identifier (terminal segment).
+    if cls_name == "ScopedNameSyntax":
+        last = ""
+        for ch in name_syn:
+            sub = _class_ref_name_of(ch)
+            if sub:
+                last = sub
+        return last
+    # IdentifierNameSyntax or generic wrapper — first identifier wins.
+    for ch in name_syn:
+        if _is_token(ch) and _token_kind_name(ch) == "Identifier":
+            return ch.valueText
+    # Fallback: descend.
+    for ch in name_syn:
+        if _is_token(ch):
+            continue
+        sub = _class_ref_name_of(ch)
+        if sub:
+            return sub
+    return ""
+
+
+def _extends_clause_target(ec_syn: Any) -> tuple[str, bool]:
+    """Return ``(parent_class_name, has_param_overrides)`` for an
+    ExtendsClauseSyntax. The clause grammar is
+    ``extends <Name> [#(...)]`` where ``<Name>`` is the first non-token
+    direct child of the clause. ``has_param_overrides`` is True iff the
+    inner Name is a ``ClassNameSyntax`` whose direct children contain a
+    ``ParameterValueAssignmentSyntax``.
+    """
+    for ch in ec_syn:
+        if _is_token(ch):
+            continue
+        nm = _class_ref_name_of(ch)
+        params = False
+        if _cls(ch) == "ClassNameSyntax":
+            for sub in ch:
+                if not _is_token(sub) and _cls(sub) == "ParameterValueAssignmentSyntax":
+                    params = True
+                    break
+        return nm, params
+    return "", False
+
+
+def _implements_clause_targets(ic_syn: Any) -> list[str]:
+    """Return the ordered list of implemented interface-class names from an
+    ImplementsClauseSyntax. The clause grammar is
+    ``implements <Name>[, <Name>]*``; pyslang wraps the comma-separated
+    name list inside a ``SeparatedSyntaxList`` (surfaced as a generic
+    SyntaxNode) under the clause. Walks one level into that wrapper and
+    collects each direct IdentifierName / ClassName / ScopedName child.
+    """
+    out: list[str] = []
+    name_node_classes = {"IdentifierNameSyntax", "ClassNameSyntax", "ScopedNameSyntax"}
+    for ch in ic_syn:
+        if _is_token(ch):
+            continue
+        # Direct name child (no separated-list wrapper interposed).
+        if _cls(ch) in name_node_classes:
+            nm = _class_ref_name_of(ch)
+            if nm:
+                out.append(nm)
+            continue
+        # Wrapper (SeparatedSyntaxList surfaced as a generic SyntaxNode) —
+        # descend one level, skip comma tokens, collect each name ref.
+        for sub in ch:
+            if _is_token(sub):
+                continue
+            if _cls(sub) in name_node_classes:
+                sub_nm = _class_ref_name_of(sub)
+                if sub_nm:
+                    out.append(sub_nm)
+    return out
+
+
 def _typedef_name_of(td_syn: Any) -> str:
     """The user-given name token of a TypedefDeclarationSyntax — the LAST
     direct Identifier Token child."""

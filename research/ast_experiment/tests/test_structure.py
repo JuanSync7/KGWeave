@@ -66,6 +66,7 @@ _ACTIVE_RULE_KINDS = {
     "CovergroupDeclaration",
     "Coverpoint", "CoverCross",
     "ClassDeclaration",
+    "ExtendsClause", "ImplementsClause",
 }
 
 

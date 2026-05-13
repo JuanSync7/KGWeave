@@ -25,6 +25,9 @@ from .common.tokens import (
     _assertion_label_of,
     _class_modifiers_of,
     _class_name_of,
+    _class_ref_name_of,  # noqa: F401  (re-export-friendly; used by classes.py)
+    _extends_clause_target,
+    _implements_clause_targets,
     _clocking_modifier_of,
     _clocking_name_of,
     _cls,
@@ -594,11 +597,72 @@ def promote(
                 else:
                     cpath = cname
                 attrs = _class_modifiers_of(node)
+                # S25 — scan the ClassDeclarationSyntax's direct children for
+                # ExtendsClauseSyntax (at most one, per LRM) and
+                # ImplementsClauseSyntax (at most one, holding a
+                # comma-separated list of interface-class refs). Capture the
+                # parent / interface names structurally so we can both stamp
+                # them as attributes here and emit the cross-cut
+                # ``extends`` / ``implements`` edges below. Edge target
+                # resolution uses the shared semantic_name_index: try the
+                # qualified ``<owner>.<ref>`` path first, then the bare ref
+                # for cross-scope visibility, then fall back to a synthetic
+                # placeholder ``_unresolved.<ref>`` with payload
+                # ``unresolved=True`` so downstream queries can still see the
+                # edge even when the target is a forward / external ref.
+                extends_name = ""
+                extends_params = False
+                implements_names: list[str] = []
+                for cch in node:
+                    if _is_token(cch):
+                        continue
+                    cch_cls = _cls(cch)
+                    if cch_cls == "ExtendsClauseSyntax":
+                        en, ep = _extends_clause_target(cch)
+                        if en:
+                            extends_name = en
+                            extends_params = ep
+                    elif cch_cls == "ImplementsClauseSyntax":
+                        implements_names = _implements_clause_targets(cch)
+                if extends_name:
+                    attrs["extends_name"] = extends_name
+                if implements_names:
+                    attrs["implements_names"] = list(implements_names)
                 _mark(nodes_list[node_offset + idx], role="class",
                       name=cname, path=cpath, attributes=attrs)
                 if mod_gid is not None:
                     _add_edge(graph, mod_gid, gid, "has_class")
                 name_index[cpath] = gid
+
+                def _resolve_class_ref(ref: str) -> tuple[str, bool]:
+                    """Return (target_gid, unresolved) for a class/interface
+                    name reference. Qualified path first, bare name fallback,
+                    then synthesize ``_unresolved.<ref>``."""
+                    tid = None
+                    if mod_gid is not None:
+                        tid = name_index.get(f"{mname}.{ref}")
+                    if tid is None:
+                        tid = name_index.get(ref)
+                    if tid is not None and tid != gid:
+                        return tid, False
+                    return f"_unresolved.{ref}", True
+
+                if extends_name:
+                    tgt, unresolved = _resolve_class_ref(extends_name)
+                    payload: dict[str, Any] = {
+                        "params": "overrides" if extends_params else None,
+                        "name": extends_name,
+                    }
+                    if unresolved:
+                        payload["unresolved"] = True
+                    _add_edge(graph, gid, tgt, "extends", **payload)
+                for iref in implements_names:
+                    tgt, unresolved = _resolve_class_ref(iref)
+                    payload = {"name": iref}
+                    if unresolved:
+                        payload["unresolved"] = True
+                    _add_edge(graph, gid, tgt, "implements", **payload)
+
                 state["class_stack"].append((gid, cpath))
                 pushed_class = True
         elif c == "TypedefDeclarationSyntax":
