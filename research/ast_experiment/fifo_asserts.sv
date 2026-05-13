@@ -20,6 +20,18 @@ module fifo_asserts(
         @(posedge clk) push ##[1:2] full;
     endsequence
 
+    // S18 — clocking blocks. ``cb_fifo`` is an ordinary clocking block;
+    // ``cb_default`` exercises the ``default clocking`` form. Clocking items
+    // (input/output direction declarations) stay BLOB — only the
+    // ClockingDeclaration itself is promoted.
+    clocking cb_fifo @(posedge clk);
+        input  full, push;
+    endclocking
+
+    default clocking cb_default @(posedge clk);
+        default input #1step output #2;
+    endclocking
+
     // S16 — concurrent assertion use sites. Labeled top-level forms exercise
     // the ConcurrentAssertionMember wrapper path; the unlabeled cover sits
     // alongside to confirm synthetic-label fallback.

@@ -23,6 +23,8 @@ from .common.graph import _add_edge, _has_edge, _mark
 from .common.resolve import _all_module_scopes
 from .common.tokens import (
     _assertion_label_of,
+    _clocking_modifier_of,
+    _clocking_name_of,
     _cls,
     _function_name_of,
     _identifier_tokens,
@@ -126,6 +128,9 @@ def promote(
     # S16: per-module monotonically-increasing counter for synthetic assertion
     # labels when the source omits ``label:``.
     assertion_counters: dict[str, int] = {}
+    # S18: per-module counter for anonymous clocking blocks (rare; the LRM
+    # requires an identifier, but synthesize a fallback for robustness).
+    clocking_counters: dict[str, int] = {}
     state = {
         "idx": 0,
         "module_stack": [],
@@ -287,6 +292,30 @@ def promote(
                       attributes={"kind": kind_label, "deferred": deferred})
                 _add_edge(graph, mod_gid, gid, "has_assertion")
                 name_index[apath] = gid
+        elif c == "ClockingDeclarationSyntax":
+            # S18 — promote ``clocking ... endclocking`` blocks (including
+            # ``default clocking`` and ``global clocking`` forms) as queryable
+            # nodes under the enclosing module/interface. Clocking items
+            # (input/output direction declarations for signals) stay BLOB.
+            # Detect ``default``/``global`` modifiers structurally via the
+            # leading keyword token — no regex.
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                cname = _clocking_name_of(node)
+                if not cname:
+                    n_seen = clocking_counters.get(mname, 0)
+                    cname = f"clocking_{n_seen}"
+                    clocking_counters[mname] = n_seen + 1
+                cpath = f"{mname}.{cname}"
+                modifier = _clocking_modifier_of(node)
+                attrs = {
+                    "default": modifier == "default",
+                    "global": modifier == "global",
+                }
+                _mark(nodes_list[node_offset + idx], role="clocking",
+                      name=cname, path=cpath, attributes=attrs)
+                _add_edge(graph, mod_gid, gid, "has_clocking")
+                name_index[cpath] = gid
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:

@@ -219,6 +219,47 @@ def _assertion_label_of(assertion_syn: Any) -> str:
     return ""
 
 
+def _clocking_name_of(clk_syn: Any) -> str:
+    """Return the clocking-block name from a ClockingDeclarationSyntax.
+
+    Grammar: ``[default|global] clocking <Identifier> @(event); ... endclocking``.
+    The name is the first direct Identifier Token child following the
+    ``clocking`` keyword. Walking direct children only avoids descending into
+    the clocking-item subtree (where Identifier tokens belong to signal
+    references, not the declaration).
+    """
+    saw_clocking_kw = False
+    for ch in clk_syn:
+        if _is_token(ch):
+            kind = _token_kind_name(ch)
+            if kind == "ClockingKeyword":
+                saw_clocking_kw = True
+                continue
+            if saw_clocking_kw and kind == "Identifier":
+                return ch.valueText
+    return ""
+
+
+def _clocking_modifier_of(clk_syn: Any) -> str:
+    """Return ``"default"``, ``"global"``, or ``""`` based on the leading
+    keyword token of a ClockingDeclarationSyntax.
+
+    The ``default``/``global`` modifier (if present) appears as a direct
+    Token child before the ``ClockingKeyword``. Detect structurally — no
+    regex on source text.
+    """
+    for ch in clk_syn:
+        if _is_token(ch):
+            kind = _token_kind_name(ch)
+            if kind == "DefaultKeyword":
+                return "default"
+            if kind == "GlobalKeyword":
+                return "global"
+            if kind == "ClockingKeyword":
+                return ""
+    return ""
+
+
 def _typedef_name_of(td_syn: Any) -> str:
     """The user-given name token of a TypedefDeclarationSyntax — the LAST
     direct Identifier Token child."""
