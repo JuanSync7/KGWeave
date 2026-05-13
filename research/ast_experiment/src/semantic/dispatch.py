@@ -45,6 +45,9 @@ from .common.tokens import (
     _covergroup_has_clocking_event,
     _covergroup_name_of,
     _coverpoint_expression,
+    _extern_decl_kind_of,
+    _extern_decl_name_of,
+    _extern_decl_ports,
     _function_name_of,
     _identifier_tokens,
     _is_token,
@@ -169,6 +172,13 @@ def promote(
     # different covergroups don't collide on ``coverpoint_0``.
     coverpoint_counters: dict[str, int] = {}
     cross_counters: dict[str, int] = {}
+    # S29: deferred resolution of ``declares`` edges from extern decls to
+    # the full module / interface / program declaration. Pass 1 visits in
+    # source order; when the extern header precedes the body in the same
+    # compilation we can't resolve at the extern's branch (the name index
+    # doesn't yet contain the body). Collect (extern_gid, name, kind) and
+    # resolve in a post-pass after pass 1 has populated the full index.
+    extern_pending: list[tuple[str, str, str]] = []
     state = {
         "idx": 0,
         "module_stack": [],
@@ -876,6 +886,52 @@ def promote(
                     if tgt is not None and tgt != gid:
                         _add_edge(graph, gid, tgt, "of_checker",
                                   name=ctype)
+        elif c == "ExternModuleDeclSyntax":
+            # S29 — promote ``extern module|interface|program <name> [#(...)]
+            # [(ports)] ;`` headers. pyslang reuses the single SyntaxKind
+            # ``ExternModuleDecl`` and the single class ``ExternModuleDeclSyntax``
+            # for all three forms; the discriminator is ``header.kind``
+            # (ModuleHeader / InterfaceHeader / ProgramHeader). Read it via
+            # ``_extern_decl_kind_of`` and stamp it as the ``kind`` attribute.
+            #
+            # Parent resolution mirrors S24 (ClassDeclaration) and S28
+            # (CheckerDeclaration): if there is an enclosing module-stack
+            # entry, attach via ``has_extern_decl``; otherwise the decl is
+            # compilation-unit-scoped and we root-anchor it with the bare
+            # name as the path and no containment edge.
+            #
+            # We do NOT push the extern decl onto module_stack — its body is
+            # only a header (no nested items), so there's nothing to attach
+            # to it. Port declarators under the header land in the existing
+            # DeclaratorSyntax / ImplicitAnsiPortSyntax branches; at cu-scope
+            # those branches no-op (no module_gid), and at nested scope they
+            # would attach to the enclosing module which is the wrong
+            # semantics — but extern decls inside another module are
+            # vanishingly rare and LRM-non-conformant in most cases. The
+            # ``ports`` attribute carries the port-name list extracted
+            # structurally via ``_extern_decl_ports`` so consumers don't need
+            # to descend into the header subtree.
+            ext_name = _extern_decl_name_of(node)
+            if ext_name:
+                ext_kind = _extern_decl_kind_of(node)
+                ports = _extern_decl_ports(node)
+                mod_gid, mname = _cur_module()
+                if mod_gid is not None:
+                    epath = f"{mname}.{ext_name}"
+                else:
+                    epath = ext_name
+                _mark(nodes_list[node_offset + idx], role="extern_decl",
+                      name=ext_name, path=epath,
+                      attributes={"kind": ext_kind, "ports": list(ports)})
+                if mod_gid is not None:
+                    _add_edge(graph, mod_gid, gid, "has_extern_decl")
+                name_index[epath] = gid
+                # Optional ``declares`` edge: defer to a post-pass — the
+                # extern header typically precedes the full body in source
+                # order, so the name index does not yet contain the body
+                # gid at this point. ``extern_pending`` is drained after
+                # visit_pass1 completes (see below).
+                extern_pending.append((gid, ext_name, ext_kind))
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:
@@ -1011,6 +1067,15 @@ def promote(
 
     if phase in (None, "pass1"):
         visit_pass1(syntax_tree.root)
+        # S29 post-pass: resolve deferred ``declares`` edges from extern
+        # decls to the full module / interface / program body using the
+        # now-complete name_index. Skip entries whose target doesn't exist
+        # (the body is in a different compilation, or simply absent).
+        for ext_gid, ext_name, ext_kind in extern_pending:
+            tgt = name_index.get(ext_name)
+            if tgt is not None and tgt != ext_gid:
+                _add_edge(graph, ext_gid, tgt, "declares", name=ext_name,
+                          kind=ext_kind)
     if phase == "pass1":
         return
 

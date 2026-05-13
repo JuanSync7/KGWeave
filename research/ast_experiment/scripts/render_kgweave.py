@@ -76,6 +76,7 @@ def _build_semantic_graph():
         HERE / "fifo.sv", HERE / "fifo_asserts.sv", HERE / "top.sv",
         HERE / "cls_corpus.sv",
         HERE / "checker_corpus.sv",
+        HERE / "extern_corpus.sv",
     ])
     return graph
 

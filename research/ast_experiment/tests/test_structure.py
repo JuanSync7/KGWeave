@@ -70,6 +70,7 @@ _ACTIVE_RULE_KINDS = {
     "ClassMethodDeclaration", "ClassMethodPrototype", "ClassPropertyDeclaration",
     "ConstraintDeclaration", "ConstraintPrototype",
     "CheckerDeclaration", "CheckerInstantiation",
+    "ExternModuleDecl",
 }
 
 
@@ -160,15 +161,12 @@ _TARGET_ACTIVE_MODULES = [
     "dataflow", "types", "behavior", "properties", "assertions",
     "clocking", "procedural", "coverage", "classes", "constraints",
     "checkers",
-]
-
-_TARGET_STUB_MODULES = [
     "extern",
 ]
 
-_STUB_PLANNED_KIND_HINTS = {
-    "extern": ["ExternModuleDecl", "ProgramDeclaration"],
-}
+_TARGET_STUB_MODULES: list[str] = []
+
+_STUB_PLANNED_KIND_HINTS: dict[str, list[str]] = {}
 
 
 def test_rules_target_layout_files_exist():

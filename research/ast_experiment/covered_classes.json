@@ -28,6 +28,7 @@
   "EqualsValueClauseSyntax",
   "EventControlWithExpressionSyntax",
   "ExpressionStatementSyntax",
+  "ExternModuleDeclSyntax",
   "ForeverStatementSyntax",
   "FunctionDeclarationSyntax",
   "FunctionPortListSyntax",

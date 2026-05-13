@@ -853,6 +853,108 @@ def _checker_instance_name(ci_syn: Any) -> str:
     return ""
 
 
+def _extern_decl_kind_of(ext_syn: Any) -> str:
+    """Return ``"module" | "interface" | "program"`` for an
+    ExternModuleDeclSyntax based on its ``header.kind``.
+
+    pyslang reuses ``SyntaxKind.ExternModuleDecl`` for all three forms; the
+    discriminator is the header child whose kind is one of ``ModuleHeader``,
+    ``InterfaceHeader``, ``ProgramHeader``. If the header is somehow absent
+    or unrecognised we return ``"module"`` as the safest default — the LRM
+    grammar guarantees one of the three is present in any parseable extern
+    declaration.
+    """
+    hdr = getattr(ext_syn, "header", None)
+    if hdr is None:
+        return "module"
+    kname = str(getattr(hdr, "kind", "")).rsplit(".", 1)[-1]
+    if kname == "InterfaceHeader":
+        return "interface"
+    if kname == "ProgramHeader":
+        return "program"
+    return "module"
+
+
+def _extern_decl_name_of(ext_syn: Any) -> str:
+    """Return the declared name from an ExternModuleDeclSyntax.
+
+    Grammar: ``extern (module|interface|program) <Identifier> [#(params)]
+    [(ports)] ;``. The name is the first Identifier Token under the header
+    (the header keyword precedes it). We walk only the header's direct
+    children to avoid descending into the parameter / port lists where
+    Identifier tokens refer to parameter / port names.
+    """
+    hdr = getattr(ext_syn, "header", None)
+    if hdr is None:
+        return ""
+    saw_kw = False
+    for ch in hdr:
+        if _is_token(ch):
+            kn = _token_kind_name(ch)
+            if kn in {"ModuleKeyword", "InterfaceKeyword", "ProgramKeyword"}:
+                saw_kw = True
+                continue
+            if saw_kw and kn == "Identifier":
+                return ch.valueText
+    # Fallback: first identifier anywhere under the header.
+    toks = _identifier_tokens(hdr)
+    return toks[0].valueText if toks else ""
+
+
+def _extern_decl_ports(ext_syn: Any) -> list[str]:
+    """Return the ordered list of port names from an ExternModuleDeclSyntax.
+
+    Walks the header's AnsiPortList (or NonAnsiPortList) direct child and
+    extracts the first Identifier token under each ImplicitAnsiPort /
+    ExplicitAnsiPort / port-decl entry. Returns an empty list when the
+    header has no port list (zero-arg form ``extern program ext_prog ();``
+    actually has an empty AnsiPortList — we return ``[]`` for that case).
+    """
+    hdr = getattr(ext_syn, "header", None)
+    if hdr is None:
+        return []
+    out: list[str] = []
+    for ch in hdr:
+        if _is_token(ch):
+            continue
+        cn = _cls(ch)
+        if cn not in {"AnsiPortListSyntax", "NonAnsiPortListSyntax"}:
+            continue
+        # The port-list wraps a SeparatedList of port-syntax entries; we
+        # walk two levels to reach each port (level 1 = SeparatedList /
+        # token, level 2 = the *PortSyntax entries themselves).
+        port_entries: list[Any] = []
+        for sub in ch:
+            if _is_token(sub):
+                continue
+            sub_cls = _cls(sub)
+            if "Port" in sub_cls:
+                port_entries.append(sub)
+                continue
+            # SeparatedList wrapper — descend one more level.
+            for g in sub:
+                if _is_token(g):
+                    continue
+                if "Port" in _cls(g):
+                    port_entries.append(g)
+        for sub in port_entries:
+            # Prefer the DeclaratorSyntax's identifier (skips type idents).
+            decl = next(
+                (g for g in sub if not _is_token(g)
+                 and _cls(g) == "DeclaratorSyntax"),
+                None,
+            )
+            if decl is not None:
+                ids = _identifier_tokens(decl)
+                if ids:
+                    out.append(ids[0].valueText)
+                    continue
+            ids = _identifier_tokens(sub)
+            if ids:
+                out.append(ids[0].valueText)
+    return out
+
+
 def _typedef_name_of(td_syn: Any) -> str:
     """The user-given name token of a TypedefDeclarationSyntax — the LAST
     direct Identifier Token child."""
