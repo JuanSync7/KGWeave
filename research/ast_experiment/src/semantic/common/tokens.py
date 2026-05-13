@@ -562,6 +562,39 @@ _CLASS_PROPERTY_QUALIFIER_KEYWORDS: dict[str, str] = {
 }
 
 
+_CONSTRAINT_QUALIFIER_KEYWORDS: dict[str, str] = {
+    "StaticKeyword": "static",
+    "PureKeyword": "pure",
+    "ExternKeyword": "extern",
+}
+
+
+def _constraint_name_of(c_syn: Any) -> str:
+    """Return the constraint name from a ConstraintDeclarationSyntax or
+    ConstraintPrototypeSyntax.
+
+    Grammar: ``[static|pure|extern] constraint <Identifier> ( { body } | ; )``.
+    The constraint name is the first Identifier token in the first
+    ``IdentifierNameSyntax`` direct child after the ``ConstraintKeyword``
+    token. Walking direct children avoids descending into the constraint
+    body where identifiers refer to property references, not the
+    declaration itself.
+    """
+    saw_constraint_kw = False
+    for ch in c_syn:
+        if _is_token(ch):
+            if _token_kind_name(ch) == "ConstraintKeyword":
+                saw_constraint_kw = True
+            continue
+        if not saw_constraint_kw:
+            continue
+        if _cls(ch) == "IdentifierNameSyntax":
+            toks = _identifier_tokens(ch)
+            if toks:
+                return toks[0].valueText
+    return ""
+
+
 _CLASS_METHOD_QUALIFIER_KEYWORDS: dict[str, str] = {
     "VirtualKeyword": "virtual",
     "PureKeyword": "pure",

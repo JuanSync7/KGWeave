@@ -68,6 +68,7 @@ _ACTIVE_RULE_KINDS = {
     "ClassDeclaration",
     "ExtendsClause", "ImplementsClause",
     "ClassMethodDeclaration", "ClassMethodPrototype", "ClassPropertyDeclaration",
+    "ConstraintDeclaration", "ConstraintPrototype",
 }
 
 
@@ -116,10 +117,12 @@ def test_active_rule_kinds_present():
     assert not missing, f"RULE_TABLE missing kinds: {sorted(missing)}"
 
 
-@pytest.mark.parametrize("name", ["constraints"])
+@pytest.mark.parametrize("name", [])
 def test_stub_modules_export_empty_rules(name):
     """The four planned-but-not-yet-implemented rule modules each export
-    RULES = [] and document their planned kinds in a header comment."""
+    RULES = [] and document their planned kinds in a header comment.
+
+    (Parametrize list now empty: constraints became active in S27.)"""
     mod = importlib.import_module(
         f"research.ast_experiment.src.semantic.rules.{name}"
     )
@@ -154,15 +157,14 @@ _TARGET_RULES_FILES = [
 _TARGET_ACTIVE_MODULES = [
     "structure", "instantiation", "interfaces", "generate",
     "dataflow", "types", "behavior", "properties", "assertions",
-    "clocking", "procedural", "coverage", "classes",
+    "clocking", "procedural", "coverage", "classes", "constraints",
 ]
 
 _TARGET_STUB_MODULES = [
-    "constraints", "checkers", "extern",
+    "checkers", "extern",
 ]
 
 _STUB_PLANNED_KIND_HINTS = {
-    "constraints": ["ConstraintDeclaration", "ConstraintBlock"],
     "checkers": ["CheckerDeclaration", "CheckerInstantiation"],
     "extern": ["ExternModuleDecl", "ProgramDeclaration"],
 }

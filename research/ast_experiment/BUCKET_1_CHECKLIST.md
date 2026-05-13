@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 49 | 63 | 0 | 72 |
+| PROMOTE | 135 | 49 | 68 | 0 | 67 |
 | CONTAINER | 88 | 23 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -41,16 +41,16 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `CheckerInstanceStatement` | ⬜ | ⬜ | future |
 | `CheckerInstantiation` | ⬜ | ⬜ | future |
 | `ClassDeclaration` | ✅ | ✅ | S24 |
-| `ClassMethodDeclaration` | ⬜ | ⬜ | future |
-| `ClassMethodPrototype` | ✅ | ⬜ | future |
-| `ClassPropertyDeclaration` | ✅ | ⬜ | future |
+| `ClassMethodDeclaration` | ⬜ | ✅ | S26 |
+| `ClassMethodPrototype` | ✅ | ✅ | S26 |
+| `ClassPropertyDeclaration` | ✅ | ✅ | S26 |
 | `ClassSpecifier` | ⬜ | ⬜ | future |
 | `ClockingDeclaration` | ✅ | ✅ | S18 |
 | `ClockingItem` | ✅ | ⬜ | future |
 | `ConcurrentAssertionMember` | ✅ | ⬜ | future |
 | `ConstraintBlock` | ⬜ | ⬜ | future |
-| `ConstraintDeclaration` | ⬜ | ⬜ | future |
-| `ConstraintPrototype` | ⬜ | ⬜ | future |
+| `ConstraintDeclaration` | ⬜ | ✅ | S27 |
+| `ConstraintPrototype` | ⬜ | ✅ | S27 |
 | `ConstructorName` | ⬜ | ⬜ | future |
 | `ContinuousAssign` | ✅ | ✅ | S2 |
 | `CoverCross` | ✅ | ✅ | S23 |

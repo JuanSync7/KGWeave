@@ -9,6 +9,10 @@ package cls_pkg;
     static int instance_count = 0;
     rand int rnd_field;
     int a, b, c;
+    constraint c_payload_nonzero { payload != 0; }
+    constraint c_payload_range { payload inside {[1:200]}; }
+    static constraint c_static_demo { 1 == 1; }
+    extern constraint c_external;
     function new();
       instance_count++;
     endfunction

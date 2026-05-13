@@ -24,6 +24,8 @@ from .common.resolve import _all_module_scopes
 from .common.tokens import (
     _CLASS_METHOD_QUALIFIER_KEYWORDS,
     _CLASS_PROPERTY_QUALIFIER_KEYWORDS,
+    _CONSTRAINT_QUALIFIER_KEYWORDS,
+    _constraint_name_of,
     _assertion_label_of,
     _class_method_name_and_kind,
     _class_modifiers_of,
@@ -769,6 +771,39 @@ def promote(
                           name=first, path=ppath, attributes=attrs)
                     _add_edge(graph, cls_gid, gid, "has_class_property")
                     name_index[ppath] = gid
+        elif c in ("ConstraintDeclarationSyntax",
+                   "ConstraintPrototypeSyntax"):
+            # S27 — promote class constraint blocks (with body) and constraint
+            # prototypes (``extern constraint c_name;`` / ``pure constraint
+            # c_name;``). Parent is the enclosing class (``class_stack``
+            # top); fall back to a silent skip if reached outside any class.
+            #
+            # Qualifier keywords (``static`` / ``pure`` / ``extern``) live in
+            # a TokenList direct child before the ``ConstraintKeyword`` —
+            # ``_qualifier_tokens_of`` walks both loose tokens and one level
+            # into the TokenList wrapper to detect them structurally. No
+            # regex on source text. The constraint body (ConstraintBlock and
+            # its ExpressionConstraint / ImplicationConstraint /
+            # SolveBeforeConstraint / DistConstraintList / etc. children)
+            # stays BLOB — only the declaration-level node is promoted.
+            if state["class_stack"]:
+                cls_gid, cls_path = state["class_stack"][-1]
+                cname = _constraint_name_of(node)
+                if cname:
+                    is_prototype = (c == "ConstraintPrototypeSyntax")
+                    quals = _qualifier_tokens_of(
+                        node, _CONSTRAINT_QUALIFIER_KEYWORDS)
+                    cpath = f"{cls_path}.{cname}"
+                    attrs = {
+                        "static": quals["static"],
+                        "pure": quals["pure"],
+                        "extern": quals["extern"],
+                        "prototype": is_prototype,
+                    }
+                    _mark(nodes_list[node_offset + idx], role="constraint",
+                          name=cname, path=cpath, attributes=attrs)
+                    _add_edge(graph, cls_gid, gid, "has_constraint")
+                    name_index[cpath] = gid
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:
