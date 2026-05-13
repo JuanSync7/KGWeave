@@ -69,3 +69,41 @@ def test_s14_name_index_registers_path(bind_graph):
     rules can resolve the property by qualified name."""
     idx = bind_graph.get("semantic_name_index", {})
     assert "fifo_asserts.p_push_implies_not_full" in idx
+
+
+# ---------------------------------------------------------------------------
+# S15 — SequenceDeclaration
+# ---------------------------------------------------------------------------
+
+
+def test_s15_sequence_node_promoted(bind_graph):
+    """The sequence declaration is promoted with role=sequence, correct name,
+    and hierarchical path ``<module>.<sequence_name>``."""
+    seqs = _by_role(bind_graph, "sequence")
+    assert len(seqs) == 1, f"expected exactly one promoted sequence, got {len(seqs)}"
+    s = seqs[0]
+    assert s["semantic"]["name"] == "s_push_then_full"
+    assert s["semantic"]["path"] == "fifo_asserts.s_push_then_full"
+
+
+def test_s15_has_sequence_edge(bind_graph):
+    """The parent module emits exactly one has_sequence edge to the promoted
+    sequence node."""
+    seqs = _by_role(bind_graph, "sequence")
+    assert seqs
+    seq_id = seqs[0]["id"]
+    modules = _by_role(bind_graph, "module")
+    parent = next((m for m in modules if m["semantic"]["name"] == "fifo_asserts"), None)
+    assert parent is not None, "fifo_asserts module not promoted"
+    edges = [e for e in bind_graph["edges"]
+             if e["type"] == "has_sequence"
+             and e["src"] == parent["id"]
+             and e["dst"] == seq_id]
+    assert len(edges) == 1, f"expected exactly one has_sequence edge, got {len(edges)}"
+
+
+def test_s15_name_index_registers_path(bind_graph):
+    """The hierarchical path is registered in semantic_name_index so downstream
+    rules can resolve the sequence by qualified name."""
+    idx = bind_graph.get("semantic_name_index", {})
+    assert "fifo_asserts.s_push_then_full" in idx

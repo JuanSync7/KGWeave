@@ -15,6 +15,10 @@ module fifo_asserts(
     property p_push_implies_not_full;
         @(posedge clk) push |-> !full;
     endproperty
+
+    sequence s_push_then_full;
+        @(posedge clk) push ##[1:2] full;
+    endsequence
 endmodule
 
 bind fifo fifo_asserts u_asserts(.clk(clk), .full(full), .push(push));

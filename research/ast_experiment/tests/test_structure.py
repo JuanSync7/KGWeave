@@ -55,7 +55,7 @@ _ACTIVE_RULE_KINDS = {
     "EnumType", "FunctionDeclaration", "TaskDeclaration", "InterfaceDeclaration",
     "ModportDeclaration", "ModportItem", "ModportNamedPort", "LoopGenerate",
     "GenerateBlock", "IfGenerate", "CaseGenerate", "GenerateRegion",
-    "BindDirective", "PropertyDeclaration",
+    "BindDirective", "PropertyDeclaration", "SequenceDeclaration",
 }
 
 
@@ -152,7 +152,6 @@ _TARGET_STUB_MODULES = [
 _STUB_PLANNED_KIND_HINTS = {
     "procedural": ["AlwaysBlock", "InitialBlock", "FinalBlock"],
     "clocking": ["ClockingDeclaration"],
-    "properties": ["SequenceDeclaration"],
     "assertions": ["AssertProperty", "AssumeProperty", "CoverProperty"],
     "coverage": ["CovergroupDeclaration", "Coverpoint", "CoverCross"],
     "classes": ["ClassDeclaration"],

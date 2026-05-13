@@ -178,6 +178,27 @@ def _property_name_of(prop_syn: Any) -> str:
     return ""
 
 
+def _sequence_name_of(seq_syn: Any) -> str:
+    """Return the sequence name from a SequenceDeclarationSyntax.
+
+    Grammar: ``[attrs] sequence <Identifier> [ports] ; <expr> endsequence``.
+    The sequence name is the first direct Identifier Token child following
+    the ``sequence`` keyword. Walking direct children only avoids descending
+    into the sequence body (where IdentifierName tokens belong to the
+    expression, not the declaration).
+    """
+    saw_sequence_kw = False
+    for ch in seq_syn:
+        if _is_token(ch):
+            kind = _token_kind_name(ch)
+            if kind == "SequenceKeyword":
+                saw_sequence_kw = True
+                continue
+            if saw_sequence_kw and kind == "Identifier":
+                return ch.valueText
+    return ""
+
+
 def _typedef_name_of(td_syn: Any) -> str:
     """The user-given name token of a TypedefDeclarationSyntax — the LAST
     direct Identifier Token child."""

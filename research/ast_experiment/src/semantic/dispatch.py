@@ -28,6 +28,7 @@ from .common.tokens import (
     _is_token,
     _module_name_of,
     _property_name_of,
+    _sequence_name_of,
     _token_kind_name,
     _typedef_name_of,
 )
@@ -181,6 +182,16 @@ def promote(
                           name=pname, path=ppath)
                     _add_edge(graph, mod_gid, gid, "has_property")
                     name_index[ppath] = gid
+        elif c == "SequenceDeclarationSyntax":
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                sname = _sequence_name_of(node)
+                if sname:
+                    spath = f"{mname}.{sname}"
+                    _mark(nodes_list[node_offset + idx], role="sequence",
+                          name=sname, path=spath)
+                    _add_edge(graph, mod_gid, gid, "has_sequence")
+                    name_index[spath] = gid
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:
