@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 33 | 55 | 0 | 80 |
+| PROMOTE | 135 | 33 | 57 | 0 | 78 |
 | CONTAINER | 88 | 17 | 0 | 0 | 0 |
 | BLOB | 213 | 17 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -34,7 +34,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `AssumePropertyStatement` | ⬜ | ✅ | S16 |
 | `BindDirective` | ✅ | ✅ | S13 |
 | `BindTargetList` | ⬜ | ⬜ | future |
-| `BlockingEventTriggerStatement` | ⬜ | ⬜ | future |
+| `BlockingEventTriggerStatement` | ⬜ | ✅ | S21 |
 | `CaseGenerate` | ⬜ | ✅ | S12c |
 | `CheckerDataDeclaration` | ⬜ | ⬜ | future |
 | `CheckerDeclaration` | ⬜ | ⬜ | future |
@@ -123,7 +123,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `NetAlias` | ⬜ | ⬜ | future |
 | `NetDeclaration` | ⬜ | ⬜ | future |
 | `NetTypeDeclaration` | ⬜ | ⬜ | future |
-| `NonblockingEventTriggerStatement` | ⬜ | ⬜ | future |
+| `NonblockingEventTriggerStatement` | ⬜ | ✅ | S21 |
 | `OrderedParamAssignment` | ⬜ | ✅ | S7 |
 | `OrderedPortConnection` | ⬜ | ⬜ | future |
 | `PackageDeclaration` | ⬜ | ✅ | S9a |

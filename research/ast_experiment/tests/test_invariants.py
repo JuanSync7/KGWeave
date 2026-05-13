@@ -29,6 +29,7 @@ _CONTAINMENT_EDGES = {
     "has_typedef", "has_enum_value", "has_modport", "has_function",
     "has_property", "has_sequence", "has_assertion", "has_clocking",
     "has_procedural_assign", "has_procedural_force",
+    "has_event_trigger",
     "has_generate", "contains_block",
 }
 _SEMANTIC_EDGES = {
@@ -40,6 +41,7 @@ _CONTAINED_ROLES = {
     "modport", "function", "property", "sequence", "assertion", "clocking",
     "procedural_assign", "procedural_deassign",
     "procedural_force", "procedural_release",
+    "event_trigger",
     "generate_loop", "generate_block",
 }
 # Roles whose `name` is treated as an owning namespace (top-level container).

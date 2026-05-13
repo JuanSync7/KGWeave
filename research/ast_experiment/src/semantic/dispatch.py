@@ -138,6 +138,9 @@ def promote(
     # S20: per-module counter for procedural-force / procedural-release
     # statements (also nameless; synthesize a path index).
     proc_force_counters: dict[str, int] = {}
+    # S21: per-module counter for named event-trigger statements
+    # (-> ev / ->> ev). Nameless in source; synthesize a path index.
+    event_trigger_counters: dict[str, int] = {}
     state = {
         "idx": 0,
         "module_stack": [],
@@ -386,6 +389,49 @@ def promote(
                         tgt_id = name_index.get(lhs_name)
                     if tgt_id is not None and tgt_id != gid:
                         _add_edge(graph, gid, tgt_id, "drives")
+        elif c == "EventTriggerStatementSyntax":
+            # S21 — promote named event-trigger statements that appear inside
+            # procedural blocks:
+            #
+            #   -> ev;    → BlockingEventTriggerStatement
+            #   ->> ev;   → NonblockingEventTriggerStatement
+            #
+            # pyslang surfaces both variants with a single shared syntax class
+            # ``EventTriggerStatementSyntax`` — only ``.kind`` discriminates.
+            # Parent is the nearest enclosing module/interface/program (NOT the
+            # always block). The event identifier is extracted structurally via
+            # the first Identifier token under the statement (the ``-> ev``
+            # grammar guarantees the only Identifier child is the event name).
+            # If the name resolves via the shared name index we emit an
+            # optional ``triggers`` edge to the corresponding event-typed
+            # declaration; otherwise we skip silently.
+            mod_gid, mname = _cur_module()
+            kind_name = str(getattr(node, "kind", "")).rsplit(".", 1)[-1]
+            _EVENT_TRIGGER_VARIANTS = {
+                "BlockingEventTriggerStatement": True,
+                "NonblockingEventTriggerStatement": False,
+            }
+            blocking = _EVENT_TRIGGER_VARIANTS.get(kind_name)
+            if mod_gid is not None and blocking is not None:
+                n_seen = event_trigger_counters.get(mname, 0)
+                tname = f"trigger_{n_seen}"
+                event_trigger_counters[mname] = n_seen + 1
+                tpath = f"{mname}.{tname}"
+                ev_name = _lhs_target_name(node) or ""
+                _mark(nodes_list[node_offset + idx], role="event_trigger",
+                      name=tname, path=tpath,
+                      attributes={"blocking": blocking,
+                                  "event_name": ev_name})
+                _add_edge(graph, mod_gid, gid, "has_event_trigger")
+                name_index[tpath] = gid
+                # Optional triggers edge — resolve event_name against the
+                # name index. Try qualified path first, then bare name.
+                if ev_name:
+                    tgt_id = name_index.get(f"{mname}.{ev_name}")
+                    if tgt_id is None:
+                        tgt_id = name_index.get(ev_name)
+                    if tgt_id is not None and tgt_id != gid:
+                        _add_edge(graph, gid, tgt_id, "triggers")
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:

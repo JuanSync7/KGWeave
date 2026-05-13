@@ -11,13 +11,20 @@ assigns (distinct from S2's module-level continuous assigns).
 S20 covers ``force lhs = rhs;`` / ``release lhs;`` — stronger variants that
 override even continuous drivers (commonly used in testbenches).
 
-pyslang surfaces both pairs with the same syntax classes, discriminated only
-by ``SyntaxKind``:
+S21 covers ``-> ev;`` (blocking) and ``->> ev;`` (nonblocking) named event
+trigger statements. pyslang surfaces both as ``EventTriggerStatementSyntax``
+— discriminated only by ``SyntaxKind`` (BlockingEventTriggerStatement vs
+NonblockingEventTriggerStatement).
+
+pyslang surfaces these families with shared syntax classes, discriminated
+only by ``SyntaxKind``:
 
   class ProceduralAssignStatementSyntax   → kinds {ProceduralAssignStatement,
                                                    ProceduralForceStatement}
   class ProceduralDeassignStatementSyntax → kinds {ProceduralDeassignStatement,
                                                    ProceduralReleaseStatement}
+  class EventTriggerStatementSyntax       → kinds {BlockingEventTriggerStatement,
+                                                   NonblockingEventTriggerStatement}
 
 The dispatch pass-1 branch keys on ``_cls(node)`` to enter the branch, then
 discriminates by ``node.kind`` to pick the role label, path prefix, edge
@@ -35,9 +42,6 @@ Planned future S-rule owners under this module (still stubs):
 * AlwaysLatchBlock
 * InitialBlock
 * FinalBlock
-* EventTriggerStatement          (S21)
-* BlockingEventTriggerStatement  (S21)
-* NonblockingEventTriggerStatement (S21)
 """
 
 from __future__ import annotations
@@ -65,10 +69,22 @@ def _s20_procedural_release(*args, **kwargs):
     return
 
 
+def _s21_blocking_event_trigger(*args, **kwargs):
+    """BlockingEventTriggerStatement is promoted in pass 1 of dispatch.promote."""
+    return
+
+
+def _s21_nonblocking_event_trigger(*args, **kwargs):
+    """NonblockingEventTriggerStatement is promoted in pass 1 of dispatch.promote."""
+    return
+
+
 _s19_procedural_assign.__rule_id__ = "S19"
 _s19_procedural_deassign.__rule_id__ = "S19"
 _s20_procedural_force.__rule_id__ = "S20"
 _s20_procedural_release.__rule_id__ = "S20"
+_s21_blocking_event_trigger.__rule_id__ = "S21"
+_s21_nonblocking_event_trigger.__rule_id__ = "S21"
 
 
 RULES: list[tuple] = [
@@ -76,4 +92,8 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.ProceduralDeassignStatement, _s19_procedural_deassign),
     (pyslang.SyntaxKind.ProceduralForceStatement, _s20_procedural_force),
     (pyslang.SyntaxKind.ProceduralReleaseStatement, _s20_procedural_release),
+    (pyslang.SyntaxKind.BlockingEventTriggerStatement,
+     _s21_blocking_event_trigger),
+    (pyslang.SyntaxKind.NonblockingEventTriggerStatement,
+     _s21_nonblocking_event_trigger),
 ]

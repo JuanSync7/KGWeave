@@ -197,3 +197,94 @@ def test_s20_assign_and_force_distinct_roles(bind_graph):
     assert len(_by_role(bind_graph, "procedural_force")) == 1
     assert len(_by_role(bind_graph, "procedural_deassign")) == 1
     assert len(_by_role(bind_graph, "procedural_release")) == 1
+
+
+# ---------------------------------------------------------------------------
+# S21 — BlockingEventTriggerStatement / NonblockingEventTriggerStatement
+#
+# ``event_trigger_demo`` in fifo_asserts.sv declares two named events
+# (ev_done, ev_ready) and fires one with ``-> ev_done;`` (blocking) and one
+# with ``->> ev_ready;`` (nonblocking) inside an always block. pyslang
+# surfaces both with the single class ``EventTriggerStatementSyntax`` —
+# only ``.kind`` discriminates the variant. S21 promotes each with role
+# ``event_trigger`` and a dedicated ``has_event_trigger`` containment edge
+# from the parent module; the ``blocking`` attribute carries the variant.
+# ---------------------------------------------------------------------------
+
+
+def test_s21_blocking_event_trigger_promoted(bind_graph):
+    """The ``-> ev_done;`` statement is promoted with role event_trigger,
+    blocking=True, and event_name=ev_done."""
+    triggers = [n for n in _by_role(bind_graph, "event_trigger")
+                if n["semantic"]["attributes"]["blocking"] is True]
+    assert len(triggers) == 1, (
+        f"expected 1 blocking event_trigger, got {len(triggers)}"
+    )
+    node = triggers[0]
+    assert node["semantic"]["path"].startswith("event_trigger_demo.")
+    assert node["semantic"]["attributes"]["event_name"] == "ev_done"
+
+
+def test_s21_nonblocking_event_trigger_promoted(bind_graph):
+    """The ``->> ev_ready;`` statement is promoted with role event_trigger,
+    blocking=False, and event_name=ev_ready."""
+    triggers = [n for n in _by_role(bind_graph, "event_trigger")
+                if n["semantic"]["attributes"]["blocking"] is False]
+    assert len(triggers) == 1, (
+        f"expected 1 nonblocking event_trigger, got {len(triggers)}"
+    )
+    node = triggers[0]
+    assert node["semantic"]["path"].startswith("event_trigger_demo.")
+    assert node["semantic"]["attributes"]["event_name"] == "ev_ready"
+
+
+def test_s21_parent_is_module_not_always_block(bind_graph):
+    """The has_event_trigger edge runs from the enclosing module
+    (event_trigger_demo), one per trigger statement (two total)."""
+    modules = _by_role(bind_graph, "module")
+    parent = next((m for m in modules
+                   if m["semantic"]["name"] == "event_trigger_demo"), None)
+    assert parent is not None, "event_trigger_demo module not promoted"
+    edges = [e for e in bind_graph["edges"]
+             if e["type"] == "has_event_trigger"
+             and e["src"] == parent["id"]]
+    assert len(edges) == 2, (
+        f"expected 2 has_event_trigger edges from event_trigger_demo, "
+        f"got {len(edges)}"
+    )
+
+
+def test_s21_name_index_registers_paths(bind_graph):
+    """Both synthesized trigger paths are registered in the
+    semantic_name_index so downstream rules can resolve them."""
+    idx = bind_graph.get("semantic_name_index", {})
+    triggers = _by_role(bind_graph, "event_trigger")
+    assert len(triggers) == 2
+    for n in triggers:
+        path = n["semantic"]["path"]
+        assert path in idx, f"name_index missing {path}"
+
+
+def test_s21_triggers_edge_resolves_to_event(bind_graph):
+    """The event_name on each trigger resolves to the corresponding
+    declarator in the parent module (events surface as nets in pass-1),
+    so a ``triggers`` edge is emitted from the trigger node to the
+    event node."""
+    triggers = _by_role(bind_graph, "event_trigger")
+    names = {n["semantic"]["attributes"]["event_name"] for n in triggers}
+    assert names == {"ev_done", "ev_ready"}
+    nets = {n["semantic"]["path"]: n["id"]
+            for n in _by_role(bind_graph, "net")
+            if n["semantic"]["path"].startswith("event_trigger_demo.")}
+    for tr in triggers:
+        ev_name = tr["semantic"]["attributes"]["event_name"]
+        ev_path = f"event_trigger_demo.{ev_name}"
+        assert ev_path in nets, f"event {ev_path} not in promoted nets"
+        ev_id = nets[ev_path]
+        drives = [e for e in bind_graph["edges"]
+                  if e["type"] == "triggers"
+                  and e["src"] == tr["id"]
+                  and e["dst"] == ev_id]
+        assert len(drives) == 1, (
+            f"expected one triggers edge for {tr['semantic']['path']}→{ev_path}"
+        )

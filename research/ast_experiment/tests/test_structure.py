@@ -62,6 +62,7 @@ _ACTIVE_RULE_KINDS = {
     "ClockingDeclaration",
     "ProceduralAssignStatement", "ProceduralDeassignStatement",
     "ProceduralForceStatement", "ProceduralReleaseStatement",
+    "BlockingEventTriggerStatement", "NonblockingEventTriggerStatement",
 }
 
 

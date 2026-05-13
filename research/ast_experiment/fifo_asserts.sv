@@ -91,4 +91,16 @@ module force_release_demo (
     assign dbg_q = r;
 endmodule
 
+// S21 — named event trigger statements. ``-> ev`` is the blocking form,
+// ``->> ev`` is the nonblocking form. pyslang surfaces both as
+// EventTriggerStatementSyntax — discriminated only by SyntaxKind
+// {BlockingEventTriggerStatement, NonblockingEventTriggerStatement}.
+module event_trigger_demo (input logic clk);
+    event ev_done, ev_ready;
+    always @(posedge clk) begin
+        -> ev_done;
+        ->> ev_ready;
+    end
+endmodule
+
 bind fifo fifo_asserts u_asserts(.clk(clk), .full(full), .push(push));
