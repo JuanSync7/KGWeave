@@ -26,6 +26,8 @@ from .common.tokens import (
     _clocking_modifier_of,
     _clocking_name_of,
     _cls,
+    _covergroup_has_clocking_event,
+    _covergroup_name_of,
     _function_name_of,
     _identifier_tokens,
     _is_token,
@@ -141,6 +143,9 @@ def promote(
     # S21: per-module counter for named event-trigger statements
     # (-> ev / ->> ev). Nameless in source; synthesize a path index.
     event_trigger_counters: dict[str, int] = {}
+    # S22: per-module counter for anonymous covergroups (LRM requires an
+    # identifier, but synthesize a fallback for robustness).
+    covergroup_counters: dict[str, int] = {}
     state = {
         "idx": 0,
         "module_stack": [],
@@ -432,6 +437,28 @@ def promote(
                         tgt_id = name_index.get(ev_name)
                     if tgt_id is not None and tgt_id != gid:
                         _add_edge(graph, gid, tgt_id, "triggers")
+        elif c == "CovergroupDeclarationSyntax":
+            # S22 — promote ``covergroup ... endgroup`` blocks as queryable
+            # nodes under the enclosing module/interface/class. Coverpoint and
+            # CoverCross sub-elements stay BLOB for S22; S23 will promote
+            # them. The clocking-event clause (``@(posedge clk)``) is
+            # surfaced as a single boolean attribute — the actual event
+            # details live in the BLOB form. Detect the event structurally
+            # by walking direct children for an EventControl* node; no regex.
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                cgname = _covergroup_name_of(node)
+                if not cgname:
+                    n_seen = covergroup_counters.get(mname, 0)
+                    cgname = f"covergroup_{n_seen}"
+                    covergroup_counters[mname] = n_seen + 1
+                cgpath = f"{mname}.{cgname}"
+                has_event = _covergroup_has_clocking_event(node)
+                _mark(nodes_list[node_offset + idx], role="covergroup",
+                      name=cgname, path=cgpath,
+                      attributes={"clocking_event": has_event})
+                _add_edge(graph, mod_gid, gid, "has_covergroup")
+                name_index[cgpath] = gid
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:

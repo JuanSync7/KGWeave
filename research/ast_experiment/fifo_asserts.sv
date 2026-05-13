@@ -53,6 +53,17 @@ module fifo_asserts(
         a_imm_deferred_final: assert final (!(push && full));
         assume (clk === 1'b0 || clk === 1'b1);
     end
+
+    // S22 — covergroup declarations. ``cg_fifo`` carries a clocking event
+    // (``@(posedge clk)``); ``cg_simple`` has none. Coverpoint sub-elements
+    // remain BLOB for S22 — they will be promoted by S23.
+    covergroup cg_fifo @(posedge clk);
+        cp_push_full: coverpoint {push, full};
+    endgroup
+
+    covergroup cg_simple;
+        cp_full: coverpoint full;
+    endgroup
 endmodule
 
 // S19 — procedural continuous assign/deassign. These are statement-level

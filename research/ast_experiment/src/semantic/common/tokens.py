@@ -260,6 +260,46 @@ def _clocking_modifier_of(clk_syn: Any) -> str:
     return ""
 
 
+def _covergroup_name_of(cg_syn: Any) -> str:
+    """Return the covergroup name from a CovergroupDeclarationSyntax.
+
+    Grammar: ``covergroup <Identifier> [ports] [@(event)]; <items> endgroup``.
+    The covergroup name is the first direct Identifier Token child following
+    the ``CoverGroupKeyword`` token. Walking direct children only avoids
+    descending into the covergroup body (where Identifier tokens belong to
+    coverpoint labels and signal references, not the declaration itself).
+    """
+    saw_covergroup_kw = False
+    for ch in cg_syn:
+        if _is_token(ch):
+            kind = _token_kind_name(ch)
+            if kind == "CoverGroupKeyword":
+                saw_covergroup_kw = True
+                continue
+            if saw_covergroup_kw and kind == "Identifier":
+                return ch.valueText
+    return ""
+
+
+def _covergroup_has_clocking_event(cg_syn: Any) -> bool:
+    """True if the CovergroupDeclarationSyntax has a clocking event clause
+    (``@(posedge clk)`` etc.) as a direct child.
+
+    Pyslang surfaces the event-control clause as an ``EventControlSyntax``
+    family node — ``EventControlWithExpressionSyntax``, ``EventControlSyntax``,
+    or ``ImplicitEventControlSyntax`` — as a direct child of the covergroup
+    declaration. Walking direct children only avoids being confused by event
+    controls inside the covergroup body (e.g. inside @@(block_event) clauses).
+    """
+    for ch in cg_syn:
+        if _is_token(ch):
+            continue
+        cn = _cls(ch)
+        if cn.startswith("EventControl") or cn == "ImplicitEventControlSyntax":
+            return True
+    return False
+
+
 def _typedef_name_of(td_syn: Any) -> str:
     """The user-given name token of a TypedefDeclarationSyntax — the LAST
     direct Identifier Token child."""
