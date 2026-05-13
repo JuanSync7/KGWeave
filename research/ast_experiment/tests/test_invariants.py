@@ -45,7 +45,7 @@ _SEMANTIC_EDGES = {
     "connects", "instantiates", "of_module",
 }
 _CONTAINED_ROLES = {
-    "port", "param", "net", "instance", "typedef", "enum_value",
+    "port", "param", "net", "instance", "typedef", "typedef_forward", "enum_value",
     "modport", "function", "property", "sequence", "assertion", "clocking",
     "procedural_assign", "procedural_deassign",
     "procedural_force", "procedural_release",

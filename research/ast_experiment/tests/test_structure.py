@@ -72,6 +72,7 @@ _ACTIVE_RULE_KINDS = {
     "CheckerDeclaration", "CheckerInstantiation",
     "ExternModuleDecl",
     "ProgramDeclaration",
+    "StructType", "UnionType", "ForwardTypedefDeclaration",
 }
 
 

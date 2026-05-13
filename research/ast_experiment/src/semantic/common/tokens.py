@@ -965,6 +965,143 @@ def _typedef_name_of(td_syn: Any) -> str:
     return last_id
 
 
+def _struct_union_body_of(td_syn: Any) -> Any | None:
+    """Return the StructUnionTypeSyntax direct child of a TypedefDeclaration,
+    or None if the typedef body is not a struct/union.
+
+    pyslang surfaces both ``struct`` and ``union`` bodies with the SAME class
+    ``StructUnionTypeSyntax``; the variant is on ``.kind`` (StructType /
+    UnionType). Callers discriminate via ``str(body.kind).rsplit('.', 1)[-1]``.
+    """
+    for ch in td_syn:
+        if _is_token(ch):
+            continue
+        if _cls(ch) == "StructUnionTypeSyntax":
+            return ch
+    return None
+
+
+def _struct_union_modifiers_of(body_syn: Any) -> dict[str, bool]:
+    """Detect ``packed`` / ``tagged`` modifiers on a StructUnionTypeSyntax by
+    walking its direct-child Token list. No regex on source text — both
+    keywords surface as dedicated Token kinds (``PackedKeyword`` /
+    ``TaggedKeyword``) immediately after the leading struct/union keyword.
+    """
+    packed = False
+    tagged = False
+    for ch in body_syn:
+        if not _is_token(ch):
+            continue
+        kn = _token_kind_name(ch)
+        if kn == "PackedKeyword":
+            packed = True
+        elif kn == "TaggedKeyword":
+            tagged = True
+    return {"packed": packed, "tagged": tagged}
+
+
+def _type_text_of(type_syn: Any) -> str:
+    """Concatenate the raw token text of a type node (whitespace-separated).
+
+    Used to surface a light, human-readable type fingerprint for struct/union
+    members without lifting the full type subtree. Walks tokens in document
+    order; collapses runs of whitespace to single spaces.
+    """
+    if type_syn is None:
+        return ""
+    parts: list[str] = []
+
+    def _walk(n: Any) -> None:
+        if _is_token(n):
+            txt = getattr(n, "valueText", "") or ""
+            if txt:
+                parts.append(txt)
+            return
+        try:
+            kids = list(n)
+        except TypeError:
+            return
+        for c in kids:
+            _walk(c)
+
+    _walk(type_syn)
+    return " ".join(parts)
+
+
+def _struct_union_members_of(body_syn: Any) -> list[dict[str, str]]:
+    """Light scan of struct/union members from a StructUnionTypeSyntax.
+
+    Each direct ``StructUnionMemberSyntax`` child carries a single type node
+    followed by a SeparatedList of DeclaratorSyntax names (``logic [7:0] a, b;``
+    yields two entries with the same type_text). We emit one
+    ``{"name", "type_text"}`` dict per declarator. The type node is the FIRST
+    non-token, non-SyntaxList, non-SeparatedList child of the member — this
+    matches both IntegerTypeSyntax (``logic [7:0]``) and NamedTypeSyntax
+    (``my_t``) without depending on a specific class name.
+    """
+    out: list[dict[str, str]] = []
+    if body_syn is None:
+        return out
+    # The StructUnionMember entries live inside a SyntaxList wrapper that
+    # pyslang surfaces with class name "SyntaxNode" (not "SyntaxList") — its
+    # discriminator is on ``.kind``. We just collect every direct grandchild
+    # of class StructUnionMemberSyntax, which is robust to either layout.
+    member_nodes: list[Any] = []
+    for ch in body_syn:
+        if _is_token(ch):
+            continue
+        if _cls(ch) == "StructUnionMemberSyntax":
+            member_nodes.append(ch)
+            continue
+        try:
+            sub_kids = list(ch)
+        except TypeError:
+            continue
+        for sub in sub_kids:
+            if not _is_token(sub) and _cls(sub) == "StructUnionMemberSyntax":
+                member_nodes.append(sub)
+    for mem in member_nodes:
+        # Walk direct children. Discriminate via ``.kind`` (not class name)
+        # because pyslang surfaces SyntaxList / SeparatedList wrappers with
+        # the generic ``SyntaxNode`` class — only the kind enum tags them.
+        type_node = None
+        decl_list = None
+        for sub in mem:
+            if _is_token(sub):
+                continue
+            sub_kind = str(getattr(sub, "kind", "")).rsplit(".", 1)[-1]
+            if sub_kind == "SyntaxList":
+                continue
+            if sub_kind == "SeparatedList":
+                decl_list = sub
+                continue
+            if type_node is None:
+                type_node = sub
+        type_text = _type_text_of(type_node)
+        search_root = decl_list if decl_list is not None else mem
+        try:
+            decl_kids = list(search_root)
+        except TypeError:
+            decl_kids = []
+        for d in decl_kids:
+            if _is_token(d) or _cls(d) != "DeclaratorSyntax":
+                continue
+            ids = _identifier_tokens(d)
+            if ids:
+                out.append({"name": ids[0].valueText,
+                            "type_text": type_text})
+    return out
+
+
+def _forward_typedef_name_of(fwd_syn: Any) -> str:
+    """Return the forward-typedef name token. ForwardTypedefDeclarationSyntax
+    has a single Identifier direct child (the forward name)."""
+    for ch in fwd_syn:
+        if _is_token(ch) and _token_kind_name(ch) == "Identifier":
+            return ch.valueText
+    return ""
+
+
 def _enum_value_names(enum_syn: Any) -> list[str]:
     """Value-declarator names under an EnumTypeSyntax."""
     def _descendants_local(n: Any):

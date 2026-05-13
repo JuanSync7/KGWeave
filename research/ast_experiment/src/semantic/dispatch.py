@@ -48,6 +48,7 @@ from .common.tokens import (
     _extern_decl_kind_of,
     _extern_decl_name_of,
     _extern_decl_ports,
+    _forward_typedef_name_of,
     _function_name_of,
     _identifier_tokens,
     _is_token,
@@ -56,6 +57,9 @@ from .common.tokens import (
     _named_label_of,
     _property_name_of,
     _sequence_name_of,
+    _struct_union_body_of,
+    _struct_union_members_of,
+    _struct_union_modifiers_of,
     _token_kind_name,
     _typedef_name_of,
 )
@@ -973,12 +977,62 @@ def promote(
                 tname = _typedef_name_of(node)
                 if tname:
                     tpath = f"{mname}.{tname}"
-                    _mark(nodes_list[node_offset + idx], role="typedef",
-                          name=tname, path=tpath)
+                    # S31 — discriminate the typedef body. EnumType keeps the
+                    # legacy enum-value declarator fan-out (S9c). StructType /
+                    # UnionType enrich the typedef with structural attributes
+                    # and must NOT push in_typedef (the inner declarators are
+                    # struct members, not enum values). Other body kinds
+                    # (named-type aliases, integer types) fall through with
+                    # body_kind=None so consumers can still filter.
+                    su_body = _struct_union_body_of(node)
+                    attrs: dict[str, Any] = {}
+                    is_struct_union = False
+                    if su_body is not None:
+                        body_kind_name = str(
+                            getattr(su_body, "kind", "")
+                        ).rsplit(".", 1)[-1]
+                        if body_kind_name in {"StructType", "UnionType"}:
+                            is_struct_union = True
+                            mods = _struct_union_modifiers_of(su_body)
+                            members = _struct_union_members_of(su_body)
+                            attrs["body_kind"] = (
+                                "struct" if body_kind_name == "StructType"
+                                else "union"
+                            )
+                            attrs["packed"] = mods["packed"]
+                            attrs["tagged"] = mods["tagged"]
+                            attrs["members"] = members
+                    if attrs:
+                        _mark(nodes_list[node_offset + idx], role="typedef",
+                              name=tname, path=tpath, attributes=attrs)
+                    else:
+                        _mark(nodes_list[node_offset + idx], role="typedef",
+                              name=tname, path=tpath)
                     _add_edge(graph, mod_gid, gid, "has_typedef")
                     name_index[tpath] = gid
-                    state["typedef_stack"].append((gid, tname, tpath))
-                    pushed = "in_typedef"
+                    # Only the enum body needs the in_typedef stack — enum
+                    # value declarators promote via the Declarator branch.
+                    # Struct / union member declarators must stay BLOB.
+                    if not is_struct_union:
+                        state["typedef_stack"].append((gid, tname, tpath))
+                        pushed = "in_typedef"
+        elif c == "ForwardTypedefDeclarationSyntax":
+            # S31 — promote a bare ``typedef <name>;`` forward declaration as
+            # its own node. Reuses the ``has_typedef`` edge type so existing
+            # queries that list a package's typedefs see both full and forward
+            # declarations; the ``forward`` attribute discriminates. No body
+            # to scan — the syntax is just ``TypedefKeyword Identifier
+            # Semicolon`` (no class-restriction keyword in the simple form).
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                fname = _forward_typedef_name_of(node)
+                if fname:
+                    fpath = f"{mname}.{fname}"
+                    _mark(nodes_list[node_offset + idx], role="typedef_forward",
+                          name=fname, path=fpath,
+                          attributes={"forward": True})
+                    _add_edge(graph, mod_gid, gid, "has_typedef")
+                    name_index[fpath] = gid
         elif c == "ImplicitAnsiPortSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:

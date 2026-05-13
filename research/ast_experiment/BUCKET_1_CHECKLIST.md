@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 49 | 72 | 0 | 63 |
+| PROMOTE | 135 | 49 | 75 | 0 | 60 |
 | CONTAINER | 88 | 23 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -78,7 +78,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ExternUdpDecl` | ⬜ | ⬜ | future |
 | `FinalBlock` | ⬜ | ⬜ | future |
 | `ForwardTypeRestriction` | ⬜ | ⬜ | future |
-| `ForwardTypedefDeclaration` | ⬜ | ⬜ | future |
+| `ForwardTypedefDeclaration` | ⬜ | ✅ | S31 |
 | `FunctionDeclaration` | ✅ | ✅ | S10 |
 | `FunctionPort` | ✅ | ⬜ | future |
 | `FunctionPortList` | ✅ | ⬜ | future |
@@ -147,14 +147,14 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `PropertyDeclaration` | ✅ | ✅ | S14 |
 | `RestrictPropertyStatement` | ⬜ | ✅ | S16 |
 | `SequenceDeclaration` | ✅ | ✅ | S15 |
-| `StructType` | ⬜ | ⬜ | future |
+| `StructType` | ⬜ | ✅ | S31 |
 | `StructUnionMember` | ⬜ | ⬜ | future |
 | `SystemName` | ✅ | ✅ | S5 |
 | `TaskDeclaration` | ⬜ | ✅ | S10 |
 | `TimeUnitsDeclaration` | ⬜ | ⬜ | future |
 | `TypeParameterDeclaration` | ✅ | ⬜ | future |
 | `TypedefDeclaration` | ✅ | ✅ | S9b |
-| `UnionType` | ⬜ | ⬜ | future |
+| `UnionType` | ⬜ | ✅ | S31 |
 | `UserDefinedNetDeclaration` | ⬜ | ⬜ | future |
 | `VariablePortHeader` | ✅ | ✅ | S1 |
 | `VirtualInterfaceType` | ⬜ | ⬜ | future |
