@@ -52,6 +52,39 @@ _ASSERTION_KIND_LABELS: dict[str, str] = {
 }
 
 
+# S17 — immediate assertion statement SyntaxKind → role kind label. The three
+# kinds surface as ``ImmediateAssertionStatementSyntax`` instances and live
+# inside procedural blocks (the LRM forbids them at module top level except
+# as ``ImmediateAssertionMember`` wrappers, which contain the same inner
+# statement). The ``_immediate`` suffix differentiates from the S16
+# concurrent labels.
+_IMMEDIATE_ASSERTION_KIND_LABELS: dict[str, str] = {
+    "ImmediateAssertStatement": "assert_immediate",
+    "ImmediateAssumeStatement": "assume_immediate",
+    "ImmediateCoverStatement": "cover_immediate",
+}
+
+
+def _has_deferred_modifier(node) -> bool:
+    """True if ``node`` (an ImmediateAssert* statement) carries a
+    ``DeferredAssertion`` child — i.e. it is written as ``assert #0 (...)``
+    or ``assert final (...)``.
+
+    Walks direct children only; ``DeferredAssertion`` is always a direct
+    child of the immediate-assertion statement when present.
+    """
+    try:
+        children = list(node)
+    except TypeError:
+        return False
+    for ch in children:
+        if ch is None or _is_token(ch):
+            continue
+        if _cls(ch) == "DeferredAssertionSyntax":
+            return True
+    return False
+
+
 # Active pass-2 rules — these are the only RULE_TABLE entries whose callable
 # actually has side effects on the graph. All others are metadata stubs.
 _PASS2_ACTIVE: set = set()
@@ -228,6 +261,30 @@ def promote(
                 _mark(nodes_list[node_offset + idx], role="assertion",
                       name=label, path=apath,
                       attributes={"kind": kind_label})
+                _add_edge(graph, mod_gid, gid, "has_assertion")
+                name_index[apath] = gid
+        elif c == "ImmediateAssertionStatementSyntax":
+            # S17 — promote immediate assert / assume / cover statements as
+            # queryable nodes under the enclosing module. Per LRM these live
+            # inside procedural contexts (always / initial / final / function
+            # / task) or wrapped by ImmediateAssertionMember at module scope;
+            # in both cases we walk up to the nearest module on the stack.
+            # Detect deferred (#0 or ``final``) by the presence of a
+            # ``DeferredAssertionSyntax`` direct child — no regex on source.
+            mod_gid, mname = _cur_module()
+            kind_name = str(getattr(node, "kind", "")).rsplit(".", 1)[-1]
+            kind_label = _IMMEDIATE_ASSERTION_KIND_LABELS.get(kind_name)
+            if mod_gid is not None and kind_label is not None:
+                label = _assertion_label_of(node)
+                if not label:
+                    n_seen = assertion_counters.get(mname, 0)
+                    label = f"{kind_label}_{n_seen}"
+                    assertion_counters[mname] = n_seen + 1
+                apath = f"{mname}.{label}"
+                deferred = _has_deferred_modifier(node)
+                _mark(nodes_list[node_offset + idx], role="assertion",
+                      name=label, path=apath,
+                      attributes={"kind": kind_label, "deferred": deferred})
                 _add_edge(graph, mod_gid, gid, "has_assertion")
                 name_index[apath] = gid
         elif c == "TypedefDeclarationSyntax":

@@ -93,15 +93,29 @@ def test_s16_unlabeled_cover_gets_synthetic_label(bind_graph):
     assert a["semantic"]["path"] in idx
 
 
+_S16_KINDS = {"assert", "assume", "cover", "cover_sequence", "restrict", "expect"}
+_S17_KINDS = {"assert_immediate", "assume_immediate", "cover_immediate"}
+
+
+def _concurrent_assertions(graph):
+    return [a for a in _assertions(graph)
+            if a["semantic"]["attributes"]["kind"] in _S16_KINDS]
+
+
+def _immediate_assertions(graph):
+    return [a for a in _assertions(graph)
+            if a["semantic"]["attributes"]["kind"] in _S17_KINDS]
+
+
 def test_s16_has_assertion_edges(bind_graph):
-    """Each promoted assertion has exactly one ``has_assertion`` edge from
-    the parent module ``fifo_asserts``."""
+    """Each promoted concurrent assertion has exactly one ``has_assertion``
+    edge from the parent module ``fifo_asserts``."""
     modules = _by_role(bind_graph, "module")
     parent = next((m for m in modules if m["semantic"]["name"] == "fifo_asserts"), None)
     assert parent is not None
-    assertions = _assertions(bind_graph)
+    assertions = _concurrent_assertions(bind_graph)
     assert len(assertions) == 4, (
-        f"expected 4 assertions from fifo_asserts.sv, got {len(assertions)}"
+        f"expected 4 concurrent assertions from fifo_asserts.sv, got {len(assertions)}"
     )
     for a in assertions:
         edges = [e for e in bind_graph["edges"]
@@ -217,3 +231,94 @@ def test_s16_assertion_in_procedural_block_parents_to_module(inline_graph):
 def test_s16_inline_module_assertion_count(inline_graph):
     """The inline corpus contributes exactly four assertions."""
     assert len(_assertions(inline_graph)) == 4
+
+
+# ---------------------------------------------------------------------------
+# S17 — immediate assertion statements (assert / assume / cover) inside a
+# procedural block, with deferred ``#0`` / ``final`` modifiers recognised.
+# Corpus: fifo_asserts.sv carries an ``always_comb`` block with one labeled
+# assert, one labeled cover, two labeled deferred asserts (#0 and final), and
+# one unlabeled assume.
+# ---------------------------------------------------------------------------
+
+
+def test_s17_labeled_immediate_assert_promoted(bind_graph):
+    """``a_imm_no_push_when_full`` is promoted with kind=assert_immediate
+    and deferred=False."""
+    matches = [a for a in _immediate_assertions(bind_graph)
+               if a["semantic"]["name"] == "a_imm_no_push_when_full"]
+    assert len(matches) == 1
+    a = matches[0]
+    assert a["semantic"]["path"] == "fifo_asserts.a_imm_no_push_when_full"
+    assert a["semantic"]["attributes"]["kind"] == "assert_immediate"
+    assert a["semantic"]["attributes"]["deferred"] is False
+
+
+def test_s17_labeled_immediate_cover_promoted(bind_graph):
+    """``c_imm_push`` is promoted with kind=cover_immediate."""
+    matches = [a for a in _immediate_assertions(bind_graph)
+               if a["semantic"]["name"] == "c_imm_push"]
+    assert len(matches) == 1
+    a = matches[0]
+    assert a["semantic"]["attributes"]["kind"] == "cover_immediate"
+    assert a["semantic"]["attributes"]["deferred"] is False
+
+
+def test_s17_unlabeled_immediate_assume_promoted(bind_graph):
+    """The unlabeled ``assume (...)`` gets a synthetic ``assume_immediate_<n>``
+    label and is registered in the name index."""
+    assumes = [a for a in _immediate_assertions(bind_graph)
+               if a["semantic"]["attributes"]["kind"] == "assume_immediate"]
+    assert len(assumes) == 1, f"expected one immediate assume, got {len(assumes)}"
+    a = assumes[0]
+    assert a["semantic"]["name"].startswith("assume_immediate_"), a["semantic"]["name"]
+    assert a["semantic"]["path"] == f"fifo_asserts.{a['semantic']['name']}"
+    idx = bind_graph.get("semantic_name_index", {})
+    assert a["semantic"]["path"] in idx
+
+
+def test_s17_deferred_hash_zero_detected(bind_graph):
+    """``assert #0 (...)`` is promoted with deferred=True (no regex — detected
+    via the DeferredAssertionSyntax child node)."""
+    matches = [a for a in _immediate_assertions(bind_graph)
+               if a["semantic"]["name"] == "a_imm_deferred_zero"]
+    assert len(matches) == 1
+    a = matches[0]
+    assert a["semantic"]["attributes"]["kind"] == "assert_immediate"
+    assert a["semantic"]["attributes"]["deferred"] is True
+
+
+def test_s17_deferred_final_detected(bind_graph):
+    """``assert final (...)`` is promoted with deferred=True."""
+    matches = [a for a in _immediate_assertions(bind_graph)
+               if a["semantic"]["name"] == "a_imm_deferred_final"]
+    assert len(matches) == 1
+    a = matches[0]
+    assert a["semantic"]["attributes"]["kind"] == "assert_immediate"
+    assert a["semantic"]["attributes"]["deferred"] is True
+
+
+def test_s17_immediate_assertion_parents_to_enclosing_module(bind_graph):
+    """All immediate assertions live inside an ``always_comb`` block but
+    their ``has_assertion`` edges originate at the enclosing module
+    ``fifo_asserts``, not at the always block."""
+    modules = _by_role(bind_graph, "module")
+    parent = next(m for m in modules if m["semantic"]["name"] == "fifo_asserts")
+    imms = _immediate_assertions(bind_graph)
+    assert len(imms) == 5, f"expected 5 immediate assertions, got {len(imms)}"
+    for a in imms:
+        edges = [e for e in bind_graph["edges"]
+                 if e["type"] == "has_assertion"
+                 and e["src"] == parent["id"]
+                 and e["dst"] == a["id"]]
+        assert len(edges) == 1, (
+            f"expected one has_assertion edge for {a['semantic']['path']}, got {len(edges)}"
+        )
+
+
+def test_s17_all_three_immediate_kinds_present(bind_graph):
+    """All three S17 kinds — assert_immediate, assume_immediate,
+    cover_immediate — appear at least once in the promoted graph."""
+    kinds = {a["semantic"]["attributes"]["kind"]
+             for a in _immediate_assertions(bind_graph)}
+    assert kinds == {"assert_immediate", "assume_immediate", "cover_immediate"}

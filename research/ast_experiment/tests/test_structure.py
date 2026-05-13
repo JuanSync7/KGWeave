@@ -58,6 +58,7 @@ _ACTIVE_RULE_KINDS = {
     "BindDirective", "PropertyDeclaration", "SequenceDeclaration",
     "AssertPropertyStatement", "AssumePropertyStatement", "CoverPropertyStatement",
     "CoverSequenceStatement", "RestrictPropertyStatement", "ExpectPropertyStatement",
+    "ImmediateAssertStatement", "ImmediateAssumeStatement", "ImmediateCoverStatement",
 }
 
 
