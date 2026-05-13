@@ -12,6 +12,9 @@ module fifo_asserts(
 );
     // Placeholder assertions — body is intentionally empty for the
     // round-trip corpus. The semantic edge is independent of contents.
+    property p_push_implies_not_full;
+        @(posedge clk) push |-> !full;
+    endproperty
 endmodule
 
 bind fifo fifo_asserts u_asserts(.clk(clk), .full(full), .push(push));

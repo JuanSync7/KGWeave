@@ -27,6 +27,7 @@ from .common.tokens import (
     _identifier_tokens,
     _is_token,
     _module_name_of,
+    _property_name_of,
     _token_kind_name,
     _typedef_name_of,
 )
@@ -170,6 +171,16 @@ def promote(
                     _add_edge(graph, mod_gid, gid, "has_function")
                     name_index[fpath] = gid
             pushed = "in_function"
+        elif c == "PropertyDeclarationSyntax":
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                pname = _property_name_of(node)
+                if pname:
+                    ppath = f"{mname}.{pname}"
+                    _mark(nodes_list[node_offset + idx], role="property",
+                          name=pname, path=ppath)
+                    _add_edge(graph, mod_gid, gid, "has_property")
+                    name_index[ppath] = gid
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:

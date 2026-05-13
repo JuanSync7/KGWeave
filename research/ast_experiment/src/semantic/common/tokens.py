@@ -157,6 +157,27 @@ def _function_name_of(fn_syn: Any) -> str:
     return last_id
 
 
+def _property_name_of(prop_syn: Any) -> str:
+    """Return the property name from a PropertyDeclarationSyntax.
+
+    Grammar: ``[attrs] property <Identifier> [ports] ; <spec> endproperty``.
+    The property name is the first direct Identifier Token child following
+    the ``property`` keyword. Walking direct children only avoids descending
+    into the property body (where IdentifierName tokens belong to the
+    expression, not the declaration).
+    """
+    saw_property_kw = False
+    for ch in prop_syn:
+        if _is_token(ch):
+            kind = _token_kind_name(ch)
+            if kind == "PropertyKeyword":
+                saw_property_kw = True
+                continue
+            if saw_property_kw and kind == "Identifier":
+                return ch.valueText
+    return ""
+
+
 def _typedef_name_of(td_syn: Any) -> str:
     """The user-given name token of a TypedefDeclarationSyntax — the LAST
     direct Identifier Token child."""

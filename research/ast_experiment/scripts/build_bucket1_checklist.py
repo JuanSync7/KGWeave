@@ -120,7 +120,7 @@ PROMOTE_FUTURE = {
     "ProceduralForceStatement", "ProceduralReleaseStatement",
     "BlockingEventTriggerStatement", "NonblockingEventTriggerStatement",
     # SVA
-    "PropertyDeclaration", "SequenceDeclaration", "ClockingDeclaration",
+    "SequenceDeclaration", "ClockingDeclaration",
     "ClockingItem", "DefaultClockingReference", "DefaultDisableDeclaration",
     "AssertPropertyStatement", "AssumePropertyStatement",
     "CoverPropertyStatement", "CoverSequenceStatement",

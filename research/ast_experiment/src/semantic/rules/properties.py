@@ -1,18 +1,30 @@
-"""SVA *definitions* — STUB.
+"""SVA *definitions* — S14 (PropertyDeclaration).
 
-Planned pyslang.SyntaxKind owners (not yet promoted):
+The promotion of property nodes lives in ``dispatch.promote``'s pass 1
+(mirroring S10's function/task handling). The metadata entry below pins
+``__rule_id__ = "S14"`` against ``pyslang.SyntaxKind.PropertyDeclaration``
+so the registry-derived Bucket-1 checklist counts it as PROMOTE_NOW.
 
-* PropertyDeclaration
-* SequenceDeclaration
-* PropertySpec
-* PropertyType
+Planned future S-rule owners under this module (still stubs):
+
+* SequenceDeclaration (S15)
+* PropertySpec / PropertyType
 * LetDeclaration
-
-# Future S-rules: S14 properties — owns SVA *definitions* only; use sites
-# (assert/assume/cover) live in assertions.py.
 """
 
 from __future__ import annotations
 
+import pyslang
 
-RULES: list[tuple] = []
+
+def _s14_property(*args, **kwargs):
+    """PropertyDeclaration is promoted in pass 1 of dispatch.promote."""
+    return
+
+
+_s14_property.__rule_id__ = "S14"
+
+
+RULES: list[tuple] = [
+    (pyslang.SyntaxKind.PropertyDeclaration, _s14_property),
+]
