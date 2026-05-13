@@ -1,4 +1,5 @@
-"""Type rules — S9 (Package, Typedef, Enum) and S31 (Struct/Union/Forward).
+"""Type rules — S9 (Package, Typedef, Enum), S31 (Struct/Union/Forward),
+and S32 (PackageImport/Export).
 
 The actual promotion of typedef-shaped nodes lives in dispatch.promote's
 pass 1 (declarative tree walk). The metadata entries below pin the rule_id
@@ -45,12 +46,22 @@ def _s31_forward_typedef(*args, **kwargs):
     return
 
 
+def _s32_package_import(*args, **kwargs):
+    return
+
+
+def _s32_package_export(*args, **kwargs):
+    return
+
+
 _s9a_package.__rule_id__ = "S9a"
 _s9b_typedef.__rule_id__ = "S9b"
 _s9c_enum_type.__rule_id__ = "S9c"
 _s31_struct_type.__rule_id__ = "S31"
 _s31_union_type.__rule_id__ = "S31"
 _s31_forward_typedef.__rule_id__ = "S31"
+_s32_package_import.__rule_id__ = "S32"
+_s32_package_export.__rule_id__ = "S32"
 
 
 RULES: list[tuple] = [
@@ -60,4 +71,6 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.StructType, _s31_struct_type),
     (pyslang.SyntaxKind.UnionType, _s31_union_type),
     (pyslang.SyntaxKind.ForwardTypedefDeclaration, _s31_forward_typedef),
+    (pyslang.SyntaxKind.PackageImportDeclaration, _s32_package_import),
+    (pyslang.SyntaxKind.PackageExportDeclaration, _s32_package_export),
 ]

@@ -73,6 +73,7 @@ _ACTIVE_RULE_KINDS = {
     "ExternModuleDecl",
     "ProgramDeclaration",
     "StructType", "UnionType", "ForwardTypedefDeclaration",
+    "PackageImportDeclaration", "PackageExportDeclaration",
 }
 
 

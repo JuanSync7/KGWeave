@@ -15,6 +15,8 @@ module fifo
     output fifo_status_e      status
 );
 
+    import fifo_pkg::FULL;
+
     logic [WIDTH-1:0] mem [DEPTH];
     logic [$clog2(DEPTH):0] wr_ptr;
     logic [$clog2(DEPTH):0] rd_ptr;

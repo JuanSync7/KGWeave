@@ -55,6 +55,7 @@ from .common.tokens import (
     _lhs_target_name,
     _module_name_of,
     _named_label_of,
+    _package_import_items_of,
     _property_name_of,
     _sequence_name_of,
     _struct_union_body_of,
@@ -1033,6 +1034,56 @@ def promote(
                           attributes={"forward": True})
                     _add_edge(graph, mod_gid, gid, "has_typedef")
                     name_index[fpath] = gid
+        elif c in ("PackageImportDeclarationSyntax",
+                   "PackageExportDeclarationSyntax"):
+            # S32 — package import / export declarations. We do NOT promote
+            # the declaration itself to a node; instead we emit one
+            # cross-cutting edge per imported / exported item from the
+            # enclosing module / interface / package / program (the
+            # ``module_stack`` top) to the referenced package node, mirroring
+            # the S25 extends/implements edge-only pattern.
+            #
+            # ``import pkg::A, pkg::B;`` therefore fans out into two
+            # ``imports`` edges. Wildcard ``::*`` is captured as
+            # ``payload["item"] = "*"``.
+            #
+            # Resolution: the package name is looked up in the shared
+            # ``semantic_name_index`` under the ``package:`` prefix and then
+            # bare. If unresolved (external package), the edge points at the
+            # synthetic ``_unresolved.<pkg>`` placeholder with
+            # ``payload["unresolved"] = True`` — same convention as S25.
+            #
+            # Compilation-unit-scope imports (no enclosing module/package)
+            # have no parent; we skip the edge and record a leak entry so
+            # the loss is auditable.
+            is_export = (c == "PackageExportDeclarationSyntax")
+            edge_type = "exports" if is_export else "imports"
+            items = _package_import_items_of(node)
+            mod_gid, mname = _cur_module()
+            for pkg_name, item_label in items:
+                if mod_gid is None:
+                    leaks.append({
+                        "kind": c,
+                        "reason": "cu-scope package import/export skipped",
+                        "package": pkg_name,
+                        "item": item_label,
+                        "edge_type": edge_type,
+                    })
+                    continue
+                tgt_id = name_index.get(f"package:{pkg_name}")
+                if tgt_id is None:
+                    tgt_id = name_index.get(pkg_name)
+                unresolved = False
+                if tgt_id is None:
+                    tgt_id = f"_unresolved.{pkg_name}"
+                    unresolved = True
+                payload: dict[str, Any] = {
+                    "package": pkg_name,
+                    "item": item_label,
+                }
+                if unresolved:
+                    payload["unresolved"] = True
+                _add_edge(graph, mod_gid, tgt_id, edge_type, **payload)
         elif c == "ImplicitAnsiPortSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:

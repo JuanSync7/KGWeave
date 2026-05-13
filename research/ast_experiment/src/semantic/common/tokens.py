@@ -521,6 +521,56 @@ def _extends_clause_target(ec_syn: Any) -> tuple[str, bool]:
     return "", False
 
 
+def _package_import_items_of(decl_syn: Any) -> list[tuple[str, str]]:
+    """Return the ordered list of ``(pkg_name, item)`` tuples from a
+    PackageImportDeclarationSyntax or PackageExportDeclarationSyntax.
+
+    Grammar: ``(import|export) <pkg>::(<id>|*) [, <pkg>::(<id>|*)]* ;``.
+    Each ``<pkg>::<rhs>`` clause surfaces as a ``PackageImportItemSyntax``
+    direct child of a SeparatedList wrapper. ``item`` is the identifier
+    valueText or the literal string ``"*"`` for the wildcard form.
+
+    Returns ``[]`` if no items are found — caller decides whether to record
+    a leak. Walks direct children only; commas inside the SeparatedList are
+    Token nodes and are skipped by the _is_token guard.
+    """
+    out: list[tuple[str, str]] = []
+
+    def _consume_item(item_syn: Any) -> None:
+        pkg_name = ""
+        item_label = ""
+        saw_colon_colon = False
+        for sub in item_syn:
+            if _is_token(sub):
+                tk = _token_kind_name(sub)
+                if tk == "Identifier":
+                    if not saw_colon_colon:
+                        pkg_name = sub.valueText
+                    else:
+                        item_label = sub.valueText
+                elif tk == "DoubleColon":
+                    saw_colon_colon = True
+                elif tk == "Star" and saw_colon_colon:
+                    item_label = "*"
+        if pkg_name and item_label:
+            out.append((pkg_name, item_label))
+
+    for ch in decl_syn:
+        if _is_token(ch):
+            continue
+        if _cls(ch) == "PackageImportItemSyntax":
+            _consume_item(ch)
+            continue
+        # SeparatedList wrapper surfaced as a generic SyntaxNode — descend
+        # one level, skip comma tokens, consume each item.
+        for sub in ch:
+            if _is_token(sub):
+                continue
+            if _cls(sub) == "PackageImportItemSyntax":
+                _consume_item(sub)
+    return out
+
+
 def _implements_clause_targets(ic_syn: Any) -> list[str]:
     """Return the ordered list of implemented interface-class names from an
     ImplementsClauseSyntax. The clause grammar is
