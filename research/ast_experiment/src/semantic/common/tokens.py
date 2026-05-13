@@ -199,6 +199,26 @@ def _sequence_name_of(seq_syn: Any) -> str:
     return ""
 
 
+def _assertion_label_of(assertion_syn: Any) -> str:
+    """Return the optional ``label:`` identifier of a concurrent-assertion
+    statement, or ``""`` if absent.
+
+    Grammar: ``[NamedLabelSyntax] <assert|assume|cover|restrict|expect>
+    <property|sequence> ( <spec> ) [action]``. Pyslang parses the ``label:``
+    prefix as a ``NamedLabelSyntax`` direct child of the
+    ``ConcurrentAssertionStatementSyntax``. Walk direct children only to avoid
+    descending into the spec body.
+    """
+    for ch in assertion_syn:
+        if _is_token(ch):
+            continue
+        if _cls(ch) == "NamedLabelSyntax":
+            ids = _identifier_tokens(ch)
+            if ids:
+                return ids[0].valueText
+    return ""
+
+
 def _typedef_name_of(td_syn: Any) -> str:
     """The user-given name token of a TypedefDeclarationSyntax — the LAST
     direct Identifier Token child."""

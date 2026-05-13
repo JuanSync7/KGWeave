@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 33 | 41 | 0 | 94 |
+| PROMOTE | 135 | 33 | 47 | 0 | 88 |
 | CONTAINER | 88 | 17 | 0 | 0 | 0 |
 | BLOB | 213 | 17 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -28,10 +28,10 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `AlwaysFFBlock` | ⬜ | ✅ | S3 |
 | `AlwaysLatchBlock` | ⬜ | ⬜ | future |
 | `AnonymousProgram` | ⬜ | ⬜ | future |
-| `AssertPropertyStatement` | ⬜ | ⬜ | future |
+| `AssertPropertyStatement` | ⬜ | ✅ | S16 |
 | `AssertionItemPort` | ⬜ | ⬜ | future |
 | `AssertionItemPortList` | ⬜ | ⬜ | future |
-| `AssumePropertyStatement` | ⬜ | ⬜ | future |
+| `AssumePropertyStatement` | ⬜ | ✅ | S16 |
 | `BindDirective` | ✅ | ✅ | S13 |
 | `BindTargetList` | ⬜ | ⬜ | future |
 | `BlockingEventTriggerStatement` | ⬜ | ⬜ | future |
@@ -54,8 +54,8 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ConstructorName` | ⬜ | ⬜ | future |
 | `ContinuousAssign` | ✅ | ✅ | S2 |
 | `CoverCross` | ⬜ | ⬜ | future |
-| `CoverPropertyStatement` | ⬜ | ⬜ | future |
-| `CoverSequenceStatement` | ⬜ | ⬜ | future |
+| `CoverPropertyStatement` | ⬜ | ✅ | S16 |
+| `CoverSequenceStatement` | ⬜ | ✅ | S16 |
 | `CoverageBins` | ⬜ | ⬜ | future |
 | `CovergroupDeclaration` | ⬜ | ⬜ | future |
 | `Coverpoint` | ⬜ | ⬜ | future |
@@ -69,7 +69,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `DefaultFunctionPort` | ⬜ | ⬜ | future |
 | `DeferredAssertion` | ⬜ | ⬜ | future |
 | `EnumType` | ✅ | ✅ | S9c |
-| `ExpectPropertyStatement` | ⬜ | ⬜ | future |
+| `ExpectPropertyStatement` | ⬜ | ✅ | S16 |
 | `ExplicitAnsiPort` | ⬜ | ⬜ | future |
 | `ExplicitNonAnsiPort` | ⬜ | ⬜ | future |
 | `ExtendsClause` | ⬜ | ⬜ | future |
@@ -145,7 +145,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ProgramDeclaration` | ⬜ | ⬜ | future |
 | `ProgramHeader` | ⬜ | ⬜ | future |
 | `PropertyDeclaration` | ⬜ | ✅ | S14 |
-| `RestrictPropertyStatement` | ⬜ | ⬜ | future |
+| `RestrictPropertyStatement` | ⬜ | ✅ | S16 |
 | `SequenceDeclaration` | ⬜ | ✅ | S15 |
 | `StructType` | ⬜ | ⬜ | future |
 | `StructUnionMember` | ⬜ | ⬜ | future |

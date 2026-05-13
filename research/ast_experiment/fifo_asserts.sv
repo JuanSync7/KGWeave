@@ -19,6 +19,14 @@ module fifo_asserts(
     sequence s_push_then_full;
         @(posedge clk) push ##[1:2] full;
     endsequence
+
+    // S16 — concurrent assertion use sites. Labeled top-level forms exercise
+    // the ConcurrentAssertionMember wrapper path; the unlabeled cover sits
+    // alongside to confirm synthetic-label fallback.
+    a_no_push_when_full: assert property (@(posedge clk) full |-> !push);
+    a_push_implies_seq: assume property (@(posedge clk) push |-> !full);
+    c_push_event: cover property (@(posedge clk) push);
+    cover property (@(posedge clk) push |-> !full);
 endmodule
 
 bind fifo fifo_asserts u_asserts(.clk(clk), .full(full), .push(push));

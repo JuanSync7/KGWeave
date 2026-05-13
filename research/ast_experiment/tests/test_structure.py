@@ -56,6 +56,8 @@ _ACTIVE_RULE_KINDS = {
     "ModportDeclaration", "ModportItem", "ModportNamedPort", "LoopGenerate",
     "GenerateBlock", "IfGenerate", "CaseGenerate", "GenerateRegion",
     "BindDirective", "PropertyDeclaration", "SequenceDeclaration",
+    "AssertPropertyStatement", "AssumePropertyStatement", "CoverPropertyStatement",
+    "CoverSequenceStatement", "RestrictPropertyStatement", "ExpectPropertyStatement",
 }
 
 
@@ -141,18 +143,17 @@ _TARGET_RULES_FILES = [
 
 _TARGET_ACTIVE_MODULES = [
     "structure", "instantiation", "interfaces", "generate",
-    "dataflow", "types", "behavior", "properties",
+    "dataflow", "types", "behavior", "properties", "assertions",
 ]
 
 _TARGET_STUB_MODULES = [
-    "procedural", "clocking", "assertions",
+    "procedural", "clocking",
     "coverage", "classes", "constraints", "checkers", "extern",
 ]
 
 _STUB_PLANNED_KIND_HINTS = {
     "procedural": ["AlwaysBlock", "InitialBlock", "FinalBlock"],
     "clocking": ["ClockingDeclaration"],
-    "assertions": ["AssertProperty", "AssumeProperty", "CoverProperty"],
     "coverage": ["CovergroupDeclaration", "Coverpoint", "CoverCross"],
     "classes": ["ClassDeclaration"],
     "constraints": ["ConstraintDeclaration", "ConstraintBlock"],

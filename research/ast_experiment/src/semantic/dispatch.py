@@ -22,6 +22,7 @@ from typing import Any
 from .common.graph import _add_edge, _has_edge, _mark
 from .common.resolve import _all_module_scopes
 from .common.tokens import (
+    _assertion_label_of,
     _cls,
     _function_name_of,
     _identifier_tokens,
@@ -36,6 +37,19 @@ from .rules import RULE_TABLE
 from .rules.dataflow import rule_s3_or_s8
 from .rules.generate import rule_s12
 from .rules.instantiation import rule_s6, rule_s13
+
+
+# S16 — concurrent assertion statement SyntaxKind → role kind label. The six
+# kinds all surface as ``ConcurrentAssertionStatementSyntax`` instances; their
+# ``.kind`` attribute discriminates the variant.
+_ASSERTION_KIND_LABELS: dict[str, str] = {
+    "AssertPropertyStatement": "assert",
+    "AssumePropertyStatement": "assume",
+    "CoverPropertyStatement": "cover",
+    "CoverSequenceStatement": "cover_sequence",
+    "RestrictPropertyStatement": "restrict",
+    "ExpectPropertyStatement": "expect",
+}
 
 
 # Active pass-2 rules — these are the only RULE_TABLE entries whose callable
@@ -76,6 +90,9 @@ def promote(
         pass
 
     port_names_by_module: dict[str, set[str]] = {}
+    # S16: per-module monotonically-increasing counter for synthetic assertion
+    # labels when the source omits ``label:``.
+    assertion_counters: dict[str, int] = {}
     state = {
         "idx": 0,
         "module_stack": [],
@@ -192,6 +209,27 @@ def promote(
                           name=sname, path=spath)
                     _add_edge(graph, mod_gid, gid, "has_sequence")
                     name_index[spath] = gid
+        elif c == "ConcurrentAssertionStatementSyntax":
+            # S16 — promote assert / assume / cover / cover_sequence /
+            # restrict / expect property statements as queryable nodes under
+            # the enclosing module. Parent is the nearest module on the
+            # module_stack (so assertions nested inside procedural blocks
+            # still attach to the module, not the block).
+            mod_gid, mname = _cur_module()
+            kind_name = str(getattr(node, "kind", "")).rsplit(".", 1)[-1]
+            kind_label = _ASSERTION_KIND_LABELS.get(kind_name)
+            if mod_gid is not None and kind_label is not None:
+                label = _assertion_label_of(node)
+                if not label:
+                    n_seen = assertion_counters.get(mname, 0)
+                    label = f"{kind_label}_{n_seen}"
+                    assertion_counters[mname] = n_seen + 1
+                apath = f"{mname}.{label}"
+                _mark(nodes_list[node_offset + idx], role="assertion",
+                      name=label, path=apath,
+                      attributes={"kind": kind_label})
+                _add_edge(graph, mod_gid, gid, "has_assertion")
+                name_index[apath] = gid
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:
