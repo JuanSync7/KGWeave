@@ -72,12 +72,12 @@ def _build_semantic_graph():
     # ids unique; the shared semantic_name_index lets cross-tree references
     # like top.u_fifo --of_module--> fifo resolve correctly).
     graph, _trees, _comp = build_kg([
-        HERE / "fifo_pkg.sv", HERE / "fifo_if.sv",
-        HERE / "fifo.sv", HERE / "fifo_asserts.sv", HERE / "top.sv",
-        HERE / "cls_corpus.sv",
-        HERE / "checker_corpus.sv",
-        HERE / "extern_corpus.sv",
-        HERE / "prim_corpus.sv",
+        HERE / "corpus" / "fifo_pkg.sv", HERE / "corpus" / "fifo_if.sv",
+        HERE / "corpus" / "fifo.sv", HERE / "corpus" / "fifo_asserts.sv", HERE / "corpus" / "top.sv",
+        HERE / "corpus" / "cls_corpus.sv",
+        HERE / "corpus" / "checker_corpus.sv",
+        HERE / "corpus" / "extern_corpus.sv",
+        HERE / "corpus" / "prim_corpus.sv",
     ])
     return graph
 

@@ -14,7 +14,7 @@ import pyslang
 import pytest
 
 HERE = Path(__file__).resolve().parent.parent.parent
-SRC = HERE / "fifo.sv"
+SRC = HERE / "corpus" / "fifo.sv"
 
 
 @pytest.fixture(scope="module")

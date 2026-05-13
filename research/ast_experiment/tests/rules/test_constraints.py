@@ -23,7 +23,7 @@ import pyslang
 import pytest
 
 HERE = Path(__file__).resolve().parent.parent.parent
-CLS = HERE / "cls_corpus.sv"
+CLS = HERE / "corpus" / "cls_corpus.sv"
 
 
 @pytest.fixture(scope="module")

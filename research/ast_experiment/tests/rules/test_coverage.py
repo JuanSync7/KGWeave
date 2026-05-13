@@ -24,7 +24,7 @@ import pyslang
 import pytest
 
 HERE = Path(__file__).resolve().parent.parent.parent
-BIND = HERE / "fifo_asserts.sv"
+BIND = HERE / "corpus" / "fifo_asserts.sv"
 
 
 @pytest.fixture(scope="module")

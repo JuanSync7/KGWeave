@@ -12,8 +12,8 @@ from __future__ import annotations
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
-FIFO = HERE / "fifo.sv"
-TOP = HERE / "top.sv"
+FIFO = HERE / "corpus" / "fifo.sv"
+TOP = HERE / "corpus" / "top.sv"
 
 
 def test_build_kg_unifies_cross_file_of_module_edge():

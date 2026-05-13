@@ -19,8 +19,8 @@ import pyslang
 import pytest
 
 HERE = Path(__file__).resolve().parent.parent.parent
-PKG = HERE / "fifo_pkg.sv"
-FIFO = HERE / "fifo.sv"
+PKG = HERE / "corpus" / "fifo_pkg.sv"
+FIFO = HERE / "corpus" / "fifo.sv"
 
 
 @pytest.fixture(scope="module")

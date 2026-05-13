@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 HERE = Path(__file__).resolve().parent.parent.parent
-PRIM = HERE / "prim_corpus.sv"
+PRIM = HERE / "corpus" / "prim_corpus.sv"
 
 
 @pytest.fixture(scope="module")

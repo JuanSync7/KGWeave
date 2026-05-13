@@ -28,7 +28,7 @@ import pyslang
 import pytest
 
 HERE = Path(__file__).resolve().parent.parent.parent
-CHK = HERE / "checker_corpus.sv"
+CHK = HERE / "corpus" / "checker_corpus.sv"
 
 
 @pytest.fixture(scope="module")

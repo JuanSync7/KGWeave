@@ -18,15 +18,15 @@ import pyslang
 import pytest
 
 HERE = Path(__file__).resolve().parent.parent
-SRC = HERE / "fifo.sv"
-TOP = HERE / "top.sv"
-PKG = HERE / "fifo_pkg.sv"
-IFACE = HERE / "fifo_if.sv"
-TB = HERE / "tb_fifo.sv"
-BIND = HERE / "fifo_asserts.sv"
-CLS = HERE / "cls_corpus.sv"
-CHK = HERE / "checker_corpus.sv"
-EXT = HERE / "extern_corpus.sv"
+SRC = HERE / "corpus" / "fifo.sv"
+TOP = HERE / "corpus" / "top.sv"
+PKG = HERE / "corpus" / "fifo_pkg.sv"
+IFACE = HERE / "corpus" / "fifo_if.sv"
+TB = HERE / "corpus" / "tb_fifo.sv"
+BIND = HERE / "corpus" / "fifo_asserts.sv"
+CLS = HERE / "corpus" / "cls_corpus.sv"
+CHK = HERE / "corpus" / "checker_corpus.sv"
+EXT = HERE / "corpus" / "extern_corpus.sv"
 COVERED = HERE / "covered_classes.json"
 
 

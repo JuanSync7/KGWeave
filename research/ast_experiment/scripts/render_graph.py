@@ -34,8 +34,8 @@ OUT.mkdir(exist_ok=True)
 
 
 def _build():
-    fifo = pyslang.SyntaxTree.fromText((HERE / "fifo.sv").read_text())
-    top = pyslang.SyntaxTree.fromText((HERE / "top.sv").read_text())
+    fifo = pyslang.SyntaxTree.fromText((HERE / "corpus" / "fifo.sv").read_text())
+    top = pyslang.SyntaxTree.fromText((HERE / "corpus" / "top.sv").read_text())
     compilation = pyslang.Compilation()
     compilation.addSyntaxTree(fifo)
     compilation.addSyntaxTree(top)

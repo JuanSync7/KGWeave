@@ -18,11 +18,11 @@ import pyslang
 import pytest
 
 HERE = Path(__file__).resolve().parent.parent.parent
-PKG = HERE / "fifo_pkg.sv"
-IFACE = HERE / "fifo_if.sv"
-FIFO = HERE / "fifo.sv"
-TOP = HERE / "top.sv"
-BIND = HERE / "fifo_asserts.sv"
+PKG = HERE / "corpus" / "fifo_pkg.sv"
+IFACE = HERE / "corpus" / "fifo_if.sv"
+FIFO = HERE / "corpus" / "fifo.sv"
+TOP = HERE / "corpus" / "top.sv"
+BIND = HERE / "corpus" / "fifo_asserts.sv"
 
 
 @pytest.fixture(scope="module")
