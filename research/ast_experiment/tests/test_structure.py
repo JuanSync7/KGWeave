@@ -74,6 +74,7 @@ _ACTIVE_RULE_KINDS = {
     "ProgramDeclaration",
     "StructType", "UnionType", "ForwardTypedefDeclaration",
     "PackageImportDeclaration", "PackageExportDeclaration",
+    "PrimitiveInstantiation",
 }
 
 

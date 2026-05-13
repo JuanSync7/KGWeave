@@ -77,6 +77,7 @@ def _build_semantic_graph():
         HERE / "cls_corpus.sv",
         HERE / "checker_corpus.sv",
         HERE / "extern_corpus.sv",
+        HERE / "prim_corpus.sv",
     ])
     return graph
 

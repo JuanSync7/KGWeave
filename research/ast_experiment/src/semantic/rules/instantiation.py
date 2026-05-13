@@ -1,7 +1,7 @@
-"""Instantiation rules — S6 + S7 + S13.
+"""Instantiation rules — S6 + S7 + S13 + S33.
 
 Owns the pyslang.SyntaxKind set for hierarchy instantiation, parameter
-overrides, and bind directives:
+overrides, bind directives, and gate-level primitive instantiations:
 
 * HierarchyInstantiation
 * HierarchicalInstance
@@ -11,6 +11,7 @@ overrides, and bind directives:
 * NamedParamAssignment
 * OrderedParamAssignment
 * BindDirective
+* PrimitiveInstantiation     (S33)
 """
 
 from __future__ import annotations
@@ -320,6 +321,194 @@ def rule_s13(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", *
                   instance_name=inst_name or "", scope=scope_str)
 
 
+# --- S33 — gate-level PrimitiveInstantiation --------------------------------
+
+# Map TokenKind name → primitive-gate label. PrimitiveInstantiationSyntax
+# carries the gate keyword as a direct Token child (AndKeyword / OrKeyword /
+# NotKeyword / NandKeyword / NorKeyword / XorKeyword / XnorKeyword /
+# BufKeyword / and the conditional variants). The label is stamped on the
+# promoted node's attributes["primitive"] so downstream queries can filter
+# by gate type without round-tripping through the token stream.
+_PRIMITIVE_KEYWORD_TO_LABEL: dict[str, str] = {
+    "AndKeyword": "and",
+    "OrKeyword": "or",
+    "NotKeyword": "not",
+    "NandKeyword": "nand",
+    "NorKeyword": "nor",
+    "XorKeyword": "xor",
+    "XnorKeyword": "xnor",
+    "BufKeyword": "buf",
+    "BufIf0Keyword": "bufif0",
+    "BufIf1Keyword": "bufif1",
+    "NotIf0Keyword": "notif0",
+    "NotIf1Keyword": "notif1",
+}
+
+
+def _primitive_type_of(node: Any) -> str:
+    """Return the gate-type label (``"and"``/``"or"``/...) of a
+    PrimitiveInstantiationSyntax, sourced from the leading keyword token.
+
+    Walks direct Token children only — the gate keyword is the FIRST primitive
+    keyword to appear before the SeparatedList of HierarchicalInstance
+    children. Returns ``""`` if no recognised keyword is present (defensive;
+    the LRM grammar guarantees one of the entries in
+    ``_PRIMITIVE_KEYWORD_TO_LABEL`` is always present).
+    """
+    for ch in node:
+        if not _is_token(ch):
+            continue
+        label = _PRIMITIVE_KEYWORD_TO_LABEL.get(_token_kind_name(ch))
+        if label is not None:
+            return label
+    return ""
+
+
+def _primitive_delay_text(node: Any) -> str:
+    """Return the textual delay of a PrimitiveInstantiationSyntax (e.g.
+    ``"#5"``) or ``""`` when no delay is specified.
+
+    pyslang surfaces gate delays as a ``DelayControlSyntax`` direct child of
+    the PrimitiveInstantiation. Concatenate every Token rawText under that
+    node — the result is the source slice (``#5``, ``#(2,3)``, etc.).
+    """
+    for ch in node:
+        if _is_token(ch):
+            continue
+        # pyslang's class for ``#<expr>`` and ``#(t_rise, t_fall)`` is
+        # ``DelaySyntax`` (kind=DelayControl) — NOT ``DelayControlSyntax``.
+        # Discriminate via the SyntaxKind to be robust across pyslang
+        # versions / grammar variants.
+        kind_name = str(getattr(ch, "kind", "")).rsplit(".", 1)[-1]
+        if kind_name == "DelayControl" or _cls(ch) == "DelaySyntax":
+            # Reconstruct the source slice by walking every Token rawText
+            # under the delay subtree (the leading ``#`` lives on the Hash
+            # token; subsequent tokens carry the integer / paren payload).
+            parts: list[str] = []
+
+            def _walk(n: Any) -> None:
+                if _is_token(n):
+                    parts.append(n.rawText)
+                    return
+                try:
+                    kids = list(n)
+                except TypeError:
+                    return
+                for c in kids:
+                    _walk(c)
+
+            _walk(ch)
+            return "".join(parts).strip()
+    return ""
+
+
+def _primitive_ports_of(inst: Any) -> list[str]:
+    """Return the ordered list of port-connection identifier texts under a
+    HierarchicalInstance whose parent is a PrimitiveInstantiation.
+
+    Gate primitives use positional connections only; each connection is an
+    ``OrderedPortConnectionSyntax`` child of the parenthesised connection
+    list. We collect ``_expression_text`` of each so simple identifier
+    references (``a``, ``out_and``) round-trip cleanly while richer
+    expressions (concatenations, constants) are still surfaced as their
+    textual form.
+    """
+    out: list[str] = []
+    for d in _descendants(inst):
+        if _cls(d) != "OrderedPortConnectionSyntax":
+            continue
+        # Walk one level into the connection to find its expression payload.
+        expr_text = ""
+        for ch in d:
+            if _is_token(ch):
+                continue
+            try:
+                kids = list(ch)
+            except TypeError:
+                kids = []
+            if kids or _identifier_tokens(ch):
+                expr_text = _expression_text(ch)
+                break
+        out.append(expr_text)
+    return out
+
+
+def rule_s33(graph, node, gid, gnode, scope, name_index, leaks,
+             scope_path="", module_gid=None, **_):
+    """S33: PrimitiveInstantiationSyntax → one ``primitive_instance`` node
+    per HierarchicalInstance child, edge ``has_primitive_instance`` from
+    the enclosing module.
+
+    Mirrors the S6 fan-out pattern: a single primitive-instantiation
+    declaration like ``not g_not1 (n_a, a), g_not2 (n_b, b);`` carries
+    TWO HierarchicalInstance children and promotes to two semantic nodes.
+    The gate type label (``"and"``/``"or"``/...) is shared across all
+    instances in the declaration and stamped on each node's
+    ``attributes["primitive"]``. The optional ``#5`` delay control (and its
+    multi-value cousin ``#(t_rise, t_fall)``) is captured as ``attributes
+    ["delay"]`` — empty string when absent. Port connections are extracted
+    positionally via ``_primitive_ports_of`` as ``attributes["ports"]``.
+
+    Optional ``drives`` edge: gate primitives connect their output as the
+    FIRST positional port. When that port name resolves to a known net /
+    port in the shared name index (qualified path first, then bare name),
+    emit a ``drives`` edge from the instance node to the target — same
+    convention as S19/S20 procedural-drive promotion.
+    """
+    prim_label = _primitive_type_of(node)
+    if not prim_label:
+        return
+    delay_text = _primitive_delay_text(node)
+    for d in _descendants(node):
+        if _cls(d) != "HierarchicalInstanceSyntax":
+            continue
+        inst_name = None
+        for ch in d:
+            if _cls(ch) == "InstanceNameSyntax":
+                toks = _identifier_tokens(ch)
+                if toks:
+                    inst_name = toks[0].valueText
+                break
+        if inst_name is None:
+            continue
+        inst_path = f"{scope_path}.{inst_name}" if scope_path else inst_name
+        hi_gid = _gid_for_subtree(graph, gid, "HierarchicalInstanceSyntax",
+                                  target_inst=inst_name)
+        if hi_gid is None:
+            continue
+        idx = _node_index_by_id(graph, hi_gid)
+        if idx is None:
+            continue
+        ports = _primitive_ports_of(d)
+        attrs: dict[str, Any] = {
+            "primitive": prim_label,
+            "ports": list(ports),
+        }
+        if delay_text:
+            attrs["delay"] = delay_text
+        _mark(graph["nodes"][idx], role="primitive_instance",
+              name=inst_name, path=inst_path, attributes=attrs)
+        name_index[inst_path] = hi_gid
+        if module_gid is not None and not _has_edge(
+            graph, module_gid, hi_gid, "has_primitive_instance"
+        ):
+            _add_edge(graph, module_gid, hi_gid, "has_primitive_instance")
+        # Optional ``drives`` edge from the gate to its output net. Gate
+        # primitives use positional connections; per LRM the OUTPUT is the
+        # first positional port (for buf/not and all 2+input gates).
+        if ports:
+            out_name = ports[0]
+            if out_name:
+                tgt = name_index.get(f"{scope_path}.{out_name}") if scope_path else None
+                if tgt is None:
+                    tgt = name_index.get(out_name)
+                if tgt is not None and tgt != hi_gid and not _has_edge(
+                    graph, hi_gid, tgt, "drives"
+                ):
+                    _add_edge(graph, hi_gid, tgt, "drives",
+                              instance=inst_path, port=out_name)
+
+
 # Metadata-only entries — sub-elements handled inside the active rules above.
 
 def _s6_hierarchical_instance(*args, **kwargs):
@@ -350,6 +539,7 @@ def _s7_ordered_param_assignment(*args, **kwargs):
 
 rule_s6.__rule_id__ = "S6"
 rule_s13.__rule_id__ = "S13"
+rule_s33.__rule_id__ = "S33"
 _s6_hierarchical_instance.__rule_id__ = "S6"
 _s6_instance_name.__rule_id__ = "S6"
 _s6_named_port_connection.__rule_id__ = "S6"
@@ -367,4 +557,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.NamedParamAssignment, _s7_named_param_assignment),
     (pyslang.SyntaxKind.OrderedParamAssignment, _s7_ordered_param_assignment),
     (pyslang.SyntaxKind.BindDirective, rule_s13),
+    (pyslang.SyntaxKind.PrimitiveInstantiation, rule_s33),
 ]

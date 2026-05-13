@@ -37,6 +37,7 @@ _CONTAINMENT_EDGES = {
     "has_constraint",
     "has_checker", "has_checker_instance",
     "has_extern_decl",
+    "has_primitive_instance",
     "has_program",
     "has_generate", "contains_block",
 }
@@ -55,6 +56,7 @@ _CONTAINED_ROLES = {
     "constraint",
     "checker", "checker_instance",
     "extern_decl",
+    "primitive_instance",
     "generate_loop", "generate_block",
 }
 # Roles whose `name` is treated as an owning namespace (top-level container).

@@ -24,6 +24,7 @@ SRCS = [
     HERE / "cls_corpus.sv",
     HERE / "checker_corpus.sv",
     HERE / "extern_corpus.sv",
+    HERE / "prim_corpus.sv",
 ]
 OUT = HERE / "elab_dump.json"
 CLASSES_OUT = HERE / "ast_classes.json"

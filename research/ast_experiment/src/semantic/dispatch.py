@@ -67,7 +67,7 @@ from .common.tokens import (
 from .rules import RULE_TABLE
 from .rules.dataflow import rule_s3_or_s8
 from .rules.generate import rule_s12
-from .rules.instantiation import rule_s6, rule_s13
+from .rules.instantiation import rule_s6, rule_s13, rule_s33
 
 
 # S16 — concurrent assertion statement SyntaxKind → role kind label. The six
@@ -121,7 +121,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33"}
 
 
 def _is_active(fn) -> bool:
@@ -1269,6 +1269,14 @@ def promote(
                 elif fn is rule_s13:
                     fn(graph, node, gid, nodes_list[node_offset + idx],
                        scope, name_index, leaks, scope_path)
+                elif fn is rule_s33:
+                    # S33 — gate-level primitive instantiation. Mirrors S6's
+                    # walker-context guards: skip inside generate / bind
+                    # subtrees, pass module_gid as the containment parent.
+                    if state2["in_generate"] == 0 and state2["in_bind"] == 0:
+                        fn(graph, node, gid, nodes_list[node_offset + idx],
+                           scope, name_index, leaks, scope_path,
+                           module_gid=mod_gid)
                 elif fn is rule_s3_or_s8 or getattr(fn, "__rule_id__", None) == "S8":
                     fn(graph, node, gid, nodes_list[node_offset + idx],
                        scope, name_index, leaks, scope_path)
