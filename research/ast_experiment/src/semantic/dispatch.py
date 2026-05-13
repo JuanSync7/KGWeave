@@ -135,6 +135,9 @@ def promote(
     # S19: per-module counter for procedural-assign / procedural-deassign
     # statements (these have no name in source; synthesize a path index).
     proc_assign_counters: dict[str, int] = {}
+    # S20: per-module counter for procedural-force / procedural-release
+    # statements (also nameless; synthesize a path index).
+    proc_force_counters: dict[str, int] = {}
     state = {
         "idx": 0,
         "module_stack": [],
@@ -322,32 +325,56 @@ def promote(
                 name_index[cpath] = gid
         elif c in ("ProceduralAssignStatementSyntax",
                    "ProceduralDeassignStatementSyntax"):
-            # S19 — promote ``assign lhs = rhs;`` and ``deassign lhs;``
-            # statements that appear inside procedural blocks (always /
-            # initial). These are distinct from S2's module-level
-            # ContinuousAssign — they override / release procedural drivers.
+            # S19/S20 — promote procedural-continuous-drive statements that
+            # appear inside procedural blocks (always / initial). These are
+            # distinct from S2's module-level ContinuousAssign — they override
+            # / release procedural drivers (S19: assign/deassign; S20:
+            # force/release — stronger, overrides continuous drivers too).
+            #
+            # pyslang surfaces both pairs with the same syntax class — the
+            # variant is discriminated by ``.kind`` only:
+            #
+            #   class=ProceduralAssignStatementSyntax    kind={Assign,Force}
+            #   class=ProceduralDeassignStatementSyntax  kind={Deassign,Release}
+            #
             # Parent is the nearest enclosing module (NOT the always block).
-            # The LHS target is extracted structurally: ``_lhs_target_name``
-            # finds the first Identifier token under the statement, which
-            # in both grammars is the LHS variable (assign: ``lhs = rhs``;
-            # deassign: ``lhs``). No regex on source text. If the LHS
-            # resolves to a known net via the shared name index, emit an
-            # optional ``drives`` edge; otherwise skip silently.
+            # The LHS target is extracted structurally via
+            # ``_lhs_target_name`` (first Identifier token under the
+            # statement) — no regex on source text. If the LHS resolves to a
+            # known net via the shared name index, emit an optional
+            # ``drives`` edge; otherwise skip silently.
             mod_gid, mname = _cur_module()
-            if mod_gid is not None:
-                if c == "ProceduralAssignStatementSyntax":
-                    role_label = "procedural_assign"
-                else:
-                    role_label = "procedural_deassign"
-                n_seen = proc_assign_counters.get(mname, 0)
-                proc_name = f"proc_assign_{n_seen}"
-                proc_assign_counters[mname] = n_seen + 1
+            kind_name = str(getattr(node, "kind", "")).rsplit(".", 1)[-1]
+            _PROC_DRIVE_VARIANTS = {
+                "ProceduralAssignStatement": (
+                    "procedural_assign", "proc_assign", "has_procedural_assign",
+                    proc_assign_counters,
+                ),
+                "ProceduralDeassignStatement": (
+                    "procedural_deassign", "proc_assign", "has_procedural_assign",
+                    proc_assign_counters,
+                ),
+                "ProceduralForceStatement": (
+                    "procedural_force", "proc_force", "has_procedural_force",
+                    proc_force_counters,
+                ),
+                "ProceduralReleaseStatement": (
+                    "procedural_release", "proc_force", "has_procedural_force",
+                    proc_force_counters,
+                ),
+            }
+            variant = _PROC_DRIVE_VARIANTS.get(kind_name)
+            if mod_gid is not None and variant is not None:
+                role_label, name_prefix, edge_type, counters = variant
+                n_seen = counters.get(mname, 0)
+                proc_name = f"{name_prefix}_{n_seen}"
+                counters[mname] = n_seen + 1
                 ppath = f"{mname}.{proc_name}"
                 lhs_name = _lhs_target_name(node) or ""
                 _mark(nodes_list[node_offset + idx], role=role_label,
                       name=proc_name, path=ppath,
                       attributes={"lhs": lhs_name})
-                _add_edge(graph, mod_gid, gid, "has_procedural_assign")
+                _add_edge(graph, mod_gid, gid, edge_type)
                 name_index[ppath] = gid
                 # Optional drives edge — only if the LHS resolves to an
                 # existing semantic node in the shared name index. We try

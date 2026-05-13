@@ -447,7 +447,8 @@ def test_s1_fires_per_module(multi_bundle):
     _tree, _comp, graph = multi_bundle
     modules = _queryable_by_role(graph, "module")
     names = {m["semantic"]["name"] for m in modules}
-    assert names == {"top", "fifo", "fifo_asserts", "proc_assign_demo"}
+    assert names == {"top", "fifo", "fifo_asserts", "proc_assign_demo",
+                     "force_release_demo"}
     # fifo has 8 ports; top has 8 ports — total 16 promoted ports.
     ports = _queryable_by_role(graph, "port")
     paths = {p["semantic"]["path"] for p in ports}

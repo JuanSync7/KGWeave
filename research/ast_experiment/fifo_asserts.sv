@@ -73,4 +73,22 @@ module proc_assign_demo (
     assign q = r;
 endmodule
 
+// S20 — procedural force/release. Like S19's assign/deassign but stronger:
+// `force` overrides even continuous drivers, and `release` lifts the override.
+// pyslang surfaces these as ProceduralAssignStatementSyntax /
+// ProceduralDeassignStatementSyntax classes — discriminated only by
+// SyntaxKind.{ProceduralForceStatement,ProceduralReleaseStatement}.
+module force_release_demo (
+    input  logic       clk,
+    input  logic       dbg_override,
+    output logic [7:0] dbg_q
+);
+    logic [7:0] r;
+    always @(posedge clk) begin
+        if (dbg_override) force r = 8'hAA;
+        else              release r;
+    end
+    assign dbg_q = r;
+endmodule
+
 bind fifo fifo_asserts u_asserts(.clk(clk), .full(full), .push(push));

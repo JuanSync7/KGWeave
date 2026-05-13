@@ -107,3 +107,93 @@ def test_s19_drives_edge_resolves_to_net(bind_graph):
     assert len(drives) == 1, (
         f"expected one drives edge procedural_assign→r, got {len(drives)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# S20 — ProceduralForce / ProceduralRelease
+#
+# ``force_release_demo`` in fifo_asserts.sv has one ``force r = 8'hAA;`` and
+# one ``release r;`` inside an always block. pyslang reuses the same
+# ProceduralAssign/Deassign syntax classes for force/release; the variant is
+# carried only by ``.kind``. S20 promotes them with their own role labels
+# ("procedural_force" / "procedural_release") and a dedicated containment
+# edge type ``has_procedural_force`` (shared across both kinds, with the
+# role attribute differentiating them).
+# ---------------------------------------------------------------------------
+
+
+def test_s20_procedural_force_promoted(bind_graph):
+    """The ``force r = 8'hAA;`` statement is promoted with role
+    procedural_force and a path under the parent module."""
+    pfs = _by_role(bind_graph, "procedural_force")
+    assert len(pfs) == 1, f"expected 1 procedural_force, got {len(pfs)}"
+    node = pfs[0]
+    assert node["semantic"]["path"].startswith("force_release_demo.")
+    assert node["semantic"]["attributes"]["lhs"] == "r"
+
+
+def test_s20_procedural_release_promoted(bind_graph):
+    """The ``release r;`` statement is promoted with role
+    procedural_release and the same LHS."""
+    prs = _by_role(bind_graph, "procedural_release")
+    assert len(prs) == 1, f"expected 1 procedural_release, got {len(prs)}"
+    node = prs[0]
+    assert node["semantic"]["path"].startswith("force_release_demo.")
+    assert node["semantic"]["attributes"]["lhs"] == "r"
+
+
+def test_s20_parent_is_module_not_always_block(bind_graph):
+    """The has_procedural_force edge runs from the enclosing module
+    (force_release_demo) — never from the AlwaysBlock. One edge per
+    force/release statement (two total)."""
+    modules = _by_role(bind_graph, "module")
+    parent = next((m for m in modules
+                   if m["semantic"]["name"] == "force_release_demo"), None)
+    assert parent is not None, "force_release_demo module not promoted"
+    edges = [e for e in bind_graph["edges"]
+             if e["type"] == "has_procedural_force"
+             and e["src"] == parent["id"]]
+    assert len(edges) == 2, (
+        f"expected 2 has_procedural_force edges from force_release_demo, "
+        f"got {len(edges)}"
+    )
+
+
+def test_s20_name_index_registers_paths(bind_graph):
+    """Force/release synthesized paths are registered in semantic_name_index."""
+    idx = bind_graph.get("semantic_name_index", {})
+    pfs = _by_role(bind_graph, "procedural_force")
+    prs = _by_role(bind_graph, "procedural_release")
+    for n in pfs + prs:
+        path = n["semantic"]["path"]
+        assert path in idx, f"name_index missing {path}"
+
+
+def test_s20_drives_edge_resolves_to_net(bind_graph):
+    """The procedural-force LHS ``r`` resolves to the local net
+    ``force_release_demo.r`` via the shared name index, so a drives edge
+    is emitted from the procedural_force node to the net."""
+    pfs = _by_role(bind_graph, "procedural_force")
+    assert pfs, "no procedural_force node"
+    pf = pfs[0]
+    nets = [n for n in _by_role(bind_graph, "net")
+            if n["semantic"]["path"] == "force_release_demo.r"]
+    assert nets, "force_release_demo.r net not promoted"
+    net_id = nets[0]["id"]
+    drives = [e for e in bind_graph["edges"]
+              if e["type"] == "drives"
+              and e["src"] == pf["id"]
+              and e["dst"] == net_id]
+    assert len(drives) == 1, (
+        f"expected one drives edge procedural_force→r, got {len(drives)}"
+    )
+
+
+def test_s20_assign_and_force_distinct_roles(bind_graph):
+    """S19's procedural_assign and S20's procedural_force are distinct roles —
+    confirming the pass-1 branch discriminates by ``.kind`` rather than by
+    the (shared) syntax class name."""
+    assert len(_by_role(bind_graph, "procedural_assign")) == 1
+    assert len(_by_role(bind_graph, "procedural_force")) == 1
+    assert len(_by_role(bind_graph, "procedural_deassign")) == 1
+    assert len(_by_role(bind_graph, "procedural_release")) == 1

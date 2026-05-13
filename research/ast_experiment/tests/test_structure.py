@@ -61,6 +61,7 @@ _ACTIVE_RULE_KINDS = {
     "ImmediateAssertStatement", "ImmediateAssumeStatement", "ImmediateCoverStatement",
     "ClockingDeclaration",
     "ProceduralAssignStatement", "ProceduralDeassignStatement",
+    "ProceduralForceStatement", "ProceduralReleaseStatement",
 }
 
 
