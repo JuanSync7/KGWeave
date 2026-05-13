@@ -55,10 +55,14 @@ module fifo_asserts(
     end
 
     // S22 — covergroup declarations. ``cg_fifo`` carries a clocking event
-    // (``@(posedge clk)``); ``cg_simple`` has none. Coverpoint sub-elements
-    // remain BLOB for S22 — they will be promoted by S23.
+    // (``@(posedge clk)``); ``cg_simple`` has none. S23 — coverpoint and
+    // cross sub-elements are promoted; coverage bins inside coverpoints
+    // remain BLOB.
     covergroup cg_fifo @(posedge clk);
+        cp_full: coverpoint full;
+        cp_push: coverpoint push;
         cp_push_full: coverpoint {push, full};
+        cx_push_full: cross cp_push, cp_full;
     endgroup
 
     covergroup cg_simple;

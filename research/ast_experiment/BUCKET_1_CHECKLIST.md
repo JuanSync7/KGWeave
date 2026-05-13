@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 33 | 58 | 0 | 77 |
+| PROMOTE | 135 | 33 | 60 | 0 | 75 |
 | CONTAINER | 88 | 17 | 0 | 0 | 0 |
 | BLOB | 213 | 17 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -53,12 +53,12 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ConstraintPrototype` | ⬜ | ⬜ | future |
 | `ConstructorName` | ⬜ | ⬜ | future |
 | `ContinuousAssign` | ✅ | ✅ | S2 |
-| `CoverCross` | ⬜ | ⬜ | future |
+| `CoverCross` | ⬜ | ✅ | S23 |
 | `CoverPropertyStatement` | ⬜ | ✅ | S16 |
 | `CoverSequenceStatement` | ⬜ | ✅ | S16 |
 | `CoverageBins` | ⬜ | ⬜ | future |
 | `CovergroupDeclaration` | ⬜ | ✅ | S22 |
-| `Coverpoint` | ⬜ | ⬜ | future |
+| `Coverpoint` | ⬜ | ✅ | S23 |
 | `DPIExport` | ⬜ | ⬜ | future |
 | `DPIImport` | ⬜ | ⬜ | future |
 | `Declarator` | ✅ | ✅ | S1 |

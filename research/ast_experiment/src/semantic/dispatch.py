@@ -26,13 +26,16 @@ from .common.tokens import (
     _clocking_modifier_of,
     _clocking_name_of,
     _cls,
+    _cover_cross_members,
     _covergroup_has_clocking_event,
     _covergroup_name_of,
+    _coverpoint_expression,
     _function_name_of,
     _identifier_tokens,
     _is_token,
     _lhs_target_name,
     _module_name_of,
+    _named_label_of,
     _property_name_of,
     _sequence_name_of,
     _token_kind_name,
@@ -146,10 +149,19 @@ def promote(
     # S22: per-module counter for anonymous covergroups (LRM requires an
     # identifier, but synthesize a fallback for robustness).
     covergroup_counters: dict[str, int] = {}
+    # S23: per-covergroup counters for anonymous coverpoints / crosses.
+    # Keyed by the covergroup path so unnamed coverpoints inside two
+    # different covergroups don't collide on ``coverpoint_0``.
+    coverpoint_counters: dict[str, int] = {}
+    cross_counters: dict[str, int] = {}
     state = {
         "idx": 0,
         "module_stack": [],
         "typedef_stack": [],
+        # S23: covergroup_stack tracks the enclosing CovergroupDeclaration
+        # so Coverpoint/CoverCross children can resolve their parent path
+        # without a top-down rewalk. Entries are (gid, cgpath) tuples.
+        "covergroup_stack": [],
         "in_param": 0,
         "in_data": 0,
         "in_port": 0,
@@ -167,6 +179,7 @@ def promote(
         gid = nodes_list[node_offset + idx]["id"]
         pushed = None
         popped_module = False
+        pushed_covergroup = False
 
         if c == "ModuleDeclarationSyntax":
             kind_name = str(getattr(node, "kind", "")).rsplit(".", 1)[-1]
@@ -459,6 +472,94 @@ def promote(
                       attributes={"clocking_event": has_event})
                 _add_edge(graph, mod_gid, gid, "has_covergroup")
                 name_index[cgpath] = gid
+                state["covergroup_stack"].append((gid, cgpath))
+                pushed_covergroup = True
+        elif c == "CoverpointSyntax":
+            # S23 — promote ``[label:] coverpoint <expr> ...;`` items inside
+            # a covergroup body. Parent is the enclosing covergroup (NOT the
+            # module); the covergroup_stack maintained alongside module_stack
+            # supplies the parent gid + hierarchical path without a top-down
+            # rewalk. If the walk somehow reaches a Coverpoint outside any
+            # covergroup, fall back to the module and record a leak so the
+            # corpus can flag it. The expression text is extracted only for
+            # the simple ``coverpoint <identifier>;`` case; richer
+            # expressions (concatenations, ranges, with-clauses) stay BLOB
+            # via ``expr_blob=True`` so we don't dump arbitrary token text.
+            mod_gid, mname = _cur_module()
+            if state["covergroup_stack"]:
+                cg_gid, cgpath = state["covergroup_stack"][-1]
+                parent_gid = cg_gid
+                parent_path = cgpath
+                edge_type = "has_coverpoint"
+            elif mod_gid is not None:
+                parent_gid = mod_gid
+                parent_path = mname
+                edge_type = "has_coverpoint"
+                leaks.append({
+                    "rule": "S23",
+                    "kind": "CoverpointSyntax",
+                    "reason": "coverpoint outside covergroup; fell back to module",
+                    "path": mname,
+                })
+            else:
+                parent_gid = None
+                parent_path = ""
+                edge_type = "has_coverpoint"
+            if parent_gid is not None:
+                cp_name = _named_label_of(node)
+                if not cp_name:
+                    key = parent_path
+                    n_seen = coverpoint_counters.get(key, 0)
+                    cp_name = f"coverpoint_{n_seen}"
+                    coverpoint_counters[key] = n_seen + 1
+                cp_path = f"{parent_path}.{cp_name}"
+                expr_text, expr_blob = _coverpoint_expression(node)
+                attrs: dict[str, Any] = {}
+                if expr_blob:
+                    attrs["expr_blob"] = True
+                else:
+                    attrs["expr_text"] = expr_text
+                _mark(nodes_list[node_offset + idx], role="coverpoint",
+                      name=cp_name, path=cp_path, attributes=attrs)
+                _add_edge(graph, parent_gid, gid, edge_type)
+                name_index[cp_path] = gid
+        elif c == "CoverCrossSyntax":
+            # S23 — promote ``[label:] cross <cp_a>, <cp_b> ...;`` items.
+            # Same parent-resolution policy as CoverpointSyntax above; the
+            # ``members`` attribute is the ordered list of coverpoint names
+            # referenced by the cross (extracted from the SeparatedList of
+            # IdentifierName children that follow the ``CrossKeyword``).
+            mod_gid, mname = _cur_module()
+            if state["covergroup_stack"]:
+                cg_gid, cgpath = state["covergroup_stack"][-1]
+                parent_gid = cg_gid
+                parent_path = cgpath
+            elif mod_gid is not None:
+                parent_gid = mod_gid
+                parent_path = mname
+                leaks.append({
+                    "rule": "S23",
+                    "kind": "CoverCrossSyntax",
+                    "reason": "cross outside covergroup; fell back to module",
+                    "path": mname,
+                })
+            else:
+                parent_gid = None
+                parent_path = ""
+            if parent_gid is not None:
+                cx_name = _named_label_of(node)
+                if not cx_name:
+                    key = parent_path
+                    n_seen = cross_counters.get(key, 0)
+                    cx_name = f"cross_{n_seen}"
+                    cross_counters[key] = n_seen + 1
+                cx_path = f"{parent_path}.{cx_name}"
+                members = _cover_cross_members(node)
+                _mark(nodes_list[node_offset + idx], role="cross",
+                      name=cx_name, path=cx_path,
+                      attributes={"members": members})
+                _add_edge(graph, parent_gid, gid, "has_cross")
+                name_index[cx_path] = gid
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:
@@ -527,6 +628,8 @@ def promote(
             state[pushed] -= 1
         if pushed == "in_typedef" and state["typedef_stack"]:
             state["typedef_stack"].pop()
+        if pushed_covergroup and state["covergroup_stack"]:
+            state["covergroup_stack"].pop()
         if popped_module:
             state["module_stack"].pop()
 

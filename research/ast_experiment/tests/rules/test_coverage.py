@@ -84,3 +84,118 @@ def test_s22_name_index_registers_paths(bind_graph):
     idx = bind_graph.get("semantic_name_index", {})
     assert "fifo_asserts.cg_fifo" in idx
     assert "fifo_asserts.cg_simple" in idx
+
+
+# ---------------------------------------------------------------------------
+# S23 — Coverpoint + CoverCross
+# ---------------------------------------------------------------------------
+
+
+def test_s23_coverpoint_nodes_promoted(bind_graph):
+    """Every ``[label:] coverpoint <expr> ...;`` item is promoted with role
+    ``coverpoint`` and a path of the form ``<module>.<covergroup>.<cp>``."""
+    cps = _by_role(bind_graph, "coverpoint")
+    paths = sorted(c["semantic"]["path"] for c in cps)
+    assert paths == [
+        "fifo_asserts.cg_fifo.cp_full",
+        "fifo_asserts.cg_fifo.cp_push",
+        "fifo_asserts.cg_fifo.cp_push_full",
+        "fifo_asserts.cg_simple.cp_full",
+    ], paths
+
+
+def test_s23_cross_nodes_promoted(bind_graph):
+    """Every ``[label:] cross <cp>, <cp> ...;`` item is promoted with role
+    ``cross`` and a path of the form ``<module>.<covergroup>.<cross>``."""
+    crosses = _by_role(bind_graph, "cross")
+    paths = sorted(c["semantic"]["path"] for c in crosses)
+    assert paths == ["fifo_asserts.cg_fifo.cx_push_full"], paths
+
+
+def test_s23_has_coverpoint_edges(bind_graph):
+    """The parent covergroup emits one has_coverpoint edge per promoted
+    coverpoint node — never the module."""
+    cps = _by_role(bind_graph, "coverpoint")
+    cgs = {c["semantic"]["path"]: c for c in _by_role(bind_graph, "covergroup")}
+    cp_ids = {c["id"] for c in cps}
+    edges = [e for e in bind_graph["edges"]
+             if e["type"] == "has_coverpoint" and e["dst"] in cp_ids]
+    assert len(edges) == len(cps), (
+        f"expected one has_coverpoint edge per coverpoint; got {len(edges)}/{len(cps)}"
+    )
+    parent_ids = {cgs[p]["id"] for p in cgs}
+    bad = [e for e in edges if e["src"] not in parent_ids]
+    assert not bad, f"has_coverpoint with non-covergroup parent: {bad}"
+
+
+def test_s23_has_cross_edges(bind_graph):
+    """The parent covergroup emits one has_cross edge per promoted cross
+    node — never the module."""
+    crosses = _by_role(bind_graph, "cross")
+    cgs = {c["semantic"]["path"]: c for c in _by_role(bind_graph, "covergroup")}
+    cx_ids = {c["id"] for c in crosses}
+    edges = [e for e in bind_graph["edges"]
+             if e["type"] == "has_cross" and e["dst"] in cx_ids]
+    assert len(edges) == 1
+    parent_ids = {cgs[p]["id"] for p in cgs}
+    assert edges[0]["src"] in parent_ids
+
+
+def test_s23_coverpoint_simple_expr_text(bind_graph):
+    """A coverpoint whose expression is a single bare identifier carries
+    ``attributes.expr_text`` with that identifier; richer expressions carry
+    ``attributes.expr_blob = True`` and no ``expr_text``."""
+    cps = {c["semantic"]["path"]: c for c in _by_role(bind_graph, "coverpoint")}
+    full = cps["fifo_asserts.cg_fifo.cp_full"]["semantic"]["attributes"]
+    assert full.get("expr_text") == "full"
+    assert "expr_blob" not in full
+    push = cps["fifo_asserts.cg_fifo.cp_push"]["semantic"]["attributes"]
+    assert push.get("expr_text") == "push"
+    concat = cps["fifo_asserts.cg_fifo.cp_push_full"]["semantic"]["attributes"]
+    assert concat.get("expr_blob") is True
+    assert "expr_text" not in concat
+
+
+def test_s23_cross_members_extracted(bind_graph):
+    """A cross node's ``attributes.members`` lists the coverpoint names it
+    references, in source order."""
+    crosses = {c["semantic"]["path"]: c for c in _by_role(bind_graph, "cross")}
+    cx = crosses["fifo_asserts.cg_fifo.cx_push_full"]
+    assert cx["semantic"]["attributes"]["members"] == ["cp_push", "cp_full"]
+
+
+def test_s23_coverpoint_name_index_registers_paths(bind_graph):
+    """Coverpoint and cross hierarchical paths are registered in the shared
+    name index so downstream rules can resolve them by qualified name."""
+    idx = bind_graph.get("semantic_name_index", {})
+    assert "fifo_asserts.cg_fifo.cp_full" in idx
+    assert "fifo_asserts.cg_fifo.cp_push" in idx
+    assert "fifo_asserts.cg_fifo.cp_push_full" in idx
+    assert "fifo_asserts.cg_simple.cp_full" in idx
+    assert "fifo_asserts.cg_fifo.cx_push_full" in idx
+
+
+def test_s23_synthetic_coverpoint_name_fallback():
+    """An anonymous coverpoint (no ``label:``) gets a synthetic name
+    ``coverpoint_<n>`` scoped to its enclosing covergroup."""
+    src = """
+    module m;
+      covergroup cg @(posedge clk);
+        coverpoint a;
+        coverpoint b;
+      endgroup
+    endmodule
+    """
+    import pyslang  # noqa: PLC0415
+    from research.ast_experiment.src.lift import lift  # noqa: PLC0415
+    from research.ast_experiment.src.semantic import promote  # noqa: PLC0415
+
+    tree = pyslang.SyntaxTree.fromText(src)
+    comp = pyslang.Compilation()
+    comp.addSyntaxTree(tree)
+    graph = lift(tree)
+    promote(graph, tree, comp)
+    cps = [n for n in graph["nodes"]
+           if n.get("semantic", {}).get("role") == "coverpoint"]
+    names = sorted(c["semantic"]["name"] for c in cps)
+    assert names == ["coverpoint_0", "coverpoint_1"], names

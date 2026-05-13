@@ -64,6 +64,7 @@ _ACTIVE_RULE_KINDS = {
     "ProceduralForceStatement", "ProceduralReleaseStatement",
     "BlockingEventTriggerStatement", "NonblockingEventTriggerStatement",
     "CovergroupDeclaration",
+    "Coverpoint", "CoverCross",
 }
 
 

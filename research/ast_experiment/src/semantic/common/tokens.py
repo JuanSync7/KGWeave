@@ -300,6 +300,104 @@ def _covergroup_has_clocking_event(cg_syn: Any) -> bool:
     return False
 
 
+def _named_label_of(node: Any) -> str:
+    """Return the optional ``label:`` identifier of any syntax node, or
+    ``""`` if absent.
+
+    Several coverage / assertion sub-statements carry an optional
+    ``NamedLabelSyntax`` direct child (``cp_full: coverpoint full;``,
+    ``cx_push_full: cross cp_push, cp_full;``, etc.). Walking direct
+    children only avoids descending into the body where Identifier tokens
+    belong to expression references, not the declaration label.
+    """
+    for ch in node:
+        if _is_token(ch):
+            continue
+        if _cls(ch) == "NamedLabelSyntax":
+            ids = _identifier_tokens(ch)
+            if ids:
+                return ids[0].valueText
+    return ""
+
+
+def _coverpoint_expression(node: Any) -> tuple[str, bool]:
+    """Extract the cover-expression of a CoverpointSyntax.
+
+    Grammar fragment: ``[label:] coverpoint <expr> [iff(...)] [{ bins }] ;``.
+    The expression is the first non-token, non-SyntaxList, non-NamedLabel,
+    non-ImplicitType direct child following the ``CoverPointKeyword`` token.
+
+    Returns ``(expr_text, expr_blob)`` where ``expr_blob`` is True when the
+    expression is anything other than a single bare identifier name. For the
+    simple identifier case we return its valueText and ``expr_blob=False``.
+    """
+    seen_kw = False
+    for ch in node:
+        if _is_token(ch):
+            if _token_kind_name(ch) == "CoverPointKeyword":
+                seen_kw = True
+            continue
+        if not seen_kw:
+            continue
+        cn = _cls(ch)
+        if cn in {"NamedLabelSyntax", "ImplicitTypeSyntax"}:
+            continue
+        # SyntaxList wrappers (attribute lists, bin lists) are skipped.
+        if cn == "SyntaxNode":
+            continue
+        # Found the expression node. Simple identifier?
+        if cn == "IdentifierNameSyntax":
+            toks = _identifier_tokens(ch)
+            if len(toks) == 1:
+                return toks[0].valueText, False
+        return "", True
+    return "", True
+
+
+def _cover_cross_members(node: Any) -> list[str]:
+    """Extract the coverpoint-name list referenced by a CoverCrossSyntax.
+
+    Grammar fragment: ``[label:] cross <cp_a>, <cp_b> [, ...] [iff(...)]
+    [{ bins }] ;``. The member list is a SeparatedList of IdentifierName
+    nodes that directly follows the ``CrossKeyword`` token. Walking direct
+    children only avoids descending into the cross body (``CoverageBins``
+    subtrees where Identifier tokens are bin-selector references).
+    """
+    seen_kw = False
+    members: list[str] = []
+    for ch in node:
+        if _is_token(ch):
+            if _token_kind_name(ch) == "CrossKeyword":
+                seen_kw = True
+            continue
+        if not seen_kw:
+            continue
+        cn = _cls(ch)
+        if cn == "NamedLabelSyntax":
+            continue
+        # Walk children of the SeparatedList for IdentifierName entries.
+        try:
+            kids = list(ch)
+        except TypeError:
+            kids = []
+        for k in kids:
+            if _is_token(k):
+                continue
+            if _cls(k) == "IdentifierNameSyntax":
+                toks = _identifier_tokens(k)
+                if toks:
+                    members.append(toks[0].valueText)
+        if members:
+            return members
+        # If the direct child IS an IdentifierName itself (single-member case)
+        if cn == "IdentifierNameSyntax":
+            toks = _identifier_tokens(ch)
+            if toks:
+                members.append(toks[0].valueText)
+        return members
+    return members
+
+
 def _typedef_name_of(td_syn: Any) -> str:
     """The user-given name token of a TypedefDeclarationSyntax — the LAST
     direct Identifier Token child."""
