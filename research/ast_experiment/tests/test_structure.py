@@ -71,6 +71,7 @@ _ACTIVE_RULE_KINDS = {
     "ConstraintDeclaration", "ConstraintPrototype",
     "CheckerDeclaration", "CheckerInstantiation",
     "ExternModuleDecl",
+    "ProgramDeclaration",
 }
 
 

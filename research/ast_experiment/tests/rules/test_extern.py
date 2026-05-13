@@ -122,3 +122,85 @@ def test_s29_no_has_extern_decl_at_cu_scope(ext_graph):
     assert edges == [], (
         f"cu-scope extern decls must not emit has_extern_decl; got {edges}"
     )
+
+
+# ---------------------------------------------------------------------------
+# S30 — Full ProgramDeclaration body promotion
+# ---------------------------------------------------------------------------
+
+
+def test_s30_program_body_promoted(ext_graph):
+    """The full ``program ext_prog ();`` body is promoted as role=program
+    (NOT role=module — pyslang reuses ModuleDeclarationSyntax across all
+    four ModuleDeclaration variants, so the kind discriminator must route
+    program bodies to a distinct role)."""
+    programs = _by_role(ext_graph, "program")
+    assert len(programs) == 1, (
+        f"expected 1 program node, got {len(programs)}"
+    )
+    prog = programs[0]
+    assert prog["semantic"]["name"] == "ext_prog"
+    # cu-scope program: path is the bare name (no parent prefix).
+    assert prog["semantic"]["path"] == "ext_prog"
+
+
+def test_s30_program_not_double_promoted_as_module(ext_graph):
+    """The program body must not also surface as role=module — the kind
+    discriminator in the shared ModuleDeclarationSyntax branch must
+    produce exactly one role per declaration."""
+    module_names = {n["semantic"]["name"]
+                    for n in _by_role(ext_graph, "module")}
+    assert "ext_prog" not in module_names, (
+        "ext_prog must be promoted as role=program, not role=module"
+    )
+
+
+def test_s30_program_port_list(ext_graph):
+    """The program body's port-name list is extracted from the
+    ProgramHeader. ``program ext_prog ();`` has an empty port list."""
+    programs = {n["semantic"]["name"]: n
+                for n in _by_role(ext_graph, "program")}
+    assert programs["ext_prog"]["semantic"]["attributes"]["ports"] == []
+
+
+def test_s30_program_name_index_entry(ext_graph):
+    """The program is registered in the shared name index under the bare
+    name and under the ``program:`` prefix, mirroring how S1 registers
+    modules (``module:``) and interfaces (``interface:``)."""
+    idx = ext_graph["semantic_name_index"]
+    programs = {n["semantic"]["name"]: n
+                for n in _by_role(ext_graph, "program")}
+    prog_gid = programs["ext_prog"]["id"]
+    assert idx.get("ext_prog") == prog_gid
+    assert idx.get("program:ext_prog") == prog_gid
+
+
+def test_s30_no_has_program_at_cu_scope(ext_graph):
+    """The corpus has only a cu-scope program; ``has_program`` is only
+    emitted for nested programs (rare and LRM-non-conformant), so the
+    edge list must be empty for this corpus."""
+    edges = [e for e in ext_graph["edges"] if e["type"] == "has_program"]
+    assert edges == [], (
+        f"cu-scope programs must not emit has_program; got {edges}"
+    )
+
+
+def test_s30_extern_program_declares_full_program(ext_graph):
+    """The S29 ``declares`` edge from ``extern program ext_prog`` should
+    target the S30-promoted full program body — i.e. cross-cuts the
+    extern/full pair via the shared name index, the same way S29 wires
+    extern module → full module."""
+    externs = {n["semantic"]["name"]: n
+               for n in _by_role(ext_graph, "extern_decl")}
+    programs = {n["semantic"]["name"]: n
+                for n in _by_role(ext_graph, "program")}
+    ext_id = externs["ext_prog"]["id"]
+    prog_id = programs["ext_prog"]["id"]
+    edges = [e for e in ext_graph["edges"]
+             if e["type"] == "declares"
+             and e["src"] == ext_id
+             and e["dst"] == prog_id]
+    assert len(edges) == 1, (
+        f"expected extern program → full program declares edge, got "
+        f"{len(edges)}"
+    )

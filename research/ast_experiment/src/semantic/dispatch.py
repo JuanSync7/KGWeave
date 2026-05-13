@@ -223,18 +223,53 @@ def promote(
         if c == "ModuleDeclarationSyntax":
             kind_name = str(getattr(node, "kind", "")).rsplit(".", 1)[-1]
             mname = _module_name_of(node)
+            # Capture the *parent* module-stack entry BEFORE pushing this
+            # node; needed by S30 to decide whether to emit a has_program
+            # containment edge for a nested program (rare).
+            parent_for_program = state["module_stack"][-1] if state["module_stack"] else (None, "")
             state["module_stack"].append((gid, mname))
             popped_module = True
+            # S1 / S30 — pyslang reuses ModuleDeclarationSyntax across
+            # module / interface / package / program bodies. The dedicated
+            # SyntaxKind enum value discriminates, so we dispatch role +
+            # containment-edge type here. S30 owns ProgramDeclaration; the
+            # program is pushed onto module_stack (above) so child rules
+            # (S2/S10/S14/S16/S18/S22/S24...) attach to the program via
+            # the standard _cur_module() lookup — same inheritance trick
+            # S28 (CheckerDeclaration) uses.
             if kind_name == "PackageDeclaration":
                 role_name = "package"
                 key_prefix = "package:"
+                _mark(nodes_list[node_offset + idx], role=role_name,
+                      name=mname, path=mname)
             elif kind_name == "InterfaceDeclaration":
                 role_name = "interface"
                 key_prefix = "interface:"
+                _mark(nodes_list[node_offset + idx], role=role_name,
+                      name=mname, path=mname)
+            elif kind_name == "ProgramDeclaration":
+                # S30 — promote a full ``program ... endprogram`` body. The
+                # ``ports`` attribute lists port names extracted from the
+                # ProgramHeader child via the same structural scan used by
+                # S29 for extern program headers; full port types / dirs
+                # stay BLOB. A nested program (rare; LRM-non-conformant in
+                # most cases) attaches to its enclosing module via a
+                # ``has_program`` edge; cu-scope programs are root-anchored
+                # mirroring how S1 handles top-level modules.
+                role_name = "program"
+                key_prefix = "program:"
+                ports = _extern_decl_ports(node)
+                _mark(nodes_list[node_offset + idx], role=role_name,
+                      name=mname, path=mname,
+                      attributes={"ports": list(ports)})
+                parent_gid, _parent_mname = parent_for_program
+                if parent_gid is not None:
+                    _add_edge(graph, parent_gid, gid, "has_program")
             else:
                 role_name = "module"
                 key_prefix = "module:"
-            _mark(nodes_list[node_offset + idx], role=role_name, name=mname, path=mname)
+                _mark(nodes_list[node_offset + idx], role=role_name,
+                      name=mname, path=mname)
             name_index[key_prefix + mname] = gid
             name_index[mname] = gid
             port_names_by_module.setdefault(mname, set())

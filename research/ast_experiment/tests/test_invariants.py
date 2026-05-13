@@ -37,6 +37,7 @@ _CONTAINMENT_EDGES = {
     "has_constraint",
     "has_checker", "has_checker_instance",
     "has_extern_decl",
+    "has_program",
     "has_generate", "contains_block",
 }
 _SEMANTIC_EDGES = {

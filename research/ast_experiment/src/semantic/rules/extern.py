@@ -1,5 +1,45 @@
 """S29 — Extern module / interface / program declarations.
 
+S30 — Full ``program ... endprogram`` body promotion. SystemVerilog
+``program`` blocks are LRM-typed testbench scopes that look like a module
+for hierarchical-naming purposes but carry distinct semantics
+(no always_*, restricted scheduling). pyslang surfaces a full program
+body via the *shared* ``ModuleDeclarationSyntax`` class — the same class
+used for ``module`` and ``interface`` and ``package``. The discriminator
+is the node's ``.kind`` attribute, which takes the dedicated value
+``SyntaxKind.ProgramDeclaration`` (distinct from
+``SyntaxKind.ModuleDeclaration``).
+
+S1 (in ``rules/structure.py``) owns the ``ModuleDeclaration`` SyntaxKind
+and runs the shared ``ModuleDeclarationSyntax`` promotion branch in
+``dispatch.promote`` pass-1. Because the branch dispatches on
+``kind_name`` (PackageDeclaration / InterfaceDeclaration /
+ProgramDeclaration / default → module), promoting a program body
+correctly is purely a matter of:
+
+* adding a ``ProgramDeclaration`` arm to the kind_name switch that
+  stamps ``role="program"`` and emits ``has_program`` containment edges;
+* pushing the program onto ``module_stack`` (same code path as modules)
+  so child rules (S2 contains, S3/S8 always_* — though always_* is
+  LRM-illegal inside a program — S10 functions, S14 properties, S16
+  assertions, S18 clocking, S24 classes, S22 covergroups, ...) attach
+  to the program via the standard ``_cur_module()`` lookup;
+* registering ``ProgramDeclaration`` under a dedicated S30 ``__rule_id__``
+  so the Bucket-1 PROMOTE_NOW counter reflects ownership and the
+  registry-derived ACTIVE kinds list picks it up.
+
+Note: the ``program`` kind is also one of the three discriminator values
+inside S29's ExternModuleDecl — there ``program`` refers to the *extern
+program* header (no body). S29 owns the header form; S30 owns the body
+form. Both live in this file because they share the construct.
+
+Future S-rules in this module:
+
+* ``AnonymousProgram`` is also planned here.
+
+S29 detail
+----------
+
 SystemVerilog ``extern module``, ``extern interface``, and ``extern program``
 declarations are header-only: they declare the interface (name, parameters,
 ports) without a body. The full module/interface/program definition lives
@@ -30,14 +70,10 @@ Promoted shape:
   (which is the common usage pattern for ``extern`` — the header lets
   downstream consumers see the contract before the body has been parsed).
 
-Future S-rules in this module:
-
-* ``ProgramDeclaration`` (S30 — full program body, not the extern header).
-* ``AnonymousProgram`` is also planned here.
-
-The metadata stub below pins ``__rule_id__="S29"`` against
-``pyslang.SyntaxKind.ExternModuleDecl`` so the registry-derived Bucket-1
-checklist counts the kind as PROMOTE_NOW.
+The metadata stubs below pin ``__rule_id__="S29"`` against
+``pyslang.SyntaxKind.ExternModuleDecl`` and ``__rule_id__="S30"`` against
+``pyslang.SyntaxKind.ProgramDeclaration`` so the registry-derived Bucket-1
+checklist counts both kinds as PROMOTE_NOW.
 """
 
 from __future__ import annotations
@@ -57,6 +93,23 @@ def _s29_extern_module_decl(*args, **kwargs):
 _s29_extern_module_decl.__rule_id__ = "S29"
 
 
+def _s30_program_decl(*args, **kwargs):
+    """ProgramDeclaration is promoted in pass 1 of dispatch.promote — see
+    the shared ``ModuleDeclarationSyntax`` branch in S1, which dispatches
+    on ``.kind`` and stamps ``role="program"`` + ``has_program`` for the
+    ProgramDeclaration variant. This stub exists only to register the
+    SyntaxKind under an active ``__rule_id__`` for the Bucket-1 checklist.
+    Note that pyslang reuses ``ModuleDeclarationSyntax`` for module /
+    interface / program / package bodies — only the dedicated
+    ``SyntaxKind.ProgramDeclaration`` enum value distinguishes a program
+    body at the kind level."""
+    return
+
+
+_s30_program_decl.__rule_id__ = "S30"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ExternModuleDecl, _s29_extern_module_decl),
+    (pyslang.SyntaxKind.ProgramDeclaration, _s30_program_decl),
 ]
