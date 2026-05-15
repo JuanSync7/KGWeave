@@ -571,6 +571,35 @@ def _package_import_items_of(decl_syn: Any) -> list[tuple[str, str]]:
     return out
 
 
+def _package_import_item_parts(item_syn: Any) -> tuple[str, str] | None:
+    """Extract ``(pkg_name, symbol)`` from a single ``PackageImportItemSyntax``.
+
+    ``symbol`` is the identifier valueText or ``"*"`` for the wildcard form.
+    Returns ``None`` if the node is malformed (missing package name or symbol).
+    Used by S50's pass-2 rule which receives the item node directly.
+    """
+    pkg_name = ""
+    symbol = ""
+    saw_colon_colon = False
+    try:
+        for sub in item_syn:
+            if not _is_token(sub):
+                continue
+            tk = _token_kind_name(sub)
+            if tk == "Identifier":
+                if not saw_colon_colon:
+                    pkg_name = sub.valueText
+                else:
+                    symbol = sub.valueText
+            elif tk == "DoubleColon":
+                saw_colon_colon = True
+            elif tk == "Star" and saw_colon_colon:
+                symbol = "*"
+    except TypeError:
+        return None
+    return (pkg_name, symbol) if (pkg_name and symbol) else None
+
+
 def _implements_clause_targets(ic_syn: Any) -> list[str]:
     """Return the ordered list of implemented interface-class names from an
     ImplementsClauseSyntax. The clause grammar is

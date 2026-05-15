@@ -1,5 +1,6 @@
 """Type rules — S9 (Package, Typedef, Enum), S31 (Struct/Union/Forward),
-S32 (PackageImport/Export), and S48 (TypeParameterDeclaration).
+S32 (PackageImport/Export), S48 (TypeParameterDeclaration), and
+S50 (PackageImportItem).
 
 The actual promotion of typedef-shaped nodes lives in dispatch.promote's
 pass 1 (declarative tree walk). The metadata entries below pin the rule_id
@@ -30,6 +31,9 @@ semantic_name_index for cross-file resolution.
 from __future__ import annotations
 
 import pyslang
+
+from ..common.graph import _add_edge
+from ..common.tokens import _package_import_item_parts
 
 
 def _s9a_package(*args, **kwargs):
@@ -68,6 +72,58 @@ def _s48_type_parameter_declaration(*args, **kwargs):
     return
 
 
+def rule_s50(graph, node, gid, gnode, scope, name_index, leaks, scope_path="",
+             module_gid=None, **_):
+    """S50 — PackageImportItem → granular ``imports_item`` edge per item.
+
+    Strategy (B): S32 keeps its existing per-decl ``imports`` edges for
+    backward compatibility. S50 adds a finer-grained ``imports_item`` edge
+    for each individual ``PackageImportItemSyntax`` node, allowing queries
+    that distinguish ``import pkg_a::foo`` from ``import pkg_b::bar`` inside
+    the same declaration without iterating the S32 ``imports`` edge payload.
+
+    Edge shape:
+      src  = enclosing module / package gid (module_stack top, passed as
+             ``module_gid`` by the dispatch shim — same pattern as S6/S33)
+      dst  = package node gid (or ``_unresolved.<pkg>`` with unresolved=True)
+      type = "imports_item"
+      payload = {"package": <pkg_name>, "symbol": <name_or_"*">}
+
+    Resolution follows S32 convention: ``package:<name>`` key first, then
+    bare name. Compilation-unit-scope items (no enclosing scope, i.e.
+    ``module_gid is None``) are skipped and appended to ``semantic_leaks``.
+    """
+    parts = _package_import_item_parts(node)
+    if parts is None:
+        return
+    pkg_name, symbol = parts
+
+    if module_gid is None:
+        graph.setdefault("semantic_leaks", []).append({
+            "kind": "PackageImportItem",
+            "reason": "cu-scope PackageImportItem skipped",
+            "package": pkg_name,
+            "symbol": symbol,
+        })
+        return
+
+    # Resolve target package node (mirrors S32 resolution convention).
+    tgt_id = name_index.get(f"package:{pkg_name}") or name_index.get(pkg_name)
+    unresolved = False
+    if tgt_id is None:
+        tgt_id = f"_unresolved.{pkg_name}"
+        unresolved = True
+
+    payload = {"package": pkg_name, "symbol": symbol}
+    if unresolved:
+        payload["unresolved"] = True
+    _add_edge(graph, module_gid, tgt_id, "imports_item", **payload)
+
+
+def _s50_stub(*args, **kwargs):
+    return
+
+
 _s9a_package.__rule_id__ = "S9a"
 _s9b_typedef.__rule_id__ = "S9b"
 _s9c_enum_type.__rule_id__ = "S9c"
@@ -77,6 +133,8 @@ _s31_forward_typedef.__rule_id__ = "S31"
 _s32_package_import.__rule_id__ = "S32"
 _s32_package_export.__rule_id__ = "S32"
 _s48_type_parameter_declaration.__rule_id__ = "S48"
+rule_s50.__rule_id__ = "S50"
+_s50_stub.__rule_id__ = "S50"
 
 
 RULES: list[tuple] = [
@@ -89,4 +147,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.PackageImportDeclaration, _s32_package_import),
     (pyslang.SyntaxKind.PackageExportDeclaration, _s32_package_export),
     (pyslang.SyntaxKind.TypeParameterDeclaration, _s48_type_parameter_declaration),
+    (pyslang.SyntaxKind.PackageImportItem, rule_s50),
 ]

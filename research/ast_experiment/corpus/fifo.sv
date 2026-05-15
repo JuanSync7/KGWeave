@@ -26,6 +26,9 @@ module fifo
     timeprecision 1ps;
 
     import fifo_pkg::FULL;
+    // S50 corpus: multi-item PackageImportDeclaration — two PackageImportItem
+    // children in one declaration, exercising the per-item imports_item edge.
+    import fifo_pkg::EMPTY, fifo_pkg::NORMAL;
 
     logic [WIDTH-1:0] mem [DEPTH];
     logic [$clog2(DEPTH):0] wr_ptr;

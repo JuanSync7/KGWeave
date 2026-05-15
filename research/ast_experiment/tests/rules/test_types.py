@@ -259,6 +259,126 @@ def test_s32_unresolved_external_package():
 
 
 # ---------------------------------------------------------------------------
+# S50: PackageImportItem granular imports_item edges
+# ---------------------------------------------------------------------------
+
+
+def test_s50_wildcard_item_edge(multi_graph):
+    """``import fifo_pkg::*;`` emits one ``imports_item`` edge with
+    payload symbol==\"*\" from the fifo module to the fifo_pkg package."""
+    fifo = _by_path(multi_graph, "fifo")
+    pkg = _by_path(multi_graph, "fifo_pkg")
+    assert fifo is not None and pkg is not None
+    edges = [
+        e for e in multi_graph["edges"]
+        if e["src"] == fifo["id"] and e["dst"] == pkg["id"]
+        and e["type"] == "imports_item"
+        and e["payload"].get("symbol") == "*"
+    ]
+    assert len(edges) == 1
+    assert edges[0]["payload"].get("package") == "fifo_pkg"
+    assert edges[0]["payload"].get("unresolved") is not True
+
+
+def test_s50_explicit_item_edges(multi_graph):
+    """``import fifo_pkg::FULL;`` and ``import fifo_pkg::EMPTY, fifo_pkg::NORMAL;``
+    each emit one ``imports_item`` edge with the correct symbol."""
+    fifo = _by_path(multi_graph, "fifo")
+    pkg = _by_path(multi_graph, "fifo_pkg")
+    item_edges = [
+        e for e in multi_graph["edges"]
+        if e["src"] == fifo["id"] and e["dst"] == pkg["id"]
+        and e["type"] == "imports_item"
+    ]
+    symbols = sorted(e["payload"].get("symbol") for e in item_edges)
+    assert symbols == ["*", "EMPTY", "FULL", "NORMAL"], (
+        f"expected [*, EMPTY, FULL, NORMAL] imports_item symbols, got {symbols}"
+    )
+
+
+def test_s50_multi_item_decl_fans_out():
+    """``import a_pkg::A, a_pkg::B;`` — a single PackageImportDeclaration
+    with two PackageImportItem children — emits TWO ``imports_item`` edges
+    (one per item), each with the correct package and symbol payload."""
+    graph = _build_inline_graph(
+        "package a_pkg;\n  parameter int A = 1;\n  parameter int B = 2;\nendpackage\n",
+        "module m;\n  import a_pkg::A, a_pkg::B;\nendmodule\n",
+    )
+    m = _by_path(graph, "m")
+    pkg = _by_path(graph, "a_pkg")
+    assert m is not None and pkg is not None
+    edges = [
+        e for e in graph["edges"]
+        if e["src"] == m["id"] and e["dst"] == pkg["id"]
+        and e["type"] == "imports_item"
+    ]
+    symbols = sorted(e["payload"].get("symbol") for e in edges)
+    assert symbols == ["A", "B"], f"expected [A, B], got {symbols}"
+    for e in edges:
+        assert e["payload"].get("package") == "a_pkg"
+        assert e["payload"].get("unresolved") is not True
+
+
+def test_s50_unresolved_package():
+    """An ``imports_item`` edge for an unresolved package points at
+    ``_unresolved.<pkg>`` with payload unresolved=True."""
+    graph = _build_inline_graph(
+        "module m;\n  import ghost_pkg::foo;\nendmodule\n",
+    )
+    m = _by_path(graph, "m")
+    edges = [
+        e for e in graph["edges"]
+        if e["src"] == m["id"] and e["type"] == "imports_item"
+        and e["payload"].get("package") == "ghost_pkg"
+    ]
+    assert len(edges) == 1
+    assert edges[0]["dst"] == "_unresolved.ghost_pkg"
+    assert edges[0]["payload"].get("symbol") == "foo"
+    assert edges[0]["payload"].get("unresolved") is True
+
+
+def test_s50_byte_equal_roundtrip():
+    """Byte-equal roundtrip: S50 must not mutate token payloads. The fifo.sv
+    corpus (which carries the multi-item import) must round-trip identically
+    through lift → promote → emit."""
+    from research.ast_experiment.src.build import build_kg
+    from research.ast_experiment.src.unlift import emit
+
+    fifo_path = HERE / "corpus" / "fifo.sv"
+    fifo_pkg_path = HERE / "corpus" / "fifo_pkg.sv"
+    # Use fifo.sv alone — emit reconstructs it from token text; multi-file
+    # graphs concatenate sources so test with single-file graph for exact match.
+    graph, _trees, _ = build_kg([fifo_path])
+    source = fifo_path.read_text()
+    result = emit(graph)
+    assert source == result, "byte-equal round-trip failed for fifo.sv after S50 corpus update"
+
+
+def test_s50_does_not_disturb_s32_imports_edges(multi_graph):
+    """S32 ``imports`` edges must still be present alongside S50
+    ``imports_item`` edges — strategy (B) keeps both for backward compat."""
+    fifo = _by_path(multi_graph, "fifo")
+    pkg = _by_path(multi_graph, "fifo_pkg")
+    imports_edges = [
+        e for e in multi_graph["edges"]
+        if e["src"] == fifo["id"] and e["dst"] == pkg["id"]
+        and e["type"] == "imports"
+    ]
+    imports_item_edges = [
+        e for e in multi_graph["edges"]
+        if e["src"] == fifo["id"] and e["dst"] == pkg["id"]
+        and e["type"] == "imports_item"
+    ]
+    # S32 emits one edge per item (*=1, FULL=1, EMPTY=1, NORMAL=1) = 4
+    assert len(imports_edges) >= 1, "S32 imports edges must still exist"
+    # S50 should produce at least the same count
+    assert len(imports_item_edges) >= len(imports_edges), (
+        f"S50 imports_item count {len(imports_item_edges)} should be >= "
+        f"S32 imports count {len(imports_edges)}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # S48: TypeParameterDeclaration promotion
 # ---------------------------------------------------------------------------
 
