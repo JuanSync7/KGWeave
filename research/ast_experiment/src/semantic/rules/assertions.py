@@ -1,4 +1,5 @@
-"""SVA *use sites* — S16 (concurrent) + S17 (immediate) assertion statements.
+"""SVA *use sites* — S16 (concurrent) + S17 (immediate) assertion statements
++ S39 (DefaultDisableDeclaration).
 
 S16 promotes the six concurrent-assertion SyntaxKinds carried by
 ``ConcurrentAssertionStatementSyntax`` nodes. S17 promotes the three
@@ -21,6 +22,14 @@ S17 also recognises the ``DeferredAssertion`` child node (carrying the
 statement to set ``attributes["deferred"] = True`` on the promoted node.
 ``DeferredAssertion`` itself stays CONTAINER (it is a modifier, not a
 queryable entity).
+
+S39 promotes ``default disable iff <expr>;`` — the implicit disable
+condition for all concurrent assertions in a scope. One per enclosing
+module / interface / checker / program. Path key:
+``<scope>.__default_disable__``. A ``has_default_disable`` edge is emitted
+from the enclosing scope. Identifier tokens in the disable expression get
+``reads`` edges so signal dependencies are queryable. Promotion lives in
+pass 1 of ``dispatch.promote`` where ``module_stack`` is maintained.
 
 Planned future S-rule owners under this module (still stubs):
 
@@ -49,6 +58,14 @@ def _s17_assertion(*args, **kwargs):
 _s17_assertion.__rule_id__ = "S17"
 
 
+def rule_s39(*args, **kwargs):
+    """DefaultDisableDeclaration is promoted in pass 1 of dispatch.promote."""
+    return
+
+
+rule_s39.__rule_id__ = "S39"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.AssertPropertyStatement, _s16_assertion),
     (pyslang.SyntaxKind.AssumePropertyStatement, _s16_assertion),
@@ -59,4 +76,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.ImmediateAssertStatement, _s17_assertion),
     (pyslang.SyntaxKind.ImmediateAssumeStatement, _s17_assertion),
     (pyslang.SyntaxKind.ImmediateCoverStatement, _s17_assertion),
+    (pyslang.SyntaxKind.DefaultDisableDeclaration, rule_s39),
 ]

@@ -322,3 +322,95 @@ def test_s17_all_three_immediate_kinds_present(bind_graph):
     kinds = {a["semantic"]["attributes"]["kind"]
              for a in _immediate_assertions(bind_graph)}
     assert kinds == {"assert_immediate", "assume_immediate", "cover_immediate"}
+
+
+# ---------------------------------------------------------------------------
+# S39 — DefaultDisableDeclaration promotion
+# ---------------------------------------------------------------------------
+
+
+def _default_disables(graph):
+    return [n for n in graph["nodes"]
+            if n.get("semantic", {}).get("role") == "default_disable"]
+
+
+def test_s39_node_promoted(bind_graph):
+    """``default disable iff (!rst_n);`` in ``fifo_asserts`` is promoted to a
+    node with role=default_disable and path ``fifo_asserts.__default_disable__``."""
+    nodes = _default_disables(bind_graph)
+    assert len(nodes) == 1, f"expected 1 default_disable node, got {len(nodes)}"
+    n = nodes[0]
+    assert n["semantic"]["path"] == "fifo_asserts.__default_disable__"
+    assert n["semantic"]["name"] == "__default_disable__"
+
+
+def test_s39_has_default_disable_edge(bind_graph):
+    """The enclosing module ``fifo_asserts`` has a ``has_default_disable``
+    edge pointing at the default_disable node."""
+    modules = _by_role(bind_graph, "module")
+    parent = next((m for m in modules if m["semantic"]["name"] == "fifo_asserts"), None)
+    assert parent is not None, "fifo_asserts module not found"
+    dd_nodes = _default_disables(bind_graph)
+    assert len(dd_nodes) == 1
+    edges = [e for e in bind_graph["edges"]
+             if e["type"] == "has_default_disable"
+             and e["src"] == parent["id"]
+             and e["dst"] == dd_nodes[0]["id"]]
+    assert len(edges) == 1, (
+        f"expected one has_default_disable edge from fifo_asserts, got {len(edges)}"
+    )
+
+
+def test_s39_reads_edge_for_disable_signal(bind_graph):
+    """A ``reads`` edge is emitted from the default_disable node to the
+    ``rst_n`` net in the enclosing scope."""
+    dd_nodes = _default_disables(bind_graph)
+    assert len(dd_nodes) == 1
+    dd = dd_nodes[0]
+    reads_edges = [e for e in bind_graph["edges"]
+                   if e["type"] == "reads" and e["src"] == dd["id"]]
+    assert len(reads_edges) >= 1, (
+        f"expected at least one reads edge from default_disable node, got {len(reads_edges)}"
+    )
+    names = {e.get("payload", {}).get("name", "") for e in reads_edges}
+    assert "rst_n" in names, f"expected 'rst_n' in reads edge names, got {names}"
+
+
+def test_s39_name_index_registered(bind_graph):
+    """The default_disable node is registered in the semantic_name_index
+    under ``fifo_asserts.__default_disable__``."""
+    idx = bind_graph.get("semantic_name_index", {})
+    assert "fifo_asserts.__default_disable__" in idx, (
+        f"key not found in index; keys: {[k for k in idx if '__default' in k]}"
+    )
+
+
+def test_s39_round_trip():
+    """Round-trip: lift → emit on the corpus file including the
+    ``default disable iff`` statement preserves the AST class stream byte-for-byte."""
+    from research.ast_experiment.src.lift import lift
+    from research.ast_experiment.src.unlift import emit
+
+    text = BIND.read_text()
+    tree = pyslang.SyntaxTree.fromText(text)
+    graph = lift(tree)
+    emitted = emit(graph)
+    reparsed = pyslang.SyntaxTree.fromText(emitted)
+
+    def _cls_stream(node, out=None):
+        if out is None:
+            out = []
+        out.append(type(node).__name__)
+        try:
+            for c in node:
+                _cls_stream(c, out)
+        except TypeError:
+            pass
+        return out
+
+    orig_stream = _cls_stream(tree.root)
+    rt_stream = _cls_stream(reparsed.root)
+    assert orig_stream == rt_stream, (
+        f"AST class streams diverge after round-trip; first diff at index "
+        f"{next(i for i,(a,b) in enumerate(zip(orig_stream,rt_stream)) if a!=b)}"
+    )

@@ -121,7 +121,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39"}
 
 
 def _is_active(fn) -> bool:
@@ -430,6 +430,52 @@ def promote(
                       name=cname, path=cpath, attributes=attrs)
                 _add_edge(graph, mod_gid, gid, "has_clocking")
                 name_index[cpath] = gid
+        elif c == "DefaultDisableDeclarationSyntax":
+            # S39 — promote ``default disable iff <expr>;`` as a queryable
+            # node under the enclosing module / interface / checker / program.
+            # The LRM allows at most one default disable declaration per scope;
+            # we use the fixed path key ``<scope>.__default_disable__`` to
+            # make this invariant queryable without collision.
+            #
+            # The disable expression is the child node that follows the
+            # ``IffKeyword`` token — structurally a ParenthesizedExpression
+            # (or any valid expr). We walk all descendant identifier tokens to
+            # emit ``reads`` edges so downstream consumers can trace signal
+            # dependencies without pattern-matching source text. No regex.
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                dd_name = "__default_disable__"
+                dd_path = f"{mname}.{dd_name}"
+                _mark(nodes_list[node_offset + idx], role="default_disable",
+                      name=dd_name, path=dd_path)
+                _add_edge(graph, mod_gid, gid, "has_default_disable")
+                name_index[dd_path] = gid
+                # Emit reads edges for all identifier tokens in the disable
+                # expression. Walk the full subtree below this node and
+                # collect every Identifier token; resolve each against the
+                # name index (qualified then bare) and emit reads edges.
+                def _collect_ids(n):
+                    if _is_token(n):
+                        if _token_kind_name(n) == "Identifier":
+                            yield n
+                        return
+                    try:
+                        kids = list(n)
+                    except TypeError:
+                        return
+                    for ch in kids:
+                        if ch is not None:
+                            yield from _collect_ids(ch)
+
+                for id_tok in _collect_ids(node):
+                    sig_name = id_tok.valueText
+                    tgt_id = name_index.get(f"{mname}.{sig_name}")
+                    if tgt_id is None:
+                        tgt_id = name_index.get(sig_name)
+                    if tgt_id is not None and tgt_id != gid:
+                        if not _has_edge(graph, gid, tgt_id, "reads"):
+                            _add_edge(graph, gid, tgt_id, "reads",
+                                      name=sig_name)
         elif c in ("ProceduralAssignStatementSyntax",
                    "ProceduralDeassignStatementSyntax"):
             # S19/S20 — promote procedural-continuous-drive statements that

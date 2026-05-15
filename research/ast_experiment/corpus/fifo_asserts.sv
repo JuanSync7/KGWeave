@@ -10,6 +10,12 @@ module fifo_asserts(
     input logic full,
     input logic push
 );
+    // S39 — default disable condition for all concurrent assertions in this
+    // scope. ``rst_n`` is referenced in the iff expression; the rule must
+    // emit a ``reads`` edge from the default_disable node to the port.
+    logic rst_n;
+    default disable iff (!rst_n);
+
     // Placeholder assertions — body is intentionally empty for the
     // round-trip corpus. The semantic edge is independent of contents.
     property p_push_implies_not_full;

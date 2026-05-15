@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 49 | 83 | 0 | 52 |
+| PROMOTE | 135 | 49 | 84 | 0 | 51 |
 | CONTAINER | 88 | 23 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -65,7 +65,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `DefParam` | ⬜ | ⬜ | future |
 | `DefParamAssignment` | ⬜ | ⬜ | future |
 | `DefaultClockingReference` | ⬜ | ⬜ | future |
-| `DefaultDisableDeclaration` | ⬜ | ⬜ | future |
+| `DefaultDisableDeclaration` | ⬜ | ✅ | S39 |
 | `DefaultFunctionPort` | ⬜ | ⬜ | future |
 | `DeferredAssertion` | ✅ | ⬜ | future |
 | `EnumType` | ✅ | ✅ | S9c |
