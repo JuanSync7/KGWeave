@@ -68,3 +68,10 @@ module tb_fifo;
     end
 
 endmodule
+
+// S49 — AnonymousProgram corpus: unnamed program block (SV §24.4).
+// An anonymous program is an unnamed compilation-unit-level scope (LRM §24.4).
+// Per pyslang, member items inside ``program; ... endprogram`` emit
+// NotAllowedInAnonymousProgram diagnostics when present, so this corpus
+// exercises the minimal parseable form — the empty unnamed block.
+program; endprogram

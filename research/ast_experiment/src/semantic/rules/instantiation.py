@@ -1,7 +1,8 @@
-"""Instantiation rules — S6 + S7 + S13 + S33.
+"""Instantiation rules — S6 + S7 + S13 + S33 + S49.
 
 Owns the pyslang.SyntaxKind set for hierarchy instantiation, parameter
-overrides, bind directives, and gate-level primitive instantiations:
+overrides, bind directives, gate-level primitive instantiations, and
+anonymous program blocks:
 
 * HierarchyInstantiation
 * HierarchicalInstance
@@ -12,6 +13,7 @@ overrides, bind directives, and gate-level primitive instantiations:
 * OrderedParamAssignment
 * BindDirective
 * PrimitiveInstantiation     (S33)
+* AnonymousProgram           (S49)
 """
 
 from __future__ import annotations
@@ -632,6 +634,27 @@ def _s7_ordered_param_assignment(*args, **kwargs):
     return
 
 
+def rule_s49(*args, **kwargs):
+    """S49: AnonymousProgram — promotion metadata stub.
+
+    The ``program; ... endprogram`` unnamed program block (SV §24.4) is
+    promoted in pass-1 of dispatch.promote via the ``AnonymousProgramSyntax``
+    class branch.  That branch uses the lesson-2 subtler variant (push onto
+    ``module_stack``) so child declarations inside the anonymous program
+    automatically attach to it as their semantic parent — identical to the
+    S30 named-program treatment.
+
+    Path key: ``__anon_program_<offset>__`` where ``<offset>`` is the byte
+    offset of the ``program`` keyword token (unique per compilation unit).
+    Attribute: ``anonymous=True`` distinguishes this node from S30 named
+    programs in downstream queries.
+    """
+    return
+
+
+rule_s49.__rule_id__ = "S49"
+
+
 rule_s6.__rule_id__ = "S6"
 rule_s13.__rule_id__ = "S13"
 rule_s33.__rule_id__ = "S33"
@@ -660,4 +683,8 @@ RULES: list[tuple] = [
     # ScopedName target and EqualsValueClause RHS.
     (pyslang.SyntaxKind.DefParam, _s43_stub),
     (pyslang.SyntaxKind.DefParamAssignment, rule_s43),
+    # S49 — AnonymousProgram: unnamed ``program; ... endprogram`` block.
+    # Promotion runs in pass-1 of dispatch.promote (own class
+    # AnonymousProgramSyntax, no shared-class ambiguity).
+    (pyslang.SyntaxKind.AnonymousProgram, rule_s49),
 ]

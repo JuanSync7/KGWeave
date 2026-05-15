@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 49 | 94 | 0 | 41 |
+| PROMOTE | 135 | 49 | 95 | 0 | 40 |
 | CONTAINER | 88 | 23 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -27,7 +27,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `AlwaysCombBlock` | ⬜ | ✅ | S8 |
 | `AlwaysFFBlock` | ⬜ | ✅ | S3 |
 | `AlwaysLatchBlock` | ⬜ | ✅ | S35 |
-| `AnonymousProgram` | ⬜ | ⬜ | future |
+| `AnonymousProgram` | ⬜ | ✅ | S49 |
 | `AssertPropertyStatement` | ⬜ | ✅ | S16 |
 | `AssertionItemPort` | ⬜ | ⬜ | future |
 | `AssertionItemPortList` | ⬜ | ⬜ | future |

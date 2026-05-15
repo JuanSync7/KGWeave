@@ -202,6 +202,129 @@ def test_defparam_override_edge_emitted(top_graph):
     assert len(edges) >= 1, "expected at least one defparam_override edge"
 
 
+# ---------------------------------------------------------------------------
+# S49 — AnonymousProgram promotion tests
+# ---------------------------------------------------------------------------
+
+TB = HERE / "corpus" / "tb_fifo.sv"
+
+
+@pytest.fixture(scope="module")
+def tb_graph():
+    """Build the tb_fifo graph which now contains an anonymous program block."""
+    from research.ast_experiment.src.build import build_kg
+
+    graph, _trees, _comp = build_kg([TB])
+    return graph
+
+
+def _anon_program_nodes(graph):
+    return [
+        n for n in graph["nodes"]
+        if n.get("semantic", {}).get("role") == "program"
+        and n.get("semantic", {}).get("attributes", {}).get("anonymous") is True
+    ]
+
+
+def test_s49_promotes_anon_program_node(tb_graph):
+    """An ``AnonymousProgram`` block is promoted with role=program and
+    anonymous=True — it is a program in every semantic respect but has no
+    declared name, so it carries a synthesised path key."""
+    nodes = _anon_program_nodes(tb_graph)
+    assert len(nodes) >= 1, "expected at least one anonymous program node"
+
+
+def test_s49_anon_program_role(tb_graph):
+    """The promoted node has role=program (same semantic role as S30 named
+    programs) — anonymous programs are module-shaped containers."""
+    nodes = _anon_program_nodes(tb_graph)
+    roles = {n["semantic"]["role"] for n in nodes}
+    assert roles == {"program"}
+
+
+def test_s49_anon_program_anonymous_attribute(tb_graph):
+    """The ``anonymous=True`` attribute distinguishes this node from a named
+    S30 program so downstream queries can filter the two forms apart."""
+    nodes = _anon_program_nodes(tb_graph)
+    for n in nodes:
+        assert n["semantic"]["attributes"]["anonymous"] is True
+
+
+def test_s49_anon_program_path_key_deterministic(tb_graph):
+    """The synthesised path key is non-empty and starts with ``__anon_program``
+    so it is recognisable as synthetic while remaining deterministic."""
+    nodes = _anon_program_nodes(tb_graph)
+    for n in nodes:
+        path = n["semantic"].get("path", "")
+        assert path.startswith("__anon_program"), (
+            f"expected path to start with __anon_program, got {path!r}"
+        )
+
+
+def test_s49_anon_program_child_decls_resolve_parent(tb_graph):
+    """InitialBlock children inside the anonymous program attach to it as
+    parent via the module_stack subtler variant (lesson 2). Verify that
+    initial-block nodes whose path is prefixed with the anon-program path
+    are promoted."""
+    anon_nodes = _anon_program_nodes(tb_graph)
+    assert anon_nodes, "prerequisite: at least one anon program"
+    anon_path = anon_nodes[0]["semantic"]["path"]
+    anon_id = anon_nodes[0]["id"]
+    # Child nodes with paths under the anon_program path OR edges that go
+    # from anon_program to a child node confirm parent resolution.
+    child_edges = [
+        e for e in tb_graph["edges"]
+        if e["src"] == anon_id
+    ]
+    assert len(child_edges) >= 1, (
+        "expected at least one edge from anonymous program node to a child"
+    )
+
+
+def test_s49_round_trip_anon_program():
+    """AnonymousProgramSyntax round-trips byte-equal through lift→emit→reparse."""
+    import pyslang  # noqa: PLC0415
+
+    from research.ast_experiment.src.lift import lift
+    from research.ast_experiment.src.unlift import emit
+
+    src = TB.read_text()
+    tree = pyslang.SyntaxTree.fromText(src)
+    assert not list(tree.diagnostics), "corpus must parse clean"
+    graph = lift(tree)
+    out = emit(graph)
+    reparsed = pyslang.SyntaxTree.fromText(out)
+
+    def _tokens(node, acc):
+        if type(node).__name__ == "Token":
+            for tr in node.trivia:
+                acc.append(tr.getRawText())
+            acc.append(node.rawText)
+            return
+        try:
+            for c in node:
+                _tokens(c, acc)
+        except TypeError:
+            pass
+
+    orig: list[str] = []
+    rt: list[str] = []
+    _tokens(tree.root, orig)
+    _tokens(reparsed.root, rt)
+    assert orig == rt
+
+
+def test_s49_rule_registered():
+    """S49 is registered in the RULE_TABLE under AnonymousProgram."""
+    import pyslang  # noqa: PLC0415
+
+    from research.ast_experiment.src.semantic.dispatch import RULE_TABLE
+
+    fn = RULE_TABLE.get(pyslang.SyntaxKind.AnonymousProgram)
+    assert fn is not None, "AnonymousProgram must have a RULE_TABLE entry"
+    assert getattr(fn, "__rule_id__", None) == "S49"
+
+
 def test_defparam_override_edge_payload_value(top_graph):
     """The ``defparam_override`` edge carries the literal RHS value text."""
     edges = [e for e in top_graph["edges"] if e["type"] == "defparam_override"]

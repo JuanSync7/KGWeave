@@ -125,7 +125,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49"}
 
 
 def _is_active(fn) -> bool:
@@ -288,6 +288,49 @@ def promote(
             name_index[key_prefix + mname] = gid
             name_index[mname] = gid
             port_names_by_module.setdefault(mname, set())
+        elif c == "AnonymousProgramSyntax":
+            # S49 — promote ``program; ... endprogram`` unnamed program blocks
+            # (SV §24.4). pyslang uses a dedicated ``AnonymousProgramSyntax``
+            # class (no shared-class ambiguity with ModuleDeclarationSyntax).
+            #
+            # Semantics mirror S30 named programs — the container is
+            # module-shaped (holds ports / initial blocks / instances exactly
+            # like a module), so we use the lesson-2 subtler variant: push
+            # onto ``module_stack``.  Existing S14/S15/S16/S18/S22/S24
+            # branches that key on ``_cur_module()`` will automatically attach
+            # child declarations to the anonymous program.
+            #
+            # Path key: ``__anon_program_<offset>__`` where <offset> is the
+            # byte offset of the ``program`` keyword token — unique per
+            # compilation unit even when multiple anonymous programs appear in
+            # the same file.
+            #
+            # Attribute: ``anonymous=True`` distinguishes this node from S30
+            # named programs so downstream queries can filter the two forms.
+            kw_tok = getattr(node, "keyword", None)
+            kw_offset = 0
+            if kw_tok is not None:
+                loc = getattr(kw_tok, "location", None)
+                if loc is not None:
+                    kw_offset = getattr(loc, "offset", 0) or 0
+            aname = f"__anon_program_{kw_offset}__"
+            _mark(nodes_list[node_offset + idx], role="program",
+                  name=aname, path=aname,
+                  attributes={"anonymous": True})
+            name_index[aname] = gid
+            # Push onto module_stack so child items (initial blocks, nets,
+            # instances…) resolve _cur_module() to this anonymous program.
+            state["module_stack"].append((gid, aname))
+            popped_module = True
+            # Containment edge: if there is an enclosing module/program on
+            # the stack (the entry BEFORE this push), emit ``has_program``
+            # mirroring the S30 nested-program handling.  We already popped
+            # the parent off the snapshot taken before the push — re-read it
+            # from the stack by looking one level below the top.
+            if len(state["module_stack"]) >= 2:
+                parent_gid_ap, _ = state["module_stack"][-2]
+                if parent_gid_ap is not None:
+                    _add_edge(graph, parent_gid_ap, gid, "has_program")
         elif c == "ModportItemSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:
@@ -1838,6 +1881,18 @@ def promote(
         if c == "ModuleDeclarationSyntax":
             mname = _module_name_of(node)
             state2["module_stack"].append((gid, mname))
+            popped = True
+        elif c == "AnonymousProgramSyntax":
+            # S49 — mirror pass-1 push so pass-2 child rules (S6/S33/etc.)
+            # see the anonymous program as their enclosing module scope.
+            kw_tok2 = getattr(node, "keyword", None)
+            kw_off2 = 0
+            if kw_tok2 is not None:
+                loc2 = getattr(kw_tok2, "location", None)
+                if loc2 is not None:
+                    kw_off2 = getattr(loc2, "offset", 0) or 0
+            aname2 = f"__anon_program_{kw_off2}__"
+            state2["module_stack"].append((gid, aname2))
             popped = True
         if c == "FunctionDeclarationSyntax":
             state2["in_function"] += 1
