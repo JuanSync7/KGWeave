@@ -1,4 +1,4 @@
-"""Generate rules — S12: loop/if/case generate + elaborated blocks.
+"""Generate rules — S12: loop/if/case generate + elaborated blocks; S38: genvar.
 
 Owns the pyslang.SyntaxKind set for SystemVerilog generate constructs:
 
@@ -7,6 +7,7 @@ Owns the pyslang.SyntaxKind set for SystemVerilog generate constructs:
 * IfGenerate
 * CaseGenerate
 * GenerateRegion
+* GenvarDeclaration
 """
 
 from __future__ import annotations
@@ -129,11 +130,25 @@ def _s12_generate_region(*args, **kwargs):
     return
 
 
+def rule_s38(*args, **kwargs):
+    """S38: GenvarDeclaration — promoted in pass-1 of the walker.
+
+    A single ``genvar i, j, k;`` declaration may carry multiple identifiers.
+    Pass-1 in ``dispatch.promote`` fans each identifier out to its own
+    queryable node (canonical node for the first, synthetic nodes for the
+    rest) and emits a ``has_genvar`` edge from the enclosing module to each.
+    This stub exists as an ownership marker for the BUCKET_1_CHECKLIST; it
+    has no runtime effect at the pass-2 dispatch site.
+    """
+    return
+
+
 rule_s12.__rule_id__ = "S12a"
 _s12_generate_block.__rule_id__ = "S12b"
 _s12_if_generate.__rule_id__ = "S12c"
 _s12_case_generate.__rule_id__ = "S12c"
 _s12_generate_region.__rule_id__ = "S12c"
+rule_s38.__rule_id__ = "S38"
 
 
 RULES: list[tuple] = [
@@ -142,4 +157,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.IfGenerate, _s12_if_generate),
     (pyslang.SyntaxKind.CaseGenerate, _s12_case_generate),
     (pyslang.SyntaxKind.GenerateRegion, _s12_generate_region),
+    (pyslang.SyntaxKind.GenvarDeclaration, rule_s38),
 ]

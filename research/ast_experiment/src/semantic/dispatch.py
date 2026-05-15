@@ -121,7 +121,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38"}
 
 
 def _is_active(fn) -> bool:
@@ -1097,6 +1097,74 @@ def promote(
                     name_index[ppath] = gid
                     port_names_by_module.setdefault(mname, set()).add(pname)
             pushed = "in_port"
+        elif c == "GenvarDeclarationSyntax":
+            # S38 — promote ``genvar <id1>, <id2>, ...;`` declarations.
+            # A single GenvarDeclarationSyntax may declare multiple identifiers
+            # (``genvar i, j, k;``). We promote one queryable ``genvar`` node
+            # per identifier: the canonical syntax node gets the first name,
+            # and synthetic nodes (appended to nodes_list — same pattern used
+            # by S12 for elaborated GenerateBlock entries) carry the remaining
+            # names. Each node gets a ``has_genvar`` edge from the enclosing
+            # module and is registered in the name_index so that for-generate
+            # loops and elaboration can resolve the genvar by path.
+            #
+            # Identifier extraction: walk direct children for
+            # ``IdentifierNameSyntax`` nodes and collect the ``valueText`` of
+            # their ``Identifier`` token child. The SeparatedList interleaves
+            # commas (Token) with IdentifierNameSyntax nodes; we skip tokens.
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                genvar_names: list[str] = []
+                for ch in node:
+                    if _is_token(ch):
+                        continue
+                    if _cls(ch) == "IdentifierNameSyntax":
+                        for tok in ch:
+                            if _is_token(tok) and _token_kind_name(tok) == "Identifier":
+                                genvar_names.append(tok.valueText)
+                                break
+                    elif _cls(ch) == "SyntaxNode":
+                        # SeparatedList wrapper — descend one level
+                        try:
+                            for item in ch:
+                                if _is_token(item):
+                                    continue
+                                if _cls(item) == "IdentifierNameSyntax":
+                                    for tok in item:
+                                        if (_is_token(tok)
+                                                and _token_kind_name(tok) == "Identifier"):
+                                            genvar_names.append(tok.valueText)
+                                            break
+                        except TypeError:
+                            pass
+                # First name goes on the canonical syntax node.
+                if genvar_names:
+                    first = genvar_names[0]
+                    first_path = f"{mname}.{first}"
+                    _mark(nodes_list[node_offset + idx], role="genvar",
+                          name=first, path=first_path)
+                    _add_edge(graph, mod_gid, gid, "has_genvar")
+                    name_index[first_path] = gid
+                    # 2nd+ names get synthetic sibling nodes so each genvar
+                    # identifier is independently queryable by path.
+                    for extra_name in genvar_names[1:]:
+                        extra_path = f"{mname}.{extra_name}"
+                        extra_id = f"genvar:{extra_path}"
+                        nodes_list.append({
+                            "id": extra_id,
+                            "type": "GenvarDeclarationSyntax",
+                            "kind": "GenvarDeclaration",
+                            "is_token": False,
+                            "payload": {"synthetic": True},
+                            "queryable": True,
+                            "semantic": {
+                                "role": "genvar",
+                                "name": extra_name,
+                                "path": extra_path,
+                            },
+                        })
+                        _add_edge(graph, mod_gid, extra_id, "has_genvar")
+                        name_index[extra_path] = extra_id
         elif c == "ParameterDeclarationSyntax":
             pushed = "in_param"
         elif c == "DataDeclarationSyntax":

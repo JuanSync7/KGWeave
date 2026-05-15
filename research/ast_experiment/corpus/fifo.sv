@@ -99,3 +99,15 @@ module latch_demo (
         end
     end
 endmodule
+
+// S38 corpus: genvar declaration (single and multi-identifier) + for-generate.
+// Exercises:
+//   genvar i;            — single genvar
+//   genvar j, k;         — multi-genvar (two identifiers in one declaration)
+//   for (i = 0; ...) begin : g_ent  — for-generate referencing i
+module genvar_demo #(parameter int N = 4) ();
+    genvar i;
+    genvar j, k;
+    for (i = 0; i < N; i = i + 1) begin : g_ent
+    end
+endmodule
