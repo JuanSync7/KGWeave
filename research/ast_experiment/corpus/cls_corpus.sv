@@ -29,6 +29,13 @@ package cls_pkg;
     T value;
   endclass
 
+  // S48 corpus: multi-assignment form — one TypeParameterDeclaration with
+  // two TypeAssignment children: parameter type A = int, B = bit;
+  class multi_type_xact #(type A = int, B = bit);
+    A a_val;
+    B b_val;
+  endclass
+
   class printable_xact extends base_xact implements printable;
     virtual function void print();
     endfunction

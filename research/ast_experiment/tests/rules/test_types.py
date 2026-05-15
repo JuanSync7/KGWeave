@@ -1,4 +1,5 @@
 """S31: struct/union typedef enrichment + ForwardTypedefDeclaration promotion.
+S48: TypeParameterDeclaration promotion (parameter type T = ...).
 
 The corpus ``fifo_pkg.sv`` exercises four typedef variants under
 ``package fifo_pkg``:
@@ -9,6 +10,12 @@ The corpus ``fifo_pkg.sv`` exercises four typedef variants under
 * ``fifo_iu_t`` — ``typedef union { ... } ...`` (S31 union body).
 * ``fifo_fwd_t`` — ``typedef fifo_fwd_t;`` bare forward declaration (S31
   ForwardTypedefDeclaration → role=typedef_forward).
+
+S48 exercises:
+* ``fifo`` module — ``parameter type DATA_T = logic [7:0]`` single assignment.
+* ``cls_pkg.para_xact`` — ``#(type T = int)`` class type parameter.
+* ``cls_pkg.multi_type_xact`` — ``#(type A = int, B = bit)`` multi-assignment
+  (one TypeParameterDeclaration, two TypeAssignment children → two nodes).
 """
 
 from __future__ import annotations
@@ -21,6 +28,7 @@ import pytest
 HERE = Path(__file__).resolve().parent.parent.parent
 PKG = HERE / "corpus" / "fifo_pkg.sv"
 FIFO = HERE / "corpus" / "fifo.sv"
+CLS = HERE / "corpus" / "cls_corpus.sv"
 
 
 @pytest.fixture(scope="module")
@@ -248,3 +256,141 @@ def test_s32_unresolved_external_package():
     assert len(edges) == 1
     assert edges[0]["dst"] == "_unresolved.nowhere_pkg"
     assert edges[0]["payload"].get("unresolved") is True
+
+
+# ---------------------------------------------------------------------------
+# S48: TypeParameterDeclaration promotion
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def fifo_graph():
+    """fifo.sv alone — exercises the module-scoped type parameter."""
+    from research.ast_experiment.src.build import build_kg
+
+    graph, _trees, _comp = build_kg([FIFO])
+    return graph
+
+
+@pytest.fixture(scope="module")
+def cls_graph():
+    """cls_corpus.sv alone — exercises class-scoped type parameters."""
+    from research.ast_experiment.src.build import build_kg
+
+    graph, _trees, _comp = build_kg([CLS])
+    return graph
+
+
+def test_s48_module_type_param_promoted(fifo_graph):
+    """``parameter type DATA_T = logic [7:0]`` in module fifo promotes to a
+    node with role=type_param and path=fifo.DATA_T."""
+    node = _by_path(fifo_graph, "fifo.DATA_T")
+    assert node is not None, "fifo.DATA_T not found in graph"
+    sem = node["semantic"]
+    assert sem["role"] == "type_param"
+    assert sem["name"] == "DATA_T"
+
+
+def test_s48_module_type_param_default_type(fifo_graph):
+    """The promoted node carries default_type capturing the RHS type text."""
+    node = _by_path(fifo_graph, "fifo.DATA_T")
+    assert node is not None
+    dt = node["semantic"]["attributes"].get("default_type", "")
+    assert dt != "", "default_type must be non-empty for DATA_T"
+    assert "logic" in dt
+
+
+def test_s48_module_type_param_edge(fifo_graph):
+    """A ``has_type_param`` edge is emitted from the fifo module to DATA_T."""
+    fifo = _by_path(fifo_graph, "fifo")
+    node = _by_path(fifo_graph, "fifo.DATA_T")
+    assert fifo is not None and node is not None
+    edges = [
+        e for e in fifo_graph["edges"]
+        if e["src"] == fifo["id"] and e["dst"] == node["id"]
+        and e["type"] == "has_type_param"
+    ]
+    assert len(edges) == 1
+
+
+def test_s48_module_type_param_name_index(fifo_graph):
+    """fifo.DATA_T is registered in the semantic_name_index."""
+    idx = fifo_graph.get("semantic_name_index", {})
+    assert "fifo.DATA_T" in idx
+
+
+def test_s48_class_type_param_promoted(cls_graph):
+    """``#(type T = int)`` on class para_xact yields a type_param node at
+    path cls_pkg.para_xact.T."""
+    node = _by_path(cls_graph, "cls_pkg.para_xact.T")
+    assert node is not None, "cls_pkg.para_xact.T not found"
+    assert node["semantic"]["role"] == "type_param"
+    assert node["semantic"]["attributes"].get("default_type") == "int"
+
+
+def test_s48_class_type_param_edge(cls_graph):
+    """A ``has_type_param`` edge connects para_xact to its type parameter T."""
+    cls = _by_path(cls_graph, "cls_pkg.para_xact")
+    node = _by_path(cls_graph, "cls_pkg.para_xact.T")
+    assert cls is not None and node is not None
+    edges = [
+        e for e in cls_graph["edges"]
+        if e["src"] == cls["id"] and e["dst"] == node["id"]
+        and e["type"] == "has_type_param"
+    ]
+    assert len(edges) == 1
+
+
+def test_s48_multi_assignment_yields_two_nodes(cls_graph):
+    """``#(type A = int, B = bit)`` on class multi_type_xact promotes two
+    separate type_param nodes: cls_pkg.multi_type_xact.A and .B."""
+    node_a = _by_path(cls_graph, "cls_pkg.multi_type_xact.A")
+    node_b = _by_path(cls_graph, "cls_pkg.multi_type_xact.B")
+    assert node_a is not None, "cls_pkg.multi_type_xact.A not found"
+    assert node_b is not None, "cls_pkg.multi_type_xact.B not found"
+    assert node_a["semantic"]["role"] == "type_param"
+    assert node_b["semantic"]["role"] == "type_param"
+    assert node_a["semantic"]["attributes"].get("default_type") == "int"
+    assert node_b["semantic"]["attributes"].get("default_type") == "bit"
+
+
+def test_s48_multi_assignment_both_edges(cls_graph):
+    """Both A and B get has_type_param edges from multi_type_xact."""
+    cls = _by_path(cls_graph, "cls_pkg.multi_type_xact")
+    node_a = _by_path(cls_graph, "cls_pkg.multi_type_xact.A")
+    node_b = _by_path(cls_graph, "cls_pkg.multi_type_xact.B")
+    assert cls is not None
+    tp_edges = [
+        e for e in cls_graph["edges"]
+        if e["src"] == cls["id"] and e["type"] == "has_type_param"
+    ]
+    dst_ids = {e["dst"] for e in tp_edges}
+    assert node_a["id"] in dst_ids
+    assert node_b["id"] in dst_ids
+
+
+def test_s48_no_default_type_is_absent(tmp_path):
+    """``parameter type T;`` (no default) promotes with no default_type attr."""
+    from research.ast_experiment.src.build import build_kg
+
+    sv = tmp_path / "nodefault.sv"
+    sv.write_text("module m #(parameter type T); endmodule\n")
+    graph, _, _ = build_kg([sv])
+    node = _by_path(graph, "m.T")
+    assert node is not None
+    assert node["semantic"]["role"] == "type_param"
+    dt = node["semantic"].get("attributes", {}).get("default_type")
+    assert dt is None or dt == ""
+
+
+def test_s48_roundtrip(fifo_graph):
+    """Byte-equal round-trip: lift → promote → emit must reproduce the
+    source text for fifo.sv, confirming S48 did not mutate token payloads."""
+    from research.ast_experiment.src.build import build_kg
+    from research.ast_experiment.src.unlift import emit
+
+    fifo_path = HERE / "corpus" / "fifo.sv"
+    graph, _trees, _ = build_kg([fifo_path])
+    source = fifo_path.read_text()
+    result = emit(graph)
+    assert source == result, "byte-equal round-trip failed for fifo.sv"

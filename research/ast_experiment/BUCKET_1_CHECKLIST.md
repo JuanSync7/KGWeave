@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 49 | 93 | 0 | 42 |
+| PROMOTE | 135 | 49 | 94 | 0 | 41 |
 | CONTAINER | 88 | 23 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -152,7 +152,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `SystemName` | ✅ | ✅ | S5 |
 | `TaskDeclaration` | ⬜ | ✅ | S10 |
 | `TimeUnitsDeclaration` | ⬜ | ✅ | S47 |
-| `TypeParameterDeclaration` | ✅ | ⬜ | future |
+| `TypeParameterDeclaration` | ✅ | ✅ | S48 |
 | `TypedefDeclaration` | ✅ | ✅ | S9b |
 | `UnionType` | ⬜ | ✅ | S31 |
 | `UserDefinedNetDeclaration` | ⬜ | ⬜ | future |

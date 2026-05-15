@@ -1,11 +1,15 @@
 // S47 corpus: timeunit / timeprecision directives inside a module.
 // Both the keyword-separated form (two statements) and the combined
 // timeunit <unit> / <prec>; form are exercised here and in fifo_pkg.sv.
+//
+// S48 corpus: TypeParameterDeclaration — parameter type DATA_T = logic [7:0]
+// exercises the single-assignment form with a default type.
 module fifo
     import fifo_pkg::*;
 #(
     parameter int DEPTH = 8,
-    parameter int WIDTH = 32
+    parameter int WIDTH = 32,
+    parameter type DATA_T = logic [7:0]
 ) (
     input  logic              clk,
     input  logic              rst_n,

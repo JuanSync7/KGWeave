@@ -125,7 +125,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48"}
 
 
 def _is_active(fn) -> bool:
@@ -1351,6 +1351,151 @@ def promote(
                           attributes={"forward": True})
                     _add_edge(graph, mod_gid, gid, "has_typedef")
                     name_index[fpath] = gid
+        elif c == "TypeParameterDeclarationSyntax":
+            # S48 — promote ``parameter type T = int;`` / ``parameter type
+            # DATA_T = logic [7:0];`` type parameters declared in module /
+            # class / interface parameter-port lists.
+            #
+            # A single TypeParameterDeclarationSyntax may contain multiple
+            # TypeAssignment children when written as
+            # ``parameter type A = int, B = bit;`` (one keyword, two names).
+            # Mirror S1's Declarator multi-name pattern: the canonical syntax
+            # node gets the first name; each additional name gets a synthetic
+            # sibling node appended to nodes_list (same pattern as S38 genvar).
+            #
+            # Parent resolution: prefer class_stack (class type parameters)
+            # over module_stack (module / interface / package type parameters).
+            # This is correct because TypeParameterDeclarationSyntax is always
+            # visited inside the ClassDeclarationSyntax / ModuleDeclarationSyntax
+            # subtree AFTER the parent has been pushed onto its respective stack.
+            #
+            # Default type: walk the EqualsTypeClauseSyntax child of each
+            # TypeAssignmentSyntax and collect all token valueTexts to form a
+            # whitespace-joined type string. Absent when no ``= <type>`` clause
+            # exists (``parameter type T;`` without default).
+            #
+            # No regex on source text — all extraction via token kind / node
+            # class inspection (CLAUDE.md invariant 4).
+            if state["class_stack"]:
+                scope_gid, scope_path = state["class_stack"][-1]
+            else:
+                scope_gid, scope_path = _cur_module()
+            if scope_gid is not None:
+                # Collect all TypeAssignment children from the SeparatedList.
+                # Structure: TypeParameterDeclarationSyntax
+                #   Token [ParameterKeyword]
+                #   Token [TypeKeyword]
+                #   SyntaxNode [SeparatedList]   ← walk this
+                #     TypeAssignmentSyntax …
+                #     Token [Comma]
+                #     TypeAssignmentSyntax …
+                type_assignments: list[tuple[str, str | None]] = []
+                for ch in node:
+                    if ch is None or _is_token(ch):
+                        continue
+                    # SeparatedList wrapper — one level down
+                    try:
+                        for item in ch:
+                            if item is None or _is_token(item):
+                                continue
+                            if _cls(item) == "TypeAssignmentSyntax":
+                                # First direct token child is the Identifier.
+                                tpname = ""
+                                default_type: str | None = None
+                                for sub in item:
+                                    if sub is None:
+                                        continue
+                                    if _is_token(sub):
+                                        tkind = _token_kind_name(sub)
+                                        if tkind == "Identifier" and not tpname:
+                                            tpname = sub.valueText
+                                    else:
+                                        # EqualsTypeClauseSyntax — collect all
+                                        # token valueTexts from the type part
+                                        # (skip the leading '=' token).
+                                        sub_kind = str(
+                                            getattr(sub, "kind", "")
+                                        ).rsplit(".", 1)[-1]
+                                        if sub_kind == "EqualsTypeClause":
+                                            # Walk EqualsTypeClause children
+                                            # skipping the leading '=' token,
+                                            # then recursively collect all
+                                            # remaining token valueTexts.
+                                            def _collect_toks(
+                                                n: Any,
+                                                out: list[str],
+                                            ) -> None:
+                                                try:
+                                                    for t in n:
+                                                        if t is None:
+                                                            continue
+                                                        if _is_token(t):
+                                                            v = t.valueText
+                                                            if v:
+                                                                out.append(v)
+                                                        else:
+                                                            _collect_toks(t, out)
+                                                except TypeError:
+                                                    pass
+                                            pieces: list[str] = []
+                                            saw_eq = False
+                                            for eq_child in sub:
+                                                if eq_child is None:
+                                                    continue
+                                                if _is_token(eq_child):
+                                                    if not saw_eq:
+                                                        saw_eq = True
+                                                        # skip the '=' token
+                                                    else:
+                                                        v = eq_child.valueText
+                                                        if v:
+                                                            pieces.append(v)
+                                                else:
+                                                    _collect_toks(eq_child, pieces)
+                                            default_type = " ".join(pieces) if pieces else None
+                                if tpname:
+                                    type_assignments.append((tpname, default_type))
+                    except TypeError:
+                        pass
+                # Promote: canonical node gets first assignment, synthetic
+                # nodes carry the remaining ones (mirrors S38 genvar).
+                for assign_idx, (tpname, default_type) in enumerate(type_assignments):
+                    tppath = f"{scope_path}.{tpname}"
+                    attrs: dict[str, Any] = {}
+                    if default_type:
+                        attrs["default_type"] = default_type
+                    if assign_idx == 0:
+                        # Canonical node — mark the existing graph node.
+                        if attrs:
+                            _mark(nodes_list[node_offset + idx],
+                                  role="type_param", name=tpname, path=tppath,
+                                  attributes=attrs)
+                        else:
+                            _mark(nodes_list[node_offset + idx],
+                                  role="type_param", name=tpname, path=tppath)
+                        _add_edge(graph, scope_gid, gid, "has_type_param")
+                        name_index[tppath] = gid
+                    else:
+                        # Synthetic sibling node for 2nd+ assignments.
+                        syn_id = f"type_param:{tppath}"
+                        syn_node: dict[str, Any] = {
+                            "id": syn_id,
+                            "type": "TypeParameterDeclarationSyntax",
+                            "kind": "TypeParameterDeclaration",
+                            "is_token": False,
+                            "payload": {"synthetic": True},
+                            "queryable": True,
+                            "semantic": {
+                                "role": "type_param",
+                                "name": tpname,
+                                "path": tppath,
+                            },
+                        }
+                        if attrs:
+                            syn_node["semantic"]["attributes"] = attrs
+                        nodes_list.append(syn_node)
+                        _add_edge(graph, scope_gid, syn_id, "has_type_param")
+                        name_index[tppath] = syn_id
         elif c in ("PackageImportDeclarationSyntax",
                    "PackageExportDeclarationSyntax"):
             # S32 — package import / export declarations. We do NOT promote
