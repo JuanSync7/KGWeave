@@ -125,7 +125,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46"}
 
 
 def _is_active(fn) -> bool:
@@ -1172,6 +1172,57 @@ def promote(
                                   f"_unresolved.{exp_name}", "dpi_exports",
                                   spec=spec, export_kind=export_kind,
                                   unresolved=True)
+        elif c == "NetAliasSyntax":
+            # S46 — edge-only: ``alias a = b = c;`` (SV §10.11)
+            # A net alias declares bidirectional equivalence between nets; it
+            # has no independent identity.  Representation: consecutive-pairs
+            # ``aliases`` edges between each adjacent identifier pair in the
+            # alias chain, each pair bidirectional (a→b, b→a, b→c, c→b for a
+            # three-name chain).  Full-product (a↔c) is NOT emitted — callers
+            # that need transitivity should close over the relation.
+            #
+            # The identifier sequence lives in the SeparatedList child of
+            # NetAliasSyntax (child index 2): IdentifierName Equals
+            # IdentifierName Equals ...
+            #
+            # Resolution: ``<scope>.<name>`` via name_index; fallback to
+            # ``_unresolved.<name>`` with unresolved=True.
+            #
+            # No new node is created; the NetAliasSyntax node stays BLOB in
+            # the Bucket-1 sense.
+            _mod_gid, mname = _cur_module()
+            if _mod_gid is not None:
+                sep_list = next(
+                    (ch for ch in node
+                     if not _is_token(ch)
+                     and str(getattr(ch, "kind", "")).endswith("SeparatedList")),
+                    None,
+                )
+                if sep_list is not None:
+                    alias_names: list[str] = []
+                    try:
+                        for ch in sep_list:
+                            if _is_token(ch):
+                                continue
+                            toks = _identifier_tokens(ch)
+                            if toks:
+                                alias_names.append(toks[0].valueText)
+                    except TypeError:
+                        pass
+                    for i in range(len(alias_names) - 1):
+                        a_name = alias_names[i]
+                        b_name = alias_names[i + 1]
+                        a_path = f"{mname}.{a_name}"
+                        b_path = f"{mname}.{b_name}"
+                        a_gid = name_index.get(a_path, f"_unresolved.{a_name}")
+                        b_gid = name_index.get(b_path, f"_unresolved.{b_name}")
+                        a_unres = isinstance(a_gid, str) and a_gid.startswith("_unresolved.")
+                        b_unres = isinstance(b_gid, str) and b_gid.startswith("_unresolved.")
+                        extra: dict[str, Any] = {}
+                        if a_unres or b_unres:
+                            extra["unresolved"] = True
+                        _add_edge(graph, a_gid, b_gid, "aliases", **extra)
+                        _add_edge(graph, b_gid, a_gid, "aliases", **extra)
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:

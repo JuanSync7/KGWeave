@@ -672,3 +672,103 @@ def test_s37_roundtrip_after_promote(s37_bundle):
     from test_roundtrip import _token_text_stream  # noqa: PLC0415
 
     assert _token_text_stream(reparsed.root) == _token_text_stream(tree.root)
+
+
+# ---------------------------------------------------------------------------
+# S46 — NetAlias (``alias a = b = c;``, SV §10.11)
+#
+# ``alias_demo`` in corpus/fifo.sv contains:
+#   logic a, b, c;
+#   alias a = b = c;
+#
+# S46 is edge-only (lesson 4): no new node is created.  Consecutive-pairs
+# convention: emit ``aliases`` edges a↔b and b↔c (both directions for
+# bidirectionality), i.e. a→b, b→a, b→c, c→b.
+#
+# Resolution via name_index (``alias_demo.a`` etc.); fallback to
+# ``_unresolved.<name>`` if not found.
+# ---------------------------------------------------------------------------
+
+ALIAS_SRC = HERE / "corpus" / "fifo.sv"
+
+
+@pytest.fixture(scope="module")
+def s46_bundle():
+    """Lift + promote corpus/fifo.sv (which contains alias_demo) and return
+    the graph so S46 tests can query the alias_demo module."""
+    text = ALIAS_SRC.read_text()
+    tree = pyslang.SyntaxTree.fromText(text)
+    comp = pyslang.Compilation()
+    comp.addSyntaxTree(tree)
+    from research.ast_experiment.src.lift import lift
+    from research.ast_experiment.src.semantic import promote
+
+    graph = lift(tree)
+    promote(graph, tree, comp)
+    return graph
+
+
+def test_s46_aliases_edges_emitted(s46_bundle):
+    """S46: alias a = b = c emits aliases edges between consecutive pairs.
+
+    Consecutive-pairs convention: (a,b) and (b,c), each bidirectional —
+    four directed edges total: a→b, b→a, b→c, c→b.
+    """
+    alias_edges = [e for e in s46_bundle["edges"] if e["type"] == "aliases"]
+    assert len(alias_edges) >= 4, (
+        f"expected at least 4 aliases edges (a↔b, b↔c), got {len(alias_edges)}: "
+        f"{alias_edges}"
+    )
+
+
+def test_s46_correct_pairings(s46_bundle):
+    """S46: aliases edges connect the correct signal pairs.
+
+    Pairs expected (bidirectional): (a,b) and (b,c).
+    Pair (a,c) is NOT expected under the consecutive-pairs convention.
+    """
+    alias_edges = [e for e in s46_bundle["edges"] if e["type"] == "aliases"]
+
+    # Collect (src_name, dst_name) from resolved nodes.
+    def _name(gid):
+        for n in s46_bundle["nodes"]:
+            if n["id"] == gid:
+                return n.get("semantic", {}).get("name") or str(gid)
+        # Could be an _unresolved.<x> string
+        if isinstance(gid, str) and gid.startswith("_unresolved."):
+            return gid.split(".", 1)[1]
+        return str(gid)
+
+    pairs = {(_name(e["src"]), _name(e["dst"])) for e in alias_edges}
+    # Bidirectional consecutive pairs a↔b, b↔c.
+    assert ("a", "b") in pairs, f"a→b aliases edge missing; pairs={pairs}"
+    assert ("b", "a") in pairs, f"b→a aliases edge missing; pairs={pairs}"
+    assert ("b", "c") in pairs, f"b→c aliases edge missing; pairs={pairs}"
+    assert ("c", "b") in pairs, f"c→b aliases edge missing; pairs={pairs}"
+
+
+def test_s46_no_node_created(s46_bundle):
+    """S46 is edge-only: no new node should carry role='net_alias'.
+
+    The NetAlias SyntaxKind stays as BLOB in the bucket-1 sense — only
+    edges are added.
+    """
+    alias_nodes = [n for n in s46_bundle["nodes"]
+                   if n.get("semantic", {}).get("role") == "net_alias"]
+    assert alias_nodes == [], (
+        f"unexpected net_alias nodes created: {alias_nodes}"
+    )
+
+
+def test_s46_roundtrip_after_promote(s46_bundle):
+    """S46 must not mutate token payloads — emit() reproduces fifo.sv
+    byte-for-byte after alias_demo is promoted."""
+    text = ALIAS_SRC.read_text()
+    tree = pyslang.SyntaxTree.fromText(text)
+    from research.ast_experiment.src.unlift import emit
+
+    emitted = emit(s46_bundle)
+    reparsed = pyslang.SyntaxTree.fromText(emitted)
+    from test_roundtrip import _token_text_stream  # noqa: PLC0415
+
+    assert _token_text_stream(reparsed.root) == _token_text_stream(tree.root)

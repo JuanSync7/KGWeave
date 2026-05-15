@@ -136,3 +136,12 @@ module dpi_demo ();
     export "DPI-C" function sv_compute;
     export "DPI-C" task sv_task;
 endmodule
+
+// S46 corpus: net alias declaration (bidirectional equivalence, SV §10.11).
+// Three signals form one alias chain: alias a = b = c;
+// Expected edges: a aliases b, b aliases c  (consecutive-pairs convention).
+// The three logic declarations ensure name_index has entries for a, b, c.
+module alias_demo;
+    logic a, b, c;
+    alias a = b = c;
+endmodule

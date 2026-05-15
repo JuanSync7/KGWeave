@@ -450,12 +450,94 @@ def rule_s37(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", *
                 _add_edge(graph, gid, src, "reads")
 
 
+def rule_s46(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", **_):
+    """S46: NetAliasSyntax → ``aliases`` edges between consecutive identifier pairs.
+
+    ``alias a = b = c;`` (SV §10.11) declares bidirectional net equivalence.
+    The rule emits ``aliases`` edges pairwise between *consecutive* identifiers
+    in the alias chain only (a↔b, b↔c) rather than the full Cartesian product
+    (a↔b, b↔c, a↔c).  Consecutive pairs capture the syntactic grouping the
+    designer wrote; consumers that need full transitivity can close over the
+    edge relation themselves.
+
+    Each pair produces two directed edges (src→dst *and* dst→src) to model
+    the bidirectionality of net aliasing.
+
+    Edge metadata:
+      type  = "aliases"
+      (no additional payload attributes — the relationship is symmetric)
+
+    No new node is created; the NetAliasSyntax node stays as BLOB in the
+    Bucket-1 sense.  Resolution: ``<scope_path>.<name>`` via name_index;
+    fallback to ``_unresolved.<name>`` with ``unresolved=True`` when absent.
+    """
+    # The SeparatedList child (child index 2) holds:
+    #   IdentifierNameSyntax  Equals  IdentifierNameSyntax  Equals  ...
+    # Collect the identifier tokens in order.
+    sep_list = next(
+        (c for c in node
+         if not _is_token(c) and str(getattr(c, "kind", "")).endswith("SeparatedList")),
+        None,
+    )
+    if sep_list is None:
+        return
+
+    names: list[str] = []
+    try:
+        for ch in sep_list:
+            if _is_token(ch):
+                continue
+            # Each non-token child is an IdentifierNameSyntax
+            ids = _identifier_tokens(ch)
+            if ids:
+                names.append(ids[0].valueText)
+    except TypeError:
+        return
+
+    if len(names) < 2:
+        return
+
+    def _res(name: str) -> str:
+        path = f"{scope_path}.{name}" if scope_path else name
+        gid_resolved = name_index.get(path)
+        if gid_resolved is not None:
+            return gid_resolved
+        # Fallback: unresolved placeholder
+        return f"_unresolved.{name}"
+
+    # Emit bidirectional aliases edges for each consecutive pair.
+    for i in range(len(names) - 1):
+        a_name, b_name = names[i], names[i + 1]
+        a_gid = _res(a_name)
+        b_gid = _res(b_name)
+        a_unresolved = isinstance(a_gid, str) and a_gid.startswith("_unresolved.")
+        b_unresolved = isinstance(b_gid, str) and b_gid.startswith("_unresolved.")
+        kw_a = {"unresolved": True} if a_unresolved else {}
+        kw_b = {"unresolved": True} if b_unresolved else {}
+        _add_edge(graph, a_gid, b_gid, "aliases", **kw_a, **kw_b)
+        _add_edge(graph, b_gid, a_gid, "aliases", **kw_a, **kw_b)
+
+
+def _s46_stub(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", **_):
+    """S46 ownership marker — NetAlias edge-only promotion.
+
+    This stub exists so the bucket-1 checklist can mark SyntaxKind.NetAlias as
+    PROMOTE under S46.  The actual work is done inline in pass-1 dispatch
+    (see dispatch.py) because the enclosing module gid must already be bound
+    before alias edges can be emitted.  At rule-dispatch time (pass 2) this
+    stub is a no-op.
+    """
+    return
+
+
 _s4_identifier_name.__rule_id__ = "S4"
 _s8_alwayscomb.__rule_id__ = "S8"
 rule_s34.__rule_id__ = "S34"
 rule_s35.__rule_id__ = "S35"
 rule_s36.__rule_id__ = "S36"
 rule_s37.__rule_id__ = "S37"
+rule_s46.__rule_id__ = "S46"
+_s46_stub.__rule_id__ = "S46"
 
 
 RULES: list[tuple] = [
@@ -470,4 +552,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.IdentifierName, _s4_identifier_name),
     (pyslang.SyntaxKind.SystemName, rule_s5),
     (pyslang.SyntaxKind.InvocationExpression, rule_s5),
+    (pyslang.SyntaxKind.NetAlias, _s46_stub),
 ]
