@@ -1,9 +1,10 @@
 """Semantic-layer query oracle.
 
-Each test fires one of the S1..S5 rules from ``scripts.semantic`` and asserts
-that the resulting graph answers a concrete elaboration query.  The round-trip
-oracle (``test_roundtrip.py``) must keep passing alongside this file — if a
-semantic promotion ever breaks structural fidelity, both files fail together.
+Each test fires one of the S1..S5 / S34 rules from ``scripts.semantic`` and
+asserts that the resulting graph answers a concrete elaboration query.  The
+round-trip oracle (``test_roundtrip.py``) must keep passing alongside this
+file — if a semantic promotion ever breaks structural fidelity, both files
+fail together.
 """
 
 from __future__ import annotations
@@ -51,20 +52,30 @@ def test_roundtrip_after_promote(fixture_bundle):
 
 
 def test_s1_module_promotes_ports_params_nets(fixture_bundle):
-    """S1: module fifo has 8 ports, 2 params, 4 nets."""
+    """S1: module fifo has 8 ports, 2 params, 4 nets.
+
+    fifo.sv now contains multiple modules (fifo + always_demo for S34 corpus);
+    we assert that the fifo module specifically carries the expected children
+    rather than asserting a fixed total module count.
+    """
     _tree, _comp, graph = fixture_bundle
     ports = _queryable_by_role(graph, "port")
     params = _queryable_by_role(graph, "param")
     nets = _queryable_by_role(graph, "net")
     modules = _queryable_by_role(graph, "module")
 
-    assert len(modules) == 1
-    assert modules[0]["semantic"]["name"] == "fifo"
-    assert {p["semantic"]["name"] for p in ports} == {
+    module_names = {m["semantic"]["name"] for m in modules}
+    assert "fifo" in module_names, f"fifo module missing; found {module_names}"
+    assert {p["semantic"]["name"] for p in ports
+            if p["semantic"]["path"].startswith("fifo.")} == {
         "clk", "rst_n", "push", "pop", "din", "dout", "full", "empty", "status",
     }
-    assert {p["semantic"]["name"] for p in params} == {"DEPTH", "WIDTH"}
-    assert {n["semantic"]["name"] for n in nets} == {"mem", "wr_ptr", "rd_ptr", "count"}
+    assert {p["semantic"]["name"] for p in params
+            if p["semantic"]["path"].startswith("fifo.")} == {"DEPTH", "WIDTH"}
+    assert {n["semantic"]["name"] for n in nets
+            if n["semantic"]["path"].startswith("fifo.")} == {
+        "mem", "wr_ptr", "rd_ptr", "count"
+    }
 
 
 def test_s2_continuous_assign_drives_and_reads(fixture_bundle):
@@ -139,3 +150,120 @@ def test_s5_system_call_clog2_reads_depth(fixture_bundle):
         tgts = neighbors(graph, c["id"], edge_type="reads", direction="out")
         names = {t["semantic"].get("name") for t in tgts}
         assert "DEPTH" in names
+
+
+# ---------------------------------------------------------------------------
+# S34 — AlwaysBlock (generic always @(...))
+#
+# ``always_demo`` in corpus/fifo.sv has two generic always blocks:
+#   1. always @(posedge clk) — edge-sensitive; q <= a
+#   2. always @(a or b)      — level-sensitive; r = a & b
+#
+# S34 promotes each ProceduralBlockSyntax[AlwaysBlock] with role="always"
+# and emits sensitive_to / drives / reads edges using the same helpers as S3.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def s34_bundle(fixture_bundle):
+    """Re-use the fixture_bundle graph which includes always_demo."""
+    _tree, _comp, graph = fixture_bundle
+    return graph
+
+
+def test_s34_always_blocks_promoted(s34_bundle):
+    """Both generic always blocks in always_demo are promoted with
+    role='always', not role='always_ff' or role='always_comb'."""
+    blocks = [n for n in s34_bundle["nodes"]
+              if n.get("semantic", {}).get("role") == "always"]
+    assert len(blocks) >= 2, (
+        f"expected at least 2 always nodes, got {len(blocks)}"
+    )
+
+
+def test_s34_always_ff_and_comb_unchanged(s34_bundle):
+    """S34 must not absorb always_ff or always_comb nodes — their role
+    labels must remain distinct (regression guard for lesson-1 shared-class
+    dispatch)."""
+    ff_nodes = [n for n in s34_bundle["nodes"]
+                if n.get("semantic", {}).get("role") == "always_ff"]
+    comb_nodes = [n for n in s34_bundle["nodes"]
+                  if n.get("semantic", {}).get("role") == "always_comb"]
+    assert len(ff_nodes) >= 1, "always_ff nodes missing after S34 added"
+    assert len(comb_nodes) >= 1, "always_comb nodes missing after S34 added"
+
+
+def test_s34_edge_sensitive_has_sensitive_to(s34_bundle):
+    """The always @(posedge clk) block emits a sensitive_to edge to clk
+    with edge='posedge'."""
+    from research.ast_experiment.src.semantic import neighbors
+
+    always_blocks = [n for n in s34_bundle["nodes"]
+                     if n.get("semantic", {}).get("role") == "always"]
+    # Find the block that has a posedge sensitive_to edge.
+    posedge_blocks = []
+    for blk in always_blocks:
+        sens = neighbors(s34_bundle, blk["id"], edge_type="sensitive_to",
+                         direction="out")
+        if any(s.get("semantic", {}).get("name") == "clk" for s in sens):
+            posedge_blocks.append(blk)
+    assert posedge_blocks, (
+        "no always block with sensitive_to(clk) found — "
+        "edge-sensitive sensitivity list not emitted"
+    )
+    # Verify posedge attribute on the sensitive_to edge.
+    blk = posedge_blocks[0]
+    clk_edges = [e for e in s34_bundle["edges"]
+                 if e["type"] == "sensitive_to"
+                 and e["src"] == blk["id"]
+                 and e.get("payload", {}).get("edge") == "posedge"]
+    assert clk_edges, "sensitive_to edge missing posedge attribute"
+
+
+def test_s34_level_sensitive_has_sensitive_to(s34_bundle):
+    """The always @(a or b) block emits sensitive_to edges to both a and b
+    (no edge qualifier — level-sensitive)."""
+    from research.ast_experiment.src.semantic import neighbors
+
+    always_blocks = [n for n in s34_bundle["nodes"]
+                     if n.get("semantic", {}).get("role") == "always"]
+    ab_blocks = []
+    for blk in always_blocks:
+        sens = neighbors(s34_bundle, blk["id"], edge_type="sensitive_to",
+                         direction="out")
+        names = {s.get("semantic", {}).get("name") for s in sens}
+        if {"a", "b"} <= names:
+            ab_blocks.append(blk)
+    assert ab_blocks, (
+        "no always block with sensitive_to({a,b}) found — "
+        "level-sensitive sensitivity list not emitted"
+    )
+
+
+def test_s34_drives_and_reads_emitted(s34_bundle):
+    """Each always block emits drives edges for LHS assignments and reads
+    edges for RHS identifiers."""
+    always_blocks = [n for n in s34_bundle["nodes"]
+                     if n.get("semantic", {}).get("role") == "always"]
+    for blk in always_blocks:
+        block_id = blk["id"]
+        drives = [e for e in s34_bundle["edges"]
+                  if e["type"] == "drives" and e["src"] == block_id]
+        reads = [e for e in s34_bundle["edges"]
+                 if e["type"] == "reads" and e["src"] == block_id]
+        assert drives or reads, (
+            f"always block {block_id} has neither drives nor reads edges"
+        )
+
+
+def test_s34_roundtrip_after_promote(fixture_bundle):
+    """S34 must not mutate token payloads — emit() still reproduces source
+    byte-for-byte after always_demo blocks are promoted."""
+    tree, _comp, graph = fixture_bundle
+    from research.ast_experiment.src.unlift import emit
+
+    emitted = emit(graph)
+    reparsed = pyslang.SyntaxTree.fromText(emitted)
+    from test_roundtrip import _token_text_stream  # noqa: PLC0415
+
+    assert _token_text_stream(reparsed.root) == _token_text_stream(tree.root)

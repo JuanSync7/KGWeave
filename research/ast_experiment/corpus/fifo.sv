@@ -58,3 +58,25 @@ module fifo
     end
 
 endmodule
+
+// S34 corpus: generic always @(...) blocks — non-FF, non-comb, non-latch.
+// Two variants exercised:
+//   1. always @(posedge clk) — edge-sensitive sensitivity list
+//   2. always @(a or b)      — level-sensitive sensitivity list
+module always_demo (
+    input  logic clk,
+    input  logic a,
+    input  logic b,
+    output logic q,
+    output logic r
+);
+    // Variant 1: posedge-only (generic always, not always_ff)
+    always @(posedge clk) begin
+        q <= a;
+    end
+
+    // Variant 2: level-sensitive (a or b)
+    always @(a or b) begin
+        r = a & b;
+    end
+endmodule

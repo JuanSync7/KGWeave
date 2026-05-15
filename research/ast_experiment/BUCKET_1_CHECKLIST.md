@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 49 | 78 | 0 | 57 |
+| PROMOTE | 135 | 49 | 79 | 0 | 56 |
 | CONTAINER | 88 | 23 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -23,7 +23,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## PROMOTE (135 items)
 | SyntaxKind | Struct | Semantic | Owner |
 |--|--|--|--|
-| `AlwaysBlock` | ⬜ | ⬜ | future |
+| `AlwaysBlock` | ⬜ | ✅ | S34 |
 | `AlwaysCombBlock` | ⬜ | ✅ | S8 |
 | `AlwaysFFBlock` | ⬜ | ✅ | S3 |
 | `AlwaysLatchBlock` | ⬜ | ⬜ | future |

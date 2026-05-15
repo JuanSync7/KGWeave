@@ -226,14 +226,87 @@ def _s8_alwayscomb(graph, node, gid, gnode, scope, name_index, leaks, scope_path
     rule_s3_or_s8(graph, node, gid, gnode, scope, name_index, leaks, scope_path)
 
 
+def rule_s34(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", **_):
+    """S34: ProceduralBlockSyntax[AlwaysBlock] → role="always".
+
+    Promotes the generic ``always @(...)`` procedural block — distinct from
+    AlwaysFFBlock (S3) and AlwaysCombBlock (S8). The keyword token is ``always``
+    (not ``always_ff`` or ``always_comb``), so the pass-1 rule_s3_or_s8 guard
+    silently falls through for this kind; S34 handles it here in pass-2.
+
+    Sensitivity list (``@(posedge clk or negedge rst)`` or ``@(a or b)``) →
+    emit ``sensitive_to`` edges to identifier tokens. If an edge keyword
+    (posedge/negedge/edge) precedes the identifier, it is stamped as the
+    ``edge`` payload attribute (same convention as S3).
+
+    Body assignments → ``drives`` for LHS, ``reads`` for RHS identifiers,
+    using the same helpers rule_s3_or_s8 uses.
+    """
+    _mark(gnode, role="always")
+
+    # Sensitivity: walk descendants for SignalEventExpressionSyntax — same
+    # scan S3 uses for always_ff blocks. Level-sensitive entries
+    # (``@(a or b)``) also produce SignalEventExpressionSyntax nodes but
+    # without a posedge/negedge token; edge stays None in that case.
+    for d in _descendants(node):
+        if _cls(d) != "SignalEventExpressionSyntax":
+            continue
+        edge = None
+        for t in _descendants(d):
+            if _is_token(t) and t.valueText in {"posedge", "negedge", "edge"}:
+                edge = t.valueText
+                break
+        ids = _identifier_tokens(d)
+        if not ids:
+            continue
+        sig = ids[0].valueText
+        tgt = _resolve(sig, scope=scope, name_index=name_index, leaks=leaks,
+                       context=f"always.sensitive_to[{gid}]",
+                       scope_path=scope_path)
+        if tgt is not None:
+            _add_edge(graph, gid, tgt, "sensitive_to", edge=edge)
+
+    # Drives / reads: same assignment-scan as S3.
+    for d in _descendants(node):
+        if _cls(d) != "BinaryExpressionSyntax":
+            continue
+        op = next((c for c in d if _is_token(c)), None)
+        if op is None:
+            continue
+        if _token_kind_name(op) not in {"LessThanEquals", "Equals"}:
+            continue
+        lhs, rhs = _split_around_eq(d)
+        if lhs is None or rhs is None:
+            continue
+        lhs_name = _lhs_target_name(lhs)
+        if lhs_name:
+            tgt = _resolve(lhs_name, scope=scope, name_index=name_index,
+                           leaks=leaks,
+                           context=f"always.drives[{gid}]",
+                           scope_path=scope_path)
+            if tgt is not None and not _has_edge(graph, gid, tgt, "drives"):
+                _add_edge(graph, gid, tgt, "drives")
+        for rname in _identifier_names_in(rhs):
+            if rname == lhs_name:
+                continue
+            src = _resolve(rname, scope=scope, name_index=name_index,
+                           leaks=leaks,
+                           context=f"always.reads[{gid}]",
+                           scope_path=scope_path)
+            if src is not None and not _has_edge(graph, gid, src, "reads"):
+                _add_edge(graph, gid, src, "reads")
+
+
 _s4_identifier_name.__rule_id__ = "S4"
 _s8_alwayscomb.__rule_id__ = "S8"
+rule_s34.__rule_id__ = "S34"
 
 
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ContinuousAssign, rule_s2),
     (pyslang.SyntaxKind.AlwaysFFBlock, rule_s3_or_s8),
     (pyslang.SyntaxKind.AlwaysCombBlock, _s8_alwayscomb),
+    (pyslang.SyntaxKind.AlwaysBlock, rule_s34),
     (pyslang.SyntaxKind.IdentifierSelectName, rule_s4),
     (pyslang.SyntaxKind.IdentifierName, _s4_identifier_name),
     (pyslang.SyntaxKind.SystemName, rule_s5),
