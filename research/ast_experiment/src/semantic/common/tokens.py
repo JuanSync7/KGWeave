@@ -1175,6 +1175,66 @@ def _enum_value_names(enum_syn: Any) -> list[str]:
     return out
 
 
+def _dpi_export_name_of(node: Any) -> str:
+    """Return the declared SV function/task name from a ``DPIExportSyntax`` node.
+
+    Structure: ``export <StringLiteral> (function|task) <Identifier> ;``.
+    pyslang surfaces a named ``.name`` attribute on ``DPIExportSyntax`` that
+    holds the single Identifier token — the SV function/task being exported.
+    Falls back to scanning direct-child Identifier tokens for robustness.
+    No regex on source text.
+    """
+    name_tok = getattr(node, "name", None)
+    if name_tok is not None and _is_token(name_tok):
+        val = getattr(name_tok, "valueText", "")
+        if val:
+            return val
+    # Fallback: first direct Identifier token.
+    for ch in node:
+        if _is_token(ch) and _token_kind_name(ch) == "Identifier":
+            return ch.valueText
+    return ""
+
+
+def _dpi_export_spec_and_kind(node: Any) -> tuple[str, str]:
+    """Return (spec, export_kind) from a ``DPIExportSyntax`` node.
+
+    spec        — the DPI string literal value, e.g. "DPI-C" or "DPI",
+                  with surrounding double-quotes stripped.
+    export_kind — "function" or "task" derived from the leading keyword
+                  token following the spec string.
+
+    Both values are extracted structurally from token kinds and values —
+    no regex on source text.
+    """
+    spec = ""
+    export_kind = "function"
+    # DPIExportSyntax has named attributes: specString, functionOrTask.
+    spec_tok = getattr(node, "specString", None)
+    if spec_tok is not None and _is_token(spec_tok):
+        raw = getattr(spec_tok, "valueText", "")
+        spec = raw.strip('"')
+    ft_tok = getattr(node, "functionOrTask", None)
+    if ft_tok is not None and _is_token(ft_tok):
+        kn = _token_kind_name(ft_tok)
+        if kn == "TaskKeyword":
+            export_kind = "task"
+    if not spec:
+        # Fallback: scan direct tokens.
+        for ch in node:
+            if not _is_token(ch):
+                continue
+            tk = _token_kind_name(ch)
+            if tk == "StringLiteral":
+                raw = getattr(ch, "valueText", "")
+                spec = raw.strip('"')
+            elif tk == "TaskKeyword":
+                export_kind = "task"
+            elif tk == "FunctionKeyword":
+                export_kind = "function"
+    return spec, export_kind
+
+
 def _dpi_import_name_of(node: Any) -> str:
     """Return the declared SV function/task name from a ``DPIImportSyntax`` node.
 

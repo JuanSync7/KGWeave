@@ -311,3 +311,117 @@ def test_s44_roundtrip(fifo_graph):
     assert reconstructed == text, (
         f"round-trip mismatch on fifo.sv after S44 corpus addition"
     )
+
+
+# ---------------------------------------------------------------------------
+# S45 — DPIExport edge-only promotion
+# ---------------------------------------------------------------------------
+
+
+def test_s45_dpi_exports_edge_resolved(fifo_graph):
+    """The ``export "DPI-C" function sv_compute;`` declaration emits a
+    ``dpi_exports`` edge from the ``dpi_demo`` module to the ``sv_compute``
+    function node.  The target is resolved via name_index (``dpi_demo.sv_compute``
+    is registered by S10 because sv_compute is a regular SV function)."""
+    funcs = {n["semantic"]["name"]: n
+             for n in _by_role(fifo_graph, "function")}
+    modules = {n["semantic"]["name"]: n
+               for n in _by_role(fifo_graph, "module")}
+    assert "sv_compute" in funcs, (
+        f"sv_compute function must be promoted by S10; found: {set(funcs)}"
+    )
+    assert "dpi_demo" in modules, "dpi_demo module must be promoted"
+    mod_id = modules["dpi_demo"]["id"]
+    fn_id = funcs["sv_compute"]["id"]
+    edges = [e for e in fifo_graph["edges"]
+             if e["type"] == "dpi_exports"
+             and e["src"] == mod_id
+             and e["dst"] == fn_id]
+    assert len(edges) == 1, (
+        f"expected 1 dpi_exports edge dpi_demo->sv_compute, got {len(edges)}"
+    )
+
+
+def test_s45_dpi_exports_payload_resolved(fifo_graph):
+    """The resolved ``dpi_exports`` edge carries spec=DPI-C, export_kind=function
+    in its payload."""
+    funcs = {n["semantic"]["name"]: n
+             for n in _by_role(fifo_graph, "function")}
+    modules = {n["semantic"]["name"]: n
+               for n in _by_role(fifo_graph, "module")}
+    mod_id = modules["dpi_demo"]["id"]
+    fn_id = funcs["sv_compute"]["id"]
+    edge = next(
+        e for e in fifo_graph["edges"]
+        if e["type"] == "dpi_exports"
+        and e["src"] == mod_id
+        and e["dst"] == fn_id
+    )
+    assert edge["payload"]["spec"] == "DPI-C", (
+        f"expected spec='DPI-C', got {edge['payload']['spec']!r}"
+    )
+    assert edge["payload"]["export_kind"] == "function", (
+        f"expected export_kind='function', got {edge['payload']['export_kind']!r}"
+    )
+
+
+def test_s45_dpi_exports_edge_unresolved(fifo_graph):
+    """The ``export "DPI-C" task sv_task;`` declaration — where sv_task has no
+    body in this scope — emits a ``dpi_exports`` edge with
+    ``dst="_unresolved.sv_task"`` and ``payload["unresolved"]=True``."""
+    modules = {n["semantic"]["name"]: n
+               for n in _by_role(fifo_graph, "module")}
+    mod_id = modules["dpi_demo"]["id"]
+    edges = [e for e in fifo_graph["edges"]
+             if e["type"] == "dpi_exports"
+             and e["src"] == mod_id
+             and e["dst"] == "_unresolved.sv_task"]
+    assert len(edges) == 1, (
+        f"expected 1 unresolved dpi_exports edge for sv_task, got {len(edges)}"
+    )
+    assert edges[0]["payload"].get("unresolved") is True
+
+
+def test_s45_dpi_exports_unresolved_payload(fifo_graph):
+    """The unresolved ``dpi_exports`` edge carries spec=DPI-C, export_kind=task
+    and unresolved=True in its payload."""
+    modules = {n["semantic"]["name"]: n
+               for n in _by_role(fifo_graph, "module")}
+    mod_id = modules["dpi_demo"]["id"]
+    edge = next(
+        e for e in fifo_graph["edges"]
+        if e["type"] == "dpi_exports"
+        and e["src"] == mod_id
+        and e["dst"] == "_unresolved.sv_task"
+    )
+    assert edge["payload"]["spec"] == "DPI-C"
+    assert edge["payload"]["export_kind"] == "task"
+    assert edge["payload"]["unresolved"] is True
+
+
+def test_s45_no_new_node_created(fifo_graph):
+    """S45 is edge-only: the DPIExport declaration must NOT produce a new
+    semantic node with a ``dpi_export`` role.  The SyntaxKind is a
+    relationship-only directive — all semantic content lives on the edge."""
+    dpi_export_nodes = [n for n in fifo_graph["nodes"]
+                        if n.get("semantic", {}).get("role") == "dpi_export"]
+    assert dpi_export_nodes == [], (
+        f"S45 must be edge-only; found unexpected dpi_export nodes: "
+        f"{dpi_export_nodes}"
+    )
+
+
+def test_s45_roundtrip(fifo_graph):
+    """Byte-equal round-trip after S45 corpus additions.  The semantic layer
+    only mutates ``node["semantic"]`` and appends edges — the emit pass must
+    reproduce the original fifo.sv bytes unchanged."""
+    from research.ast_experiment.src.unlift import emit
+    text = FIFO.read_text()
+    tree = pyslang.SyntaxTree.fromText(text)
+    graph_fresh = __import__(
+        "research.ast_experiment.src.lift", fromlist=["lift"]
+    ).lift(tree)
+    reconstructed = emit(graph_fresh)
+    assert reconstructed == text, (
+        f"round-trip mismatch on fifo.sv after S45 corpus addition"
+    )

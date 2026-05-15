@@ -45,6 +45,8 @@ from .common.tokens import (
     _covergroup_has_clocking_event,
     _covergroup_name_of,
     _coverpoint_expression,
+    _dpi_export_name_of,
+    _dpi_export_spec_and_kind,
     _dpi_import_name_of,
     _dpi_import_spec_and_kind,
     _extern_decl_kind_of,
@@ -123,7 +125,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45"}
 
 
 def _is_active(fn) -> bool:
@@ -1136,6 +1138,40 @@ def promote(
                                       "import_kind": import_kind})
                     _add_edge(graph, mod_gid, gid, "has_dpi_import")
                     name_index[dpath] = gid
+        elif c == "DPIExportSyntax":
+            # S45 — edge-only: ``export "DPI-C" function|task <name> ;``
+            # A DPI export has no independent identity — it is a pointer-like
+            # directive that marks an existing SV function/task as callable
+            # from C.  Representation: a ``dpi_exports`` edge from the
+            # enclosing module/package to the target function node.
+            #
+            # Target resolution via name_index (``<scope>.<fn_name>``).  If
+            # the target is not present (forward-declared, or a different
+            # compilation unit), emit the edge with
+            # ``dst="_unresolved.<name>"`` and ``payload["unresolved"]=True``.
+            #
+            # Attributes:
+            #   spec        — DPI spec string, quotes stripped ("DPI-C"/"DPI")
+            #   export_kind — "function" or "task"
+            #
+            # No new node is created; node["semantic"] is left as-is (this
+            # stays BLOB in the Bucket-1 sense — no role is stamped on the
+            # DPIExportSyntax node itself).
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                exp_name = _dpi_export_name_of(node)
+                if exp_name:
+                    spec, export_kind = _dpi_export_spec_and_kind(node)
+                    target_path = f"{mname}.{exp_name}"
+                    target_gid = name_index.get(target_path)
+                    if target_gid is not None:
+                        _add_edge(graph, mod_gid, target_gid, "dpi_exports",
+                                  spec=spec, export_kind=export_kind)
+                    else:
+                        _add_edge(graph, mod_gid,
+                                  f"_unresolved.{exp_name}", "dpi_exports",
+                                  spec=spec, export_kind=export_kind,
+                                  unresolved=True)
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:

@@ -117,8 +117,22 @@ endmodule
 //   1. import "DPI-C" function int c_compute(input int x)  — function, DPI-C spec
 //   2. import "DPI-C" task c_log(input int level)          — task, DPI-C spec
 //   3. import "DPI" function void dpi_reset()              — function, DPI spec
+//
+// S45 corpus: DPI export declarations (export "DPI-C" function|task <name> ;).
+// Two variants exercised:
+//   1. export "DPI-C" function sv_compute  — re-exports a module-local SV function
+//   2. export "DPI-C" task sv_task         — exports a task (resolves to _unresolved)
+// sv_compute is defined as a regular SV function so the edge resolves via name_index.
+// sv_task has no body in this scope so the edge emits _unresolved.sv_task.
 module dpi_demo ();
     import "DPI-C" function int c_compute(input int x);
     import "DPI-C" task c_log(input int level);
     import "DPI" function void dpi_reset();
+
+    function automatic int sv_compute(input int x);
+        sv_compute = x * 2;
+    endfunction
+
+    export "DPI-C" function sv_compute;
+    export "DPI-C" task sv_task;
 endmodule
