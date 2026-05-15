@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 49 | 81 | 0 | 54 |
+| PROMOTE | 135 | 49 | 82 | 0 | 53 |
 | CONTAINER | 88 | 23 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -76,7 +76,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ExternInterfaceMethod` | ⬜ | ⬜ | future |
 | `ExternModuleDecl` | ⬜ | ✅ | S29 |
 | `ExternUdpDecl` | ⬜ | ⬜ | future |
-| `FinalBlock` | ⬜ | ⬜ | future |
+| `FinalBlock` | ⬜ | ✅ | S37 |
 | `ForwardTypeRestriction` | ⬜ | ⬜ | future |
 | `ForwardTypedefDeclaration` | ⬜ | ✅ | S31 |
 | `FunctionDeclaration` | ✅ | ✅ | S10 |

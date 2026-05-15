@@ -62,4 +62,9 @@ module tb_fifo;
         #20 $finish;
     end
 
+    integer err_count;
+    final begin
+        $display("done: count=%0d", err_count);
+    end
+
 endmodule
