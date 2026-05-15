@@ -7,4 +7,5 @@ package fifo_pkg;
   typedef union { int i; bit [31:0] b; } fifo_iu_t;
   typedef fifo_fwd_t;
   parameter int DEFAULT_DEPTH = 8;
+  export *::*;
 endpackage

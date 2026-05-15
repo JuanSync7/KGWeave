@@ -1,6 +1,6 @@
 """Type rules — S9 (Package, Typedef, Enum), S31 (Struct/Union/Forward),
-S32 (PackageImport/Export), S48 (TypeParameterDeclaration), and
-S50 (PackageImportItem).
+S32 (PackageImport/Export), S48 (TypeParameterDeclaration),
+S50 (PackageImportItem), and S51 (PackageExportAllDeclaration).
 
 The actual promotion of typedef-shaped nodes lives in dispatch.promote's
 pass 1 (declarative tree walk). The metadata entries below pin the rule_id
@@ -124,6 +124,39 @@ def _s50_stub(*args, **kwargs):
     return
 
 
+def rule_s51(graph, node, gid, gnode, scope, name_index, leaks, scope_path="",
+             module_gid=None, **_):
+    """S51 — PackageExportAllDeclaration → ``exports_all`` self-loop edge.
+
+    ``export *::*;`` re-exports every symbol imported from any package.  There
+    is no specific target package; the enclosing scope re-exports everything.
+    Representation: a single ``exports_all`` self-loop from the enclosing
+    package / module node to itself, with payload ``{"wildcard": True}``.
+
+    Edge shape:
+      src  = enclosing module / package gid (module_stack top, passed as
+             ``module_gid`` by the dispatch shim — same pattern as S50)
+      dst  = same gid (self-loop)
+      type = "exports_all"
+      payload = {"wildcard": True}
+
+    Compilation-unit-scope occurrences (``module_gid is None``) are skipped
+    and appended to ``semantic_leaks`` — consistent with S32/S50 convention.
+    """
+    if module_gid is None:
+        graph.setdefault("semantic_leaks", []).append({
+            "kind": "PackageExportAllDeclaration",
+            "reason": "cu-scope export *::* skipped",
+        })
+        return
+
+    _add_edge(graph, module_gid, module_gid, "exports_all", wildcard=True)
+
+
+def _s51_stub(*args, **kwargs):
+    return
+
+
 _s9a_package.__rule_id__ = "S9a"
 _s9b_typedef.__rule_id__ = "S9b"
 _s9c_enum_type.__rule_id__ = "S9c"
@@ -135,6 +168,8 @@ _s32_package_export.__rule_id__ = "S32"
 _s48_type_parameter_declaration.__rule_id__ = "S48"
 rule_s50.__rule_id__ = "S50"
 _s50_stub.__rule_id__ = "S50"
+rule_s51.__rule_id__ = "S51"
+_s51_stub.__rule_id__ = "S51"
 
 
 RULES: list[tuple] = [
@@ -148,4 +183,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.PackageExportDeclaration, _s32_package_export),
     (pyslang.SyntaxKind.TypeParameterDeclaration, _s48_type_parameter_declaration),
     (pyslang.SyntaxKind.PackageImportItem, rule_s50),
+    (pyslang.SyntaxKind.PackageExportAllDeclaration, rule_s51),
 ]

@@ -72,7 +72,7 @@ from .rules import RULE_TABLE
 from .rules.dataflow import rule_s3_or_s8
 from .rules.generate import rule_s12
 from .rules.instantiation import rule_s6, rule_s13, rule_s33, rule_s43
-from .rules.types import rule_s50
+from .rules.types import rule_s50, rule_s51
 
 
 # S16 — concurrent assertion statement SyntaxKind → role kind label. The six
@@ -126,7 +126,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51"}
 
 
 def _is_active(fn) -> bool:
@@ -1937,6 +1937,11 @@ def promote(
                 elif fn is rule_s50:
                     # S50 — PackageImportItem needs the enclosing module gid
                     # to emit the imports_item edge from the correct source.
+                    fn(graph, node, gid, nodes_list[node_offset + idx],
+                       scope, name_index, leaks, scope_path, module_gid=mod_gid)
+                elif fn is rule_s51:
+                    # S51 — PackageExportAllDeclaration (export *::*;) emits a
+                    # self-loop exports_all edge from the enclosing scope.
                     fn(graph, node, gid, nodes_list[node_offset + idx],
                        scope, name_index, leaks, scope_path, module_gid=mod_gid)
                 elif fn is rule_s3_or_s8 or getattr(fn, "__rule_id__", None) == "S8":

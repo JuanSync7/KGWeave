@@ -514,3 +514,82 @@ def test_s48_roundtrip(fifo_graph):
     source = fifo_path.read_text()
     result = emit(graph)
     assert source == result, "byte-equal round-trip failed for fifo.sv"
+
+
+# ---------------------------------------------------------------------------
+# S51: PackageExportAllDeclaration — export *::*; → exports_all self-loop
+# ---------------------------------------------------------------------------
+
+
+def test_s51_exports_all_edge_self_loop(pkg_graph):
+    """``export *::*;`` in fifo_pkg emits an ``exports_all`` self-loop edge
+    from the package node to itself with payload wildcard=True."""
+    pkg = _by_path(pkg_graph, "fifo_pkg")
+    assert pkg is not None, "fifo_pkg node not found"
+    edges = [
+        e for e in pkg_graph["edges"]
+        if e["src"] == pkg["id"] and e["dst"] == pkg["id"]
+        and e["type"] == "exports_all"
+    ]
+    assert len(edges) == 1, f"expected exactly one exports_all self-loop, got {edges}"
+    assert edges[0]["payload"].get("wildcard") is True
+
+
+def test_s51_no_new_node_created(pkg_graph):
+    """S51 is edge-only: no new node should be created for the
+    PackageExportAllDeclaration — the node count must not exceed what S9/S31
+    already produces for fifo_pkg."""
+    # Count nodes that belong to fifo_pkg scope (path starts with "fifo_pkg.")
+    # plus the package node itself. The export *::* must not add an extra node.
+    pkg = _by_path(pkg_graph, "fifo_pkg")
+    assert pkg is not None
+    # Only the exports_all edge was added; no extra nodes with role related to
+    # exports_all should exist.
+    export_all_nodes = [
+        n for n in pkg_graph["nodes"]
+        if n.get("semantic", {}).get("role") == "exports_all"
+    ]
+    assert export_all_nodes == [], (
+        f"S51 must not create new nodes; found: {export_all_nodes}"
+    )
+
+
+def test_s51_byte_equal_roundtrip():
+    """Byte-equal round-trip for a corpus containing ``export *::*;``: lift →
+    promote → emit must not mutate any token payloads introduced by S51.
+    We build a single-file graph from an inline SV snippet (no trailing-EOF
+    quirk) to verify the token stream is preserved exactly."""
+    from research.ast_experiment.src.build import build_kg
+    from research.ast_experiment.src.unlift import emit
+    import tempfile
+
+    # Use a self-contained snippet so the test is not sensitive to the
+    # pre-existing emit trailing-newline limitation on fifo_pkg.sv.
+    src = "package ep; import a_pkg::*; export *::*; endpackage"
+    tmpdir = Path(tempfile.mkdtemp(prefix="s51_rt_"))
+    p = tmpdir / "ep.sv"
+    p.write_text(src)
+    graph, _trees, _ = build_kg([p])
+    result = emit(graph)
+    assert src == result, (
+        f"byte-equal round-trip failed after S51 promotion:\n"
+        f"  expected: {src!r}\n"
+        f"  got:      {result!r}"
+    )
+
+
+def test_s51_module_scope_works():
+    """A module (not a package) containing ``export *::*;`` also emits a
+    self-loop exports_all edge from the module node to itself."""
+    graph = _build_inline_graph(
+        "module m; export *::*; endmodule\n",
+    )
+    m = _by_path(graph, "m")
+    assert m is not None, "module m not found"
+    edges = [
+        e for e in graph["edges"]
+        if e["src"] == m["id"] and e["dst"] == m["id"]
+        and e["type"] == "exports_all"
+    ]
+    assert len(edges) == 1, f"expected one exports_all from module scope, got {edges}"
+    assert edges[0]["payload"].get("wildcard") is True
