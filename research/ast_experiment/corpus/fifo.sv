@@ -80,3 +80,22 @@ module always_demo (
         r = a & b;
     end
 endmodule
+
+// S35 corpus: always_latch block — inferred latch (no sensitivity list).
+// Two signals exercised:
+//   latch_out — driven when en is high, reads latch_in
+//   latch_sel — driven from a conditional reading both latch_in and b
+module latch_demo (
+    input  logic en,
+    input  logic latch_in,
+    input  logic b,
+    output logic latch_out,
+    output logic latch_sel
+);
+    always_latch begin
+        if (en) begin
+            latch_out = latch_in;
+            latch_sel = latch_in & b;
+        end
+    end
+endmodule

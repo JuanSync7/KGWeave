@@ -267,3 +267,144 @@ def test_s34_roundtrip_after_promote(fixture_bundle):
     from test_roundtrip import _token_text_stream  # noqa: PLC0415
 
     assert _token_text_stream(reparsed.root) == _token_text_stream(tree.root)
+
+
+# ---------------------------------------------------------------------------
+# S35 — AlwaysLatchBlock (always_latch begin ... end)
+#
+# ``latch_demo`` in corpus/fifo.sv contains one always_latch block:
+#   always_latch begin
+#       if (en) begin
+#           latch_out = latch_in;
+#           latch_sel = latch_in & b;
+#       end
+#   end
+#
+# S35 promotes it with role="procedural_block", attribute kind="always_latch",
+# and emits drives/reads edges by walking body assignments (no sensitivity list
+# — latches infer sensitivity from body, per LRM).
+# ---------------------------------------------------------------------------
+
+LATCH_SRC = HERE / "corpus" / "fifo.sv"
+
+
+@pytest.fixture(scope="module")
+def s35_bundle():
+    """Lift + promote corpus/fifo.sv (which contains latch_demo) and return
+    the graph so S35 tests can query the latch_demo module."""
+    text = LATCH_SRC.read_text()
+    tree = pyslang.SyntaxTree.fromText(text)
+    comp = pyslang.Compilation()
+    comp.addSyntaxTree(tree)
+    from research.ast_experiment.src.lift import lift
+    from research.ast_experiment.src.semantic import promote
+
+    graph = lift(tree)
+    promote(graph, tree, comp)
+    return graph
+
+
+def test_s35_always_latch_promoted(s35_bundle):
+    """The always_latch block in latch_demo is promoted with
+    role='procedural_block' and kind='always_latch'."""
+    latch_blocks = [
+        n for n in s35_bundle["nodes"]
+        if n.get("semantic", {}).get("role") == "procedural_block"
+        and n.get("semantic", {}).get("attributes", {}).get("kind") == "always_latch"
+    ]
+    assert len(latch_blocks) >= 1, (
+        f"expected at least 1 always_latch node, got {len(latch_blocks)}"
+    )
+
+
+def test_s35_not_confused_with_ff_or_comb(s35_bundle):
+    """S35 must not absorb always_ff or always_comb nodes — role labels are
+    distinct (regression guard for lesson-1 shared-class dispatch)."""
+    ff_nodes = [n for n in s35_bundle["nodes"]
+                if n.get("semantic", {}).get("role") == "always_ff"]
+    comb_nodes = [n for n in s35_bundle["nodes"]
+                  if n.get("semantic", {}).get("role") == "always_comb"]
+    assert len(ff_nodes) >= 1, "always_ff nodes missing after S35 added"
+    assert len(comb_nodes) >= 1, "always_comb nodes missing after S35 added"
+
+
+def test_s35_drives_latch_out_and_latch_sel(s35_bundle):
+    """The always_latch block drives both latch_out and latch_sel."""
+    latch_blocks = [
+        n for n in s35_bundle["nodes"]
+        if n.get("semantic", {}).get("role") == "procedural_block"
+        and n.get("semantic", {}).get("attributes", {}).get("kind") == "always_latch"
+    ]
+    assert latch_blocks, "no always_latch block found"
+    blk = latch_blocks[0]
+    driven = {
+        e["dst"] for e in s35_bundle["edges"]
+        if e["type"] == "drives" and e["src"] == blk["id"]
+    }
+    # Resolve dst gids back to names via the name index.
+    name_index = s35_bundle.get("semantic_name_index", {})
+    gid_to_name = {v: k.split(".")[-1] for k, v in name_index.items()}
+    driven_names = {gid_to_name.get(d, d) for d in driven}
+    assert "latch_out" in driven_names, (
+        f"latch_out not in drives edges; driven_names={driven_names}"
+    )
+    assert "latch_sel" in driven_names, (
+        f"latch_sel not in drives edges; driven_names={driven_names}"
+    )
+
+
+def test_s35_reads_latch_in_and_b(s35_bundle):
+    """The always_latch block reads latch_in (body RHS) and b (body RHS)."""
+    latch_blocks = [
+        n for n in s35_bundle["nodes"]
+        if n.get("semantic", {}).get("role") == "procedural_block"
+        and n.get("semantic", {}).get("attributes", {}).get("kind") == "always_latch"
+    ]
+    assert latch_blocks, "no always_latch block found"
+    blk = latch_blocks[0]
+    read_dsts = {
+        e["dst"] for e in s35_bundle["edges"]
+        if e["type"] == "reads" and e["src"] == blk["id"]
+    }
+    name_index = s35_bundle.get("semantic_name_index", {})
+    gid_to_name = {v: k.split(".")[-1] for k, v in name_index.items()}
+    read_names = {gid_to_name.get(d, d) for d in read_dsts}
+    assert "latch_in" in read_names, (
+        f"latch_in not in reads edges; read_names={read_names}"
+    )
+    assert "b" in read_names, (
+        f"b not in reads edges; read_names={read_names}"
+    )
+
+
+def test_s35_no_sensitive_to_edges(s35_bundle):
+    """always_latch has no explicit sensitivity list — no sensitive_to edges
+    should be emitted by S35."""
+    latch_blocks = [
+        n for n in s35_bundle["nodes"]
+        if n.get("semantic", {}).get("role") == "procedural_block"
+        and n.get("semantic", {}).get("attributes", {}).get("kind") == "always_latch"
+    ]
+    assert latch_blocks, "no always_latch block found"
+    blk = latch_blocks[0]
+    sens_edges = [
+        e for e in s35_bundle["edges"]
+        if e["type"] == "sensitive_to" and e["src"] == blk["id"]
+    ]
+    assert not sens_edges, (
+        f"unexpected sensitive_to edges on always_latch block: {sens_edges}"
+    )
+
+
+def test_s35_roundtrip_after_promote(s35_bundle):
+    """S35 must not mutate token payloads — emit() still reproduces source
+    byte-for-byte after latch_demo block is promoted."""
+    text = LATCH_SRC.read_text()
+    tree = pyslang.SyntaxTree.fromText(text)
+    from research.ast_experiment.src.unlift import emit
+
+    emitted = emit(s35_bundle)
+    reparsed = pyslang.SyntaxTree.fromText(emitted)
+    from test_roundtrip import _token_text_stream  # noqa: PLC0415
+
+    assert _token_text_stream(reparsed.root) == _token_text_stream(tree.root)
