@@ -509,6 +509,101 @@ def rule_s33(graph, node, gid, gnode, scope, name_index, leaks,
                               instance=inst_path, port=out_name)
 
 
+# --- S43 — DefParam / DefParamAssignment legacy parameter override -----------
+
+
+def _s43_stub(*args, **kwargs):
+    """DefParam outer wrapper — consumed by rule_s43 on the inner
+    DefParamAssignment (lesson 5 wrapper dedup: register only innermost)."""
+    return
+
+
+def rule_s43(graph, node, gid, gnode, scope, name_index, leaks,
+             scope_path="", module_gid=None, **_):
+    """S43: DefParamAssignment → ``defparam_override`` edge (edge-only, lesson 4).
+
+    ``defparam u_fifo.DEPTH = 8;`` is fundamentally a cross-hierarchy
+    parameter override with no independent identity — it is an edge
+    ``(enclosing_module) -[defparam_override]-> (target_param)`` with
+    payload ``{"hier_path": "<lhs>", "value": "<rhs_text>"}``.
+
+    Structural navigation (no regex per CLAUDE.md §6 invariant 4):
+    - ScopedNameSyntax child → hierarchical target path (token text concat)
+    - EqualsValueClauseSyntax child → RHS value via ``_expression_text``
+
+    Target resolution: try ``<inst>.<param>`` qualified against
+    name_index; if unresolved, emit ``dst="_unresolved.<hier_path>"`` with
+    ``payload["unresolved"]=True`` (lesson 4 fallback).
+    """
+    if module_gid is None:
+        return
+
+    # Walk direct children: ScopedName (lhs) and EqualsValueClause (rhs).
+    hier_path_parts: list[str] = []
+    value_text: str = ""
+
+    for ch in node:
+        if _is_token(ch):
+            continue
+        ch_cls = _cls(ch)
+        if ch_cls == "ScopedNameSyntax":
+            # Collect all Identifier token texts under the ScopedName to form
+            # the hierarchical path (e.g. "u_fifo.DEPTH").
+            for sub in _descendants(ch):
+                if _is_token(sub) and _token_kind_name(sub) == "Identifier":
+                    hier_path_parts.append(sub.valueText)
+        elif ch_cls == "EqualsValueClauseSyntax":
+            # Walk past the leading Equals token to the expression node.
+            for sub in ch:
+                if _is_token(sub):
+                    continue
+                value_text = _expression_text(sub)
+                break
+
+    if not hier_path_parts:
+        leaks.append({
+            "context": f"defparam[{gid}]",
+            "name": "?",
+            "reason": "defparam_missing_target_path",
+        })
+        return
+
+    hier_path = ".".join(hier_path_parts)
+    # Target is the last identifier in the scoped path (the param name),
+    # qualified under the instance-type module name if possible.
+    # hier_path_parts example: ["u_fifo", "DEPTH"]
+    # Try: look up the scope_path-qualified instance type to resolve the param.
+    target_id: str | None = None
+    if len(hier_path_parts) >= 2:
+        inst_name = hier_path_parts[0]
+        param_name = hier_path_parts[-1]
+        # Find the of_module type for the named instance in name_index.
+        # First try scope_path.inst_name to get the instance gid, then
+        # walk edges to find the ``of_module`` target module, and look up
+        # ``<module>.<param>`` in the index.
+        qualified_inst = f"{scope_path}.{inst_name}" if scope_path else inst_name
+        inst_gid = name_index.get(qualified_inst)
+        if inst_gid is not None:
+            # Walk the graph edges to find the ``of_module`` edge.
+            for e in graph["edges"]:
+                if e["src"] == inst_gid and e.get("type") == "of_module":
+                    mod_name = e.get("payload", {}).get("name") or ""
+                    if mod_name:
+                        target_id = name_index.get(f"{mod_name}.{param_name}")
+                    break
+        if target_id is None:
+            # Fallback: bare param name lookup.
+            target_id = name_index.get(param_name)
+
+    dst = target_id if target_id is not None else f"_unresolved.{hier_path}"
+    payload: dict = {"hier_path": hier_path, "value": value_text}
+    if target_id is None:
+        payload["unresolved"] = True
+
+    if not _has_edge(graph, module_gid, dst, "defparam_override"):
+        _add_edge(graph, module_gid, dst, "defparam_override", **payload)
+
+
 # Metadata-only entries — sub-elements handled inside the active rules above.
 
 def _s6_hierarchical_instance(*args, **kwargs):
@@ -540,6 +635,8 @@ def _s7_ordered_param_assignment(*args, **kwargs):
 rule_s6.__rule_id__ = "S6"
 rule_s13.__rule_id__ = "S13"
 rule_s33.__rule_id__ = "S33"
+rule_s43.__rule_id__ = "S43"
+_s43_stub.__rule_id__ = "S43"
 _s6_hierarchical_instance.__rule_id__ = "S6"
 _s6_instance_name.__rule_id__ = "S6"
 _s6_named_port_connection.__rule_id__ = "S6"
@@ -558,4 +655,9 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.OrderedParamAssignment, _s7_ordered_param_assignment),
     (pyslang.SyntaxKind.BindDirective, rule_s13),
     (pyslang.SyntaxKind.PrimitiveInstantiation, rule_s33),
+    # S43 — DefParam is the wrapper kind (lesson 5: register only innermost).
+    # DefParamAssignment is the innermost queryable kind; it carries the
+    # ScopedName target and EqualsValueClause RHS.
+    (pyslang.SyntaxKind.DefParam, _s43_stub),
+    (pyslang.SyntaxKind.DefParamAssignment, rule_s43),
 ]

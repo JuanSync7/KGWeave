@@ -1,4 +1,4 @@
-"""S33 PrimitiveInstantiation: gate-level primitive promotion tests.
+"""S33 PrimitiveInstantiation / S43 DefParam: instantiation rule tests.
 
 The S6 / S7 / S13 active rules are already exercised end-to-end by the
 top.sv-backed test_invariants.py / test_roundtrip.py suites; S33 introduces
@@ -21,6 +21,8 @@ import pytest
 
 HERE = Path(__file__).resolve().parent.parent.parent
 PRIM = HERE / "corpus" / "prim_corpus.sv"
+FIFO = HERE / "corpus" / "fifo.sv"
+TOP = HERE / "corpus" / "top.sv"
 
 
 @pytest.fixture(scope="module")
@@ -160,6 +162,95 @@ def test_round_trip_primitive_instantiation():
     out = emit(graph)
     reparsed = pyslang.SyntaxTree.fromText(out)
     # Compare token text streams (the standard round-trip oracle).
+    def _tokens(node, acc):
+        if type(node).__name__ == "Token":
+            for tr in node.trivia:
+                acc.append(tr.getRawText())
+            acc.append(node.rawText)
+            return
+        try:
+            for c in node:
+                _tokens(c, acc)
+        except TypeError:
+            pass
+
+    orig: list[str] = []
+    rt: list[str] = []
+    _tokens(tree.root, orig)
+    _tokens(reparsed.root, rt)
+    assert orig == rt
+
+
+# ---------------------------------------------------------------------------
+# S43 — DefParam / DefParamAssignment promotion tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def top_graph():
+    """Build a combined FIFO+TOP graph so defparam u_fifo.DEPTH resolves."""
+    from research.ast_experiment.src.build import build_kg
+
+    graph, _trees, _comp = build_kg([FIFO, TOP])
+    return graph
+
+
+def test_defparam_override_edge_emitted(top_graph):
+    """``defparam u_fifo.DEPTH = 8;`` emits a ``defparam_override`` edge
+    from the enclosing ``top`` module node."""
+    edges = [e for e in top_graph["edges"] if e["type"] == "defparam_override"]
+    assert len(edges) >= 1, "expected at least one defparam_override edge"
+
+
+def test_defparam_override_edge_payload_value(top_graph):
+    """The ``defparam_override`` edge carries the literal RHS value text."""
+    edges = [e for e in top_graph["edges"] if e["type"] == "defparam_override"]
+    assert len(edges) >= 1
+    edge = edges[0]
+    # Payload key ``value`` must equal "8" (the integer literal in the corpus).
+    assert edge.get("payload", {}).get("value") == "8", (
+        f"expected payload.value='8', got {edge}"
+    )
+
+
+def test_defparam_override_source_is_module(top_graph):
+    """The source of the ``defparam_override`` edge is the ``top`` module node."""
+    edges = [e for e in top_graph["edges"] if e["type"] == "defparam_override"]
+    assert edges
+    src_id = edges[0]["src"]
+    src_node = next(
+        (n for n in top_graph["nodes"] if n["id"] == src_id), None
+    )
+    assert src_node is not None
+    assert src_node.get("semantic", {}).get("role") == "module"
+    assert src_node["semantic"]["name"] == "top"
+
+
+def test_defparam_rule_registered():
+    """DefParamAssignment (innermost kind) is registered with __rule_id__='S43'."""
+    import pyslang  # noqa: PLC0415
+
+    from research.ast_experiment.src.semantic.dispatch import RULE_TABLE
+
+    fn = RULE_TABLE.get(pyslang.SyntaxKind.DefParamAssignment)
+    assert fn is not None, "DefParamAssignment not in RULE_TABLE"
+    assert getattr(fn, "__rule_id__", None) == "S43"
+
+
+def test_defparam_round_trip(top_graph):
+    """top.sv (including the defparam line) round-trips byte-equal through
+    lift → emit → reparse."""
+    import pyslang  # noqa: PLC0415
+
+    from research.ast_experiment.src.lift import lift
+    from research.ast_experiment.src.unlift import emit
+
+    src = TOP.read_text()
+    tree = pyslang.SyntaxTree.fromText(src)
+    graph = lift(tree)
+    out = emit(graph)
+    reparsed = pyslang.SyntaxTree.fromText(out)
+
     def _tokens(node, acc):
         if type(node).__name__ == "Token":
             for tr in node.trivia:

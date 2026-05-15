@@ -67,7 +67,7 @@ from .common.tokens import (
 from .rules import RULE_TABLE
 from .rules.dataflow import rule_s3_or_s8
 from .rules.generate import rule_s12
-from .rules.instantiation import rule_s6, rule_s13, rule_s33
+from .rules.instantiation import rule_s6, rule_s13, rule_s33, rule_s43
 
 
 # S16 — concurrent assertion statement SyntaxKind → role kind label. The six
@@ -121,7 +121,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43"}
 
 
 def _is_active(fn) -> bool:
@@ -1345,6 +1345,25 @@ def promote(
                           attributes={"port_count": port_count})
                     _add_edge(graph, mod_gid, gid, "has_let")
                     name_index[lpath] = gid
+        elif c == "DefParamAssignmentSyntax":
+            # S43 — ``defparam <inst>.<param> = <expr>;`` legacy override.
+            # Edge-only (lesson 4): emit ``defparam_override`` from the
+            # enclosing module to the target parameter, with payload
+            # ``{"hier_path": "<lhs>", "value": "<rhs_text>"}``.
+            # Delegate to rule_s43 which carries the full structural walk.
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                rule_s43(
+                    graph=graph,
+                    node=node,
+                    gid=gid,
+                    gnode=nodes_list[node_offset + idx],
+                    scope=None,
+                    name_index=name_index,
+                    leaks=leaks,
+                    scope_path=mname,
+                    module_gid=mod_gid,
+                )
         elif c == "ParameterDeclarationSyntax":
             pushed = "in_param"
         elif c == "DataDeclarationSyntax":

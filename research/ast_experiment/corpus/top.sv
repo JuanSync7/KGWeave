@@ -61,6 +61,8 @@ module top #(
         .empty (empty_b)
     );
 
+    defparam u_fifo.DEPTH = 8;
+
     generate
         for (genvar i = 0; i < NUM_FIFOS; i++) begin: gen_fifos
             fifo u_fifo_gen (
