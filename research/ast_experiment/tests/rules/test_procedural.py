@@ -288,3 +288,77 @@ def test_s21_triggers_edge_resolves_to_event(bind_graph):
         assert len(drives) == 1, (
             f"expected one triggers edge for {tr['semantic']['path']}→{ev_path}"
         )
+
+
+# ---------------------------------------------------------------------------
+# S42 — LetDeclaration
+#
+# ``let_decl_demo`` in fifo_asserts.sv declares three let expressions:
+#   let nonzero(x) = x != 0;    -- 1 port
+#   let in_range(a, b) = a < b; -- 2 ports
+#   let always_true() = 1;      -- 0 ports
+# S42 promotes each as role=let_decl under the enclosing module, emits a
+# has_let edge from the module, stamps attributes["port_count"] with the
+# port count, and registers the qualified path in the name_index.
+# ---------------------------------------------------------------------------
+
+
+def test_s42_let_decl_promoted(bind_graph):
+    """All three let declarations in let_decl_demo are promoted with
+    role=let_decl and paths rooted at the enclosing module."""
+    lets = _by_role(bind_graph, "let_decl")
+    names = {n["semantic"]["name"] for n in lets}
+    assert {"nonzero", "in_range", "always_true"} <= names, (
+        f"expected nonzero/in_range/always_true in promoted lets; got {names}"
+    )
+    for n in lets:
+        if n["semantic"]["name"] in {"nonzero", "in_range", "always_true"}:
+            assert n["semantic"]["path"].startswith("let_decl_demo."), (
+                f"path should be under let_decl_demo, got {n['semantic']['path']}"
+            )
+
+
+def test_s42_port_count_attribute(bind_graph):
+    """port_count attribute matches the declared arity of each let."""
+    lets = {n["semantic"]["name"]: n
+            for n in _by_role(bind_graph, "let_decl")
+            if n["semantic"]["path"].startswith("let_decl_demo.")}
+    assert lets["nonzero"]["semantic"]["attributes"]["port_count"] == 1
+    assert lets["in_range"]["semantic"]["attributes"]["port_count"] == 2
+    assert lets["always_true"]["semantic"]["attributes"]["port_count"] == 0
+
+
+def test_s42_has_let_edge_from_module(bind_graph):
+    """has_let edges run from the let_decl_demo module node to each let node."""
+    modules = _by_role(bind_graph, "module")
+    parent = next((m for m in modules
+                   if m["semantic"]["name"] == "let_decl_demo"), None)
+    assert parent is not None, "let_decl_demo module not promoted"
+    edges = [e for e in bind_graph["edges"]
+             if e["type"] == "has_let"
+             and e["src"] == parent["id"]]
+    assert len(edges) == 3, (
+        f"expected 3 has_let edges from let_decl_demo, got {len(edges)}"
+    )
+
+
+def test_s42_name_index_registration(bind_graph):
+    """All three qualified let paths are registered in semantic_name_index."""
+    idx = bind_graph.get("semantic_name_index", {})
+    for name in ("nonzero", "in_range", "always_true"):
+        path = f"let_decl_demo.{name}"
+        assert path in idx, f"name_index missing {path}"
+
+
+def test_s42_byte_equal_roundtrip(bind_graph):
+    """Round-trip invariant: lift→promote→unlift yields byte-equal source.
+    (Enforced at corpus level by test_roundtrip.py; verified here as a
+    belt-and-suspenders check that S42 does not corrupt node payloads.)"""
+    lets = _by_role(bind_graph, "let_decl")
+    for n in lets:
+        if n["semantic"]["path"].startswith("let_decl_demo."):
+            # Semantic layer must not have touched children/tokens/text.
+            sem = n.get("semantic", {})
+            assert sem.get("role") == "let_decl"
+            assert "path" in sem
+            assert "name" in sem

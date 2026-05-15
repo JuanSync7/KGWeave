@@ -135,4 +135,18 @@ module event_trigger_demo (input logic clk);
     end
 endmodule
 
+// S42 — LetDeclaration: compile-time macro-like substitution. ``let nonzero(x)
+// = x != 0;`` declares a single-port let that can be used inside assertion
+// expressions. The rule promotes it with role=let_decl, a has_let edge from
+// the enclosing module, and registers the qualified path in the name_index so
+// callers referencing the let can resolve it.
+module let_decl_demo (
+    input logic clk,
+    input logic [7:0] data
+);
+    let nonzero(x) = x != 0;
+    let in_range(a, b) = a < b;
+    let always_true() = 1;
+endmodule
+
 bind fifo fifo_asserts u_asserts(.clk(clk), .full(full), .push(push));

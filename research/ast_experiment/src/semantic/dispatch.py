@@ -121,7 +121,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42"}
 
 
 def _is_active(fn) -> bool:
@@ -1296,6 +1296,55 @@ def promote(
                         })
                         _add_edge(graph, mod_gid, extra_id, "has_genvar")
                         name_index[extra_path] = extra_id
+        elif c == "LetDeclarationSyntax":
+            # S42 — promote ``let <name>[(ports)] = <expr>;`` declarations as
+            # queryable nodes under the enclosing module / checker / package
+            # (the ``module_stack`` top, subtler variant from lesson 2).
+            #
+            # Name extraction: walk direct children for Token nodes; the
+            # Identifier token immediately following the LetKeyword is the
+            # let name. Port count extraction: walk the
+            # AssertionItemPortListSyntax child and count
+            # AssertionItemPortSyntax nodes inside the SeparatedList wrapper.
+            # The body expression stays BLOB — graph-as-index, blob-as-detail.
+            # No regex on source text.
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                saw_let_kw = False
+                let_name = ""
+                port_count = 0
+                for ch in node:
+                    if ch is None:
+                        continue
+                    if _is_token(ch):
+                        tkind = _token_kind_name(ch)
+                        if tkind == "LetKeyword":
+                            saw_let_kw = True
+                        elif saw_let_kw and tkind == "Identifier" and not let_name:
+                            let_name = ch.valueText
+                    elif _cls(ch) == "AssertionItemPortListSyntax":
+                        for pch in ch:
+                            if pch is None or _is_token(pch):
+                                continue
+                            if _cls(pch) == "AssertionItemPortSyntax":
+                                port_count += 1
+                            else:
+                                # SeparatedList wrapper
+                                try:
+                                    for gch in pch:
+                                        if (gch is not None
+                                                and not _is_token(gch)
+                                                and _cls(gch) == "AssertionItemPortSyntax"):
+                                            port_count += 1
+                                except TypeError:
+                                    pass
+                if let_name:
+                    lpath = f"{mname}.{let_name}"
+                    _mark(nodes_list[node_offset + idx], role="let_decl",
+                          name=let_name, path=lpath,
+                          attributes={"port_count": port_count})
+                    _add_edge(graph, mod_gid, gid, "has_let")
+                    name_index[lpath] = gid
         elif c == "ParameterDeclarationSyntax":
             pushed = "in_param"
         elif c == "DataDeclarationSyntax":

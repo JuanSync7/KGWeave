@@ -87,6 +87,14 @@ _s21_blocking_event_trigger.__rule_id__ = "S21"
 _s21_nonblocking_event_trigger.__rule_id__ = "S21"
 
 
+def rule_s42(*args, **kwargs):
+    """LetDeclaration is promoted in pass 1 of dispatch.promote."""
+    return
+
+
+rule_s42.__rule_id__ = "S42"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ProceduralAssignStatement, _s19_procedural_assign),
     (pyslang.SyntaxKind.ProceduralDeassignStatement, _s19_procedural_deassign),
@@ -96,4 +104,5 @@ RULES: list[tuple] = [
      _s21_blocking_event_trigger),
     (pyslang.SyntaxKind.NonblockingEventTriggerStatement,
      _s21_nonblocking_event_trigger),
+    (pyslang.SyntaxKind.LetDeclaration, rule_s42),
 ]
