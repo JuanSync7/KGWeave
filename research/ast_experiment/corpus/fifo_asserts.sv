@@ -38,6 +38,13 @@ module fifo_asserts(
         default input #1step output #2;
     endclocking
 
+    // S40 — DefaultClockingReference: ``default clocking <name>;`` selects
+    // which named clocking block is the implicit default for the scope.
+    // This is an edge-only kind (no independent identity); S40 emits a
+    // ``default_clocking`` edge from the enclosing module to the target
+    // clocking block. Resolved via name_index; fallback to _unresolved.<name>.
+    default clocking cb_fifo;
+
     // S16 — concurrent assertion use sites. Labeled top-level forms exercise
     // the ConcurrentAssertionMember wrapper path; the unlabeled cover sits
     // alongside to confirm synthetic-label fallback.

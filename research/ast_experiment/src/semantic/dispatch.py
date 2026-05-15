@@ -121,7 +121,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40"}
 
 
 def _is_active(fn) -> bool:
@@ -476,6 +476,39 @@ def promote(
                         if not _has_edge(graph, gid, tgt_id, "reads"):
                             _add_edge(graph, gid, tgt_id, "reads",
                                       name=sig_name)
+        elif c == "DefaultClockingReferenceSyntax":
+            # S40 — ``default clocking <name>;`` selects which named clocking
+            # block is the implicit default for the enclosing scope.
+            # Edge-only kind: no independent identity — purely a pointer.
+            # Emit a ``default_clocking`` edge from the enclosing module /
+            # interface / checker / program to the resolved clocking block.
+            # Resolve the target via name_index; fall back to
+            # ``_unresolved.<name>`` if the clocking block is not yet indexed
+            # (forward reference or external scope — lesson 4 of CLAUDE.md).
+            # The Identifier token carrying the clocking block name is the
+            # direct child that follows the ``ClockingKeyword`` token —
+            # detected structurally, no regex.
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                ref_name = ""
+                saw_clocking_kw = False
+                for ch in node:
+                    if _is_token(ch):
+                        tk = _token_kind_name(ch)
+                        if tk == "ClockingKeyword":
+                            saw_clocking_kw = True
+                            continue
+                        if saw_clocking_kw and tk == "Identifier":
+                            ref_name = ch.valueText
+                            break
+                if ref_name:
+                    tgt_gid = name_index.get(f"{mname}.{ref_name}")
+                    if tgt_gid is None:
+                        tgt_gid = name_index.get(ref_name)
+                    if tgt_gid is None:
+                        tgt_gid = f"_unresolved.{ref_name}"
+                    _add_edge(graph, mod_gid, tgt_gid, "default_clocking",
+                              name=ref_name)
         elif c in ("ProceduralAssignStatementSyntax",
                    "ProceduralDeassignStatementSyntax"):
             # S19/S20 — promote procedural-continuous-drive statements that

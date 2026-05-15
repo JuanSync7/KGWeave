@@ -83,3 +83,78 @@ def test_s18_name_index_registers_paths(bind_graph):
     idx = bind_graph.get("semantic_name_index", {})
     assert "fifo_asserts.cb_fifo" in idx
     assert "fifo_asserts.cb_default" in idx
+
+
+# ---------------------------------------------------------------------------
+# S40 — DefaultClockingReference tests
+# ---------------------------------------------------------------------------
+
+
+def test_s40_default_clocking_edge_exists(bind_graph):
+    """``default clocking cb_fifo;`` emits a ``default_clocking`` edge from
+    the enclosing module (fifo_asserts) to the clocking block node for
+    cb_fifo."""
+    modules = [n for n in bind_graph["nodes"]
+               if n.get("semantic", {}).get("role") == "module"]
+    parent = next(
+        (m for m in modules if m["semantic"]["name"] == "fifo_asserts"), None
+    )
+    assert parent is not None, "fifo_asserts module not promoted"
+
+    idx = bind_graph.get("semantic_name_index", {})
+    clk_gid = idx.get("fifo_asserts.cb_fifo")
+    assert clk_gid is not None, "cb_fifo not in name_index"
+
+    edges = [
+        e for e in bind_graph["edges"]
+        if e["type"] == "default_clocking"
+        and e["src"] == parent["id"]
+        and e["dst"] == clk_gid
+    ]
+    assert len(edges) == 1, (
+        f"expected 1 default_clocking edge from fifo_asserts to cb_fifo, "
+        f"got {len(edges)}"
+    )
+
+
+def test_s40_default_clocking_edge_payload(bind_graph):
+    """The ``default_clocking`` edge carries ``name`` metadata equal to the
+    referenced clocking block name."""
+    idx = bind_graph.get("semantic_name_index", {})
+    clk_gid = idx.get("fifo_asserts.cb_fifo")
+    assert clk_gid is not None
+
+    modules = [n for n in bind_graph["nodes"]
+               if n.get("semantic", {}).get("role") == "module"]
+    parent = next(
+        (m for m in modules if m["semantic"]["name"] == "fifo_asserts"), None
+    )
+    assert parent is not None
+
+    edges = [
+        e for e in bind_graph["edges"]
+        if e["type"] == "default_clocking"
+        and e["src"] == parent["id"]
+        and e["dst"] == clk_gid
+    ]
+    assert len(edges) == 1
+    assert edges[0].get("payload", {}).get("name") == "cb_fifo"
+
+
+def test_s40_roundtrip(bind_graph):
+    """Byte-equal round-trip: emit(lift(corpus)) must reconstruct the source
+    exactly — the default_clocking edge must not mutate any node structure."""
+    from pathlib import Path
+    from research.ast_experiment.src.lift import lift
+    from research.ast_experiment.src.unlift import emit
+    import pyslang
+
+    corpus = Path(__file__).resolve().parent.parent.parent / "corpus" / "fifo_asserts.sv"
+    text = corpus.read_text()
+    tree = pyslang.SyntaxTree.fromText(text)
+    graph = lift(tree)
+    reconstructed = emit(graph)
+    assert reconstructed == text, (
+        f"round-trip mismatch: got {len(reconstructed)} bytes, "
+        f"expected {len(text)} bytes"
+    )
