@@ -1173,3 +1173,63 @@ def _enum_value_names(enum_syn: Any) -> list[str]:
         if toks:
             out.append(toks[0].valueText)
     return out
+
+
+def _dpi_import_name_of(node: Any) -> str:
+    """Return the declared SV function/task name from a ``DPIImportSyntax`` node.
+
+    Structure: DPIImportSyntax → FunctionPrototypeSyntax → IdentifierNameSyntax
+    → Identifier token.  The function/task name is the first Identifier token
+    inside the FunctionPrototypeSyntax child — structurally, the IdentifierName
+    child of the prototype.  No regex on source text.
+    """
+    for ch in node:
+        if ch is None or _is_token(ch):
+            continue
+        if _cls(ch) == "FunctionPrototypeSyntax":
+            for gch in ch:
+                if gch is None or _is_token(gch):
+                    continue
+                if _cls(gch) == "IdentifierNameSyntax":
+                    toks = _identifier_tokens(gch)
+                    if toks:
+                        return toks[0].valueText
+            break
+    return ""
+
+
+def _dpi_import_spec_and_kind(node: Any) -> tuple[str, str]:
+    """Return (spec, import_kind) from a ``DPIImportSyntax`` node.
+
+    spec       — the DPI string literal value, e.g. "DPI-C" or "DPI",
+                 with surrounding quotes stripped.
+    import_kind — "function" or "task" derived from the leading keyword
+                  token inside FunctionPrototypeSyntax.
+
+    Both values are extracted structurally from token kinds and values —
+    no regex on source text.
+    """
+    spec = ""
+    import_kind = "function"
+    for ch in node:
+        if ch is None:
+            continue
+        if _is_token(ch):
+            tk = _token_kind_name(ch)
+            if tk == "StringLiteral":
+                # valueText includes the surrounding double-quotes; strip them.
+                raw = ch.valueText
+                spec = raw.strip('"')
+        else:
+            if _cls(ch) == "FunctionPrototypeSyntax":
+                for gch in ch:
+                    if gch is None or not _is_token(gch):
+                        continue
+                    tk2 = _token_kind_name(gch)
+                    if tk2 == "FunctionKeyword":
+                        import_kind = "function"
+                        break
+                    if tk2 == "TaskKeyword":
+                        import_kind = "task"
+                        break
+    return spec, import_kind

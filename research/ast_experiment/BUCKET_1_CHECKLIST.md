@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 49 | 89 | 0 | 46 |
+| PROMOTE | 135 | 49 | 90 | 0 | 45 |
 | CONTAINER | 88 | 23 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -60,7 +60,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `CovergroupDeclaration` | ✅ | ✅ | S22 |
 | `Coverpoint` | ✅ | ✅ | S23 |
 | `DPIExport` | ⬜ | ⬜ | future |
-| `DPIImport` | ⬜ | ⬜ | future |
+| `DPIImport` | ⬜ | ✅ | S44 |
 | `Declarator` | ✅ | ✅ | S1 |
 | `DefParam` | ⬜ | ✅ | S43 |
 | `DefParamAssignment` | ⬜ | ✅ | S43 |

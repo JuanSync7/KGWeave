@@ -45,6 +45,8 @@ from .common.tokens import (
     _covergroup_has_clocking_event,
     _covergroup_name_of,
     _coverpoint_expression,
+    _dpi_import_name_of,
+    _dpi_import_spec_and_kind,
     _extern_decl_kind_of,
     _extern_decl_name_of,
     _extern_decl_ports,
@@ -121,7 +123,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44"}
 
 
 def _is_active(fn) -> bool:
@@ -1103,6 +1105,37 @@ def promote(
                 # gid at this point. ``extern_pending`` is drained after
                 # visit_pass1 completes (see below).
                 extern_pending.append((gid, ext_name, ext_kind))
+        elif c == "DPIImportSyntax":
+            # S44 — promote ``import "DPI-C" function|task <name> (...);``
+            # declarations as queryable nodes under the enclosing module or
+            # package.  DPI imports are declaration-like (they introduce a
+            # callable into the current scope) but carry no body — they are
+            # extern-style in spirit.  Unlike extern module/interface (S29),
+            # DPI imports are always nested inside a module or package (LRM
+            # §35.5.1 forbids them at the compilation-unit level); so we
+            # always attach to the current module_stack top.
+            #
+            # Attributes extracted structurally — no regex on source text:
+            #   spec        — string-literal value stripped of quotes
+            #                 ("DPI-C" or "DPI")
+            #   import_kind — "function" or "task" from the FunctionKeyword /
+            #                 TaskKeyword token inside FunctionPrototypeSyntax
+            #
+            # Name index: registers ``<scope>.<function_name>`` so callers
+            # can resolve a DPI-imported function the same way they resolve
+            # module-defined functions.
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                fn_name = _dpi_import_name_of(node)
+                if fn_name:
+                    spec, import_kind = _dpi_import_spec_and_kind(node)
+                    dpath = f"{mname}.{fn_name}"
+                    _mark(nodes_list[node_offset + idx], role="dpi_import",
+                          name=fn_name, path=dpath,
+                          attributes={"spec": spec,
+                                      "import_kind": import_kind})
+                    _add_edge(graph, mod_gid, gid, "has_dpi_import")
+                    name_index[dpath] = gid
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:

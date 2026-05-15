@@ -204,3 +204,110 @@ def test_s30_extern_program_declares_full_program(ext_graph):
         f"expected extern program → full program declares edge, got "
         f"{len(edges)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# S44 — DPIImport promotion
+# ---------------------------------------------------------------------------
+
+FIFO = HERE / "corpus" / "fifo.sv"
+
+
+@pytest.fixture(scope="module")
+def fifo_graph():
+    """Graph built from fifo.sv — contains the S44 dpi_demo module."""
+    text = FIFO.read_text()
+    tree = pyslang.SyntaxTree.fromText(text)
+    comp = pyslang.Compilation()
+    comp.addSyntaxTree(tree)
+    from research.ast_experiment.src.lift import lift
+    from research.ast_experiment.src.semantic import promote
+
+    graph = lift(tree)
+    promote(graph, tree, comp)
+    return graph
+
+
+def test_s44_dpi_imports_promoted(fifo_graph):
+    """All three DPI import declarations inside ``dpi_demo`` are promoted as
+    role=dpi_import nodes."""
+    imports = _by_role(fifo_graph, "dpi_import")
+    by_name = {n["semantic"]["name"]: n for n in imports}
+    assert "c_compute" in by_name, f"c_compute missing; found {set(by_name)}"
+    assert "c_log" in by_name, f"c_log missing; found {set(by_name)}"
+    assert "dpi_reset" in by_name, f"dpi_reset missing; found {set(by_name)}"
+
+
+def test_s44_path_key_includes_scope(fifo_graph):
+    """Path key is ``<scope>.<function_name>`` — the enclosing module name
+    is included as a prefix."""
+    imports = {n["semantic"]["name"]: n
+               for n in _by_role(fifo_graph, "dpi_import")}
+    assert imports["c_compute"]["semantic"]["path"] == "dpi_demo.c_compute"
+    assert imports["c_log"]["semantic"]["path"] == "dpi_demo.c_log"
+    assert imports["dpi_reset"]["semantic"]["path"] == "dpi_demo.dpi_reset"
+
+
+def test_s44_spec_attribute(fifo_graph):
+    """The ``spec`` attribute records the DPI string literal ("DPI-C" or
+    "DPI") stripped of surrounding quotes."""
+    imports = {n["semantic"]["name"]: n
+               for n in _by_role(fifo_graph, "dpi_import")}
+    assert imports["c_compute"]["semantic"]["attributes"]["spec"] == "DPI-C"
+    assert imports["c_log"]["semantic"]["attributes"]["spec"] == "DPI-C"
+    assert imports["dpi_reset"]["semantic"]["attributes"]["spec"] == "DPI"
+
+
+def test_s44_import_kind_attribute(fifo_graph):
+    """The ``import_kind`` attribute distinguishes function from task."""
+    imports = {n["semantic"]["name"]: n
+               for n in _by_role(fifo_graph, "dpi_import")}
+    assert imports["c_compute"]["semantic"]["attributes"]["import_kind"] == "function"
+    assert imports["c_log"]["semantic"]["attributes"]["import_kind"] == "task"
+    assert imports["dpi_reset"]["semantic"]["attributes"]["import_kind"] == "function"
+
+
+def test_s44_has_dpi_import_edge(fifo_graph):
+    """Each DPI import node is connected to the enclosing module via a
+    ``has_dpi_import`` edge."""
+    imports = _by_role(fifo_graph, "dpi_import")
+    import_ids = {n["id"] for n in imports}
+    dpi_edges = [e for e in fifo_graph["edges"]
+                 if e["type"] == "has_dpi_import"]
+    edge_dsts = {e["dst"] for e in dpi_edges}
+    assert import_ids == edge_dsts, (
+        f"has_dpi_import edge destinations {edge_dsts} must match "
+        f"all dpi_import node ids {import_ids}"
+    )
+
+
+def test_s44_name_index_registered(fifo_graph):
+    """Every DPI import is registered in the shared name index under the
+    qualified path ``dpi_demo.<function_name>``."""
+    idx = fifo_graph["semantic_name_index"]
+    imports = {n["semantic"]["name"]: n
+               for n in _by_role(fifo_graph, "dpi_import")}
+    for name, node in imports.items():
+        path = f"dpi_demo.{name}"
+        assert idx.get(path) == node["id"], (
+            f"name_index[{path!r}] expected {node['id']!r}, "
+            f"got {idx.get(path)!r}"
+        )
+
+
+def test_s44_roundtrip(fifo_graph):
+    """Byte-equal round-trip: lift → emit must reconstruct the exact source
+    bytes from fifo.sv (which now contains the dpi_demo module).  The
+    semantic layer only mutates ``node["semantic"]`` and appends edges — it
+    never touches ``node["tokens"]`` or ``node["children"]``, so the emit
+    pass must reproduce the original text unchanged."""
+    from research.ast_experiment.src.unlift import emit
+    text = FIFO.read_text()
+    tree = pyslang.SyntaxTree.fromText(text)
+    graph_fresh = __import__(
+        "research.ast_experiment.src.lift", fromlist=["lift"]
+    ).lift(tree)
+    reconstructed = emit(graph_fresh)
+    assert reconstructed == text, (
+        f"round-trip mismatch on fifo.sv after S44 corpus addition"
+    )

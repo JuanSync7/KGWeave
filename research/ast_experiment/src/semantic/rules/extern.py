@@ -109,7 +109,22 @@ def _s30_program_decl(*args, **kwargs):
 _s30_program_decl.__rule_id__ = "S30"
 
 
+def rule_s44(*args, **kwargs):
+    """DPIImport is promoted in pass 1 of dispatch.promote — see the S44
+    branch.  This stub registers ``SyntaxKind.DPIImport`` under an active
+    ``__rule_id__`` for the Bucket-1 checklist and the ``_ACTIVE_RULE_IDS``
+    gate in dispatch.  The promotion logic lives inline in pass 1 because
+    DPI imports, like extern module declarations and clocking blocks, need
+    the enclosing module_stack context that is only available during the
+    DFS traversal."""
+    return
+
+
+rule_s44.__rule_id__ = "S44"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ExternModuleDecl, _s29_extern_module_decl),
     (pyslang.SyntaxKind.ProgramDeclaration, _s30_program_decl),
+    (pyslang.SyntaxKind.DPIImport, rule_s44),
 ]

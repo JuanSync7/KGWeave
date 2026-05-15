@@ -111,3 +111,14 @@ module genvar_demo #(parameter int N = 4) ();
     for (i = 0; i < N; i = i + 1) begin : g_ent
     end
 endmodule
+
+// S44 corpus: DPI import declarations.
+// Exercises the four key variants:
+//   1. import "DPI-C" function int c_compute(input int x)  — function, DPI-C spec
+//   2. import "DPI-C" task c_log(input int level)          — task, DPI-C spec
+//   3. import "DPI" function void dpi_reset()              — function, DPI spec
+module dpi_demo ();
+    import "DPI-C" function int c_compute(input int x);
+    import "DPI-C" task c_log(input int level);
+    import "DPI" function void dpi_reset();
+endmodule
