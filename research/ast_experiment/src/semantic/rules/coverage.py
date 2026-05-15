@@ -1,6 +1,6 @@
-"""S22 + S23 — covergroup / coverpoint / cross promotion.
+"""S22 + S23 + S41 — covergroup / coverpoint / cross / bins promotion.
 
-All three sub-rules are dispatched from pass 1 of ``dispatch.promote`` (the
+All sub-rules are dispatched from pass 1 of ``dispatch.promote`` (the
 same model used by S14/S15/S18/S22 — declarations that need to be visible to
 later passes before any rule has a chance to resolve them by hierarchical
 name). The metadata stubs below pin ``__rule_id__`` against the relevant
@@ -25,11 +25,16 @@ arbitrary token text.
 
 The cross member list is extracted from the SeparatedList of
 ``IdentifierNameSyntax`` direct children that follow the ``CrossKeyword``
-token — no regex on source text. Bins inside coverpoints stay BLOB.
+token — no regex on source text.
 
-Planned future S-rule owners under this module (still stubs):
-
-* CoverageBins (kept BLOB — payload-only)
+S41 — CoverageBins: every ``bins <name> = {...};``,
+``bins <name>[] = {...};``, ``illegal_bins <name> = {...};``, or
+``ignore_bins <name> = {...};`` declaration inside a coverpoint body is
+promoted with role ``coverage_bins``. The parent is the enclosing Coverpoint
+(``coverpoint_stack`` top — pushed by S23, analogous to how S24 pushes
+``class_stack`` for S25/S26 children). ``bins_kind`` attribute discriminates
+the three keyword forms. ``array_form=True`` is set when a
+``CoverageBinsArraySizeSyntax`` child is present (``[]`` or ``[N]``).
 """
 
 from __future__ import annotations
@@ -61,8 +66,17 @@ def _s23_cover_cross(*args, **kwargs):
 _s23_cover_cross.__rule_id__ = "S23"
 
 
+def rule_s41(*args, **kwargs):
+    """CoverageBins is promoted in pass 1 of dispatch.promote."""
+    return
+
+
+rule_s41.__rule_id__ = "S41"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.CovergroupDeclaration, _s22_covergroup),
     (pyslang.SyntaxKind.Coverpoint, _s23_coverpoint),
     (pyslang.SyntaxKind.CoverCross, _s23_cover_cross),
+    (pyslang.SyntaxKind.CoverageBins, rule_s41),
 ]

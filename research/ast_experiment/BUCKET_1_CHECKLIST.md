@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 49 | 85 | 0 | 50 |
+| PROMOTE | 135 | 49 | 86 | 0 | 49 |
 | CONTAINER | 88 | 23 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -56,7 +56,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `CoverCross` | ✅ | ✅ | S23 |
 | `CoverPropertyStatement` | ⬜ | ✅ | S16 |
 | `CoverSequenceStatement` | ⬜ | ✅ | S16 |
-| `CoverageBins` | ⬜ | ⬜ | future |
+| `CoverageBins` | ⬜ | ✅ | S41 |
 | `CovergroupDeclaration` | ✅ | ✅ | S22 |
 | `Coverpoint` | ✅ | ✅ | S23 |
 | `DPIExport` | ⬜ | ⬜ | future |

@@ -121,7 +121,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41"}
 
 
 def _is_active(fn) -> bool:
@@ -197,6 +197,11 @@ def promote(
         # children can resolve their parent path without a top-down rewalk.
         # Entries are (gid, class_path) tuples.
         "class_stack": [],
+        # S41: coverpoint_stack tracks the enclosing Coverpoint (or CoverCross)
+        # so CoverageBins children can resolve their parent path and gid without
+        # a top-down rewalk. Entries are (gid, cp_path) tuples. Pushed when S23
+        # successfully promotes a Coverpoint; popped on exit from that node.
+        "coverpoint_stack": [],
         # S28: checker_stack tracks the enclosing CheckerDeclaration so its
         # internal property / sequence / assertion children resolve their
         # parent path against the checker (not against the surrounding
@@ -224,6 +229,7 @@ def promote(
         popped_module = False
         pushed_covergroup = False
         pushed_class = False
+        pushed_coverpoint = False
 
         if c == "ModuleDeclarationSyntax":
             kind_name = str(getattr(node, "kind", "")).rsplit(".", 1)[-1]
@@ -688,6 +694,10 @@ def promote(
                       name=cp_name, path=cp_path, attributes=attrs)
                 _add_edge(graph, parent_gid, gid, edge_type)
                 name_index[cp_path] = gid
+                # S41: push coverpoint_stack so CoverageBins children can
+                # resolve their parent without a top-down rewalk.
+                state["coverpoint_stack"].append((gid, cp_path))
+                pushed_coverpoint = True
         elif c == "CoverCrossSyntax":
             # S23 — promote ``[label:] cross <cp_a>, <cp_b> ...;`` items.
             # Same parent-resolution policy as CoverpointSyntax above; the
@@ -725,6 +735,48 @@ def promote(
                       attributes={"members": members})
                 _add_edge(graph, parent_gid, gid, "has_cross")
                 name_index[cx_path] = gid
+        elif c == "CoverageBinsSyntax":
+            # S41 — promote ``bins <name> = {...};`` / ``bins <name>[] = ...;``
+            # / ``illegal_bins <name> = ...;`` / ``ignore_bins <name> = ...;``
+            # declarations inside a coverpoint body. Parent is the enclosing
+            # Coverpoint (coverpoint_stack top). If somehow reached outside any
+            # coverpoint, silently skip — the LRM forbids this and the corpus
+            # won't synthesise it.
+            #
+            # bins_kind is discriminated by the leading keyword token's kind:
+            #   BinsKeyword       → "bins"
+            #   IllegalBinsKeyword → "illegal_bins"
+            #   IgnoreBinsKeyword  → "ignore_bins"
+            # The identifier (bins name) is the token immediately following the
+            # keyword. array_form is detected by the presence of a
+            # CoverageBinsArraySizeSyntax child.
+            if state["coverpoint_stack"]:
+                cp_gid, cp_path = state["coverpoint_stack"][-1]
+                # Extract leading keyword and bins name from direct children.
+                bins_keyword = ""
+                bins_name = ""
+                has_array_form = False
+                expect_name = False
+                for ch in node:
+                    if _is_token(ch):
+                        tkind = _token_kind_name(ch)
+                        if tkind in {"BinsKeyword", "IllegalBinsKeyword", "IgnoreBinsKeyword"}:
+                            bins_keyword = ch.valueText  # "bins", "illegal_bins", "ignore_bins"
+                            expect_name = True
+                        elif expect_name and tkind == "Identifier":
+                            bins_name = ch.valueText
+                            expect_name = False
+                    elif _cls(ch) == "CoverageBinsArraySizeSyntax":
+                        has_array_form = True
+                if bins_name:
+                    bins_path = f"{cp_path}.{bins_name}"
+                    attrs: dict = {"bins_kind": bins_keyword}
+                    if has_array_form:
+                        attrs["array_form"] = True
+                    _mark(nodes_list[node_offset + idx], role="coverage_bins",
+                          name=bins_name, path=bins_path, attributes=attrs)
+                    _add_edge(graph, cp_gid, gid, "has_bins")
+                    name_index[bins_path] = gid
         elif c == "ClassDeclarationSyntax":
             # S24 — promote ``[virtual|interface] [final] class <name>
             # [#(params)] [extends ...] [implements ...] ; <items> endclass``
@@ -1342,6 +1394,9 @@ def promote(
             state["typedef_stack"].pop()
         if pushed_covergroup and state["covergroup_stack"]:
             state["covergroup_stack"].pop()
+        # S41: pop the coverpoint_stack entry pushed by the S23 Coverpoint branch.
+        if pushed_coverpoint and state["coverpoint_stack"]:
+            state["coverpoint_stack"].pop()
         if pushed_class and state["class_stack"]:
             state["class_stack"].pop()
         # S28: pop the checker_stack entry the CheckerDeclaration branch

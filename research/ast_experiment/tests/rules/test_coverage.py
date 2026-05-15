@@ -199,3 +199,74 @@ def test_s23_synthetic_coverpoint_name_fallback():
            if n.get("semantic", {}).get("role") == "coverpoint"]
     names = sorted(c["semantic"]["name"] for c in cps)
     assert names == ["coverpoint_0", "coverpoint_1"], names
+
+
+# ---------------------------------------------------------------------------
+# S41 — CoverageBins
+# ---------------------------------------------------------------------------
+
+
+def test_s41_coverage_bins_nodes_promoted(bind_graph):
+    """Each ``bins``/``illegal_bins``/``ignore_bins`` declaration inside
+    ``cp_push`` is promoted with role ``coverage_bins`` and a three-level
+    hierarchical path ``<module>.<covergroup>.<coverpoint>.<bins_name>``."""
+    bins_nodes = _by_role(bind_graph, "coverage_bins")
+    paths = sorted(b["semantic"]["path"] for b in bins_nodes)
+    assert paths == [
+        "fifo_asserts.cg_fifo.cp_push.bad",
+        "fifo_asserts.cg_fifo.cp_push.high",
+        "fifo_asserts.cg_fifo.cp_push.low",
+    ], paths
+
+
+def test_s41_bins_kind_attribute(bind_graph):
+    """Each bins node carries ``attributes.bins_kind`` discriminating
+    ``bins``, ``illegal_bins``, and ``ignore_bins``."""
+    bins_nodes = {b["semantic"]["name"]: b for b in _by_role(bind_graph, "coverage_bins")}
+    assert bins_nodes["low"]["semantic"]["attributes"]["bins_kind"] == "bins"
+    assert bins_nodes["high"]["semantic"]["attributes"]["bins_kind"] == "bins"
+    assert bins_nodes["bad"]["semantic"]["attributes"]["bins_kind"] == "illegal_bins"
+
+
+def test_s41_has_bins_edges(bind_graph):
+    """The parent coverpoint emits one ``has_bins`` edge per promoted bins
+    node — never the covergroup or module."""
+    bins_nodes = _by_role(bind_graph, "coverage_bins")
+    cps = {c["semantic"]["path"]: c for c in _by_role(bind_graph, "coverpoint")}
+    bins_ids = {b["id"] for b in bins_nodes}
+    edges = [e for e in bind_graph["edges"]
+             if e["type"] == "has_bins" and e["dst"] in bins_ids]
+    assert len(edges) == len(bins_nodes), (
+        f"expected {len(bins_nodes)} has_bins edges, got {len(edges)}"
+    )
+    parent_cp = cps["fifo_asserts.cg_fifo.cp_push"]
+    assert all(e["src"] == parent_cp["id"] for e in edges), (
+        "has_bins edge sourced from wrong parent"
+    )
+
+
+def test_s41_array_form_attribute(bind_graph):
+    """Bins declared as ``bins name[]`` carry ``attributes.array_form = True``;
+    plain ``bins name`` do not."""
+    bins_nodes = {b["semantic"]["name"]: b for b in _by_role(bind_graph, "coverage_bins")}
+    assert bins_nodes["high"]["semantic"]["attributes"].get("array_form") is True
+    assert "array_form" not in bins_nodes["low"]["semantic"]["attributes"]
+    assert "array_form" not in bins_nodes["bad"]["semantic"]["attributes"]
+
+
+def test_s41_roundtrip(bind_graph):
+    """Bins promotion must not alter the lossless round-trip property: every
+    corpus file lifts and emits to byte-equal source."""
+    from research.ast_experiment.src.unlift import emit  # noqa: PLC0415
+
+    text = BIND.read_text()
+    tree = pyslang.SyntaxTree.fromText(text)
+    comp = pyslang.Compilation()
+    comp.addSyntaxTree(tree)
+    from research.ast_experiment.src.lift import lift  # noqa: PLC0415
+    from research.ast_experiment.src.semantic import promote  # noqa: PLC0415
+
+    graph = lift(tree)
+    promote(graph, tree, comp)
+    reconstructed = emit(graph)
+    assert reconstructed == text, "round-trip broke after S41"
