@@ -297,6 +297,53 @@ def rule_s34(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", *
                 _add_edge(graph, gid, src, "reads")
 
 
+def rule_s36(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", **_):
+    """S36: ProceduralBlockSyntax[InitialBlock] → role="procedural_block",
+    kind="initial".
+
+    Promotes the ``initial begin ... end`` construct. Initial blocks have no
+    explicit sensitivity list (they execute once at time zero), so we skip the
+    SignalEventExpressionSyntax scan entirely and only walk body assignments for
+    ``drives``/``reads`` edges — same body-scan pattern as S35 (always_latch)
+    and S8 (always_comb).
+
+    Discriminated by SyntaxKind.InitialBlock (not by the Python class name,
+    per CLAUDE.md lesson 1 — ProceduralBlockSyntax is shared across
+    always/always_ff/always_comb/always_latch/initial/final).
+    """
+    _mark(gnode, role="procedural_block", attributes={"kind": "initial"})
+
+    # Drives / reads: walk body assignments — same scan as S35/S8.
+    for d in _descendants(node):
+        if _cls(d) != "BinaryExpressionSyntax":
+            continue
+        op = next((c for c in d if _is_token(c)), None)
+        if op is None:
+            continue
+        if _token_kind_name(op) not in {"LessThanEquals", "Equals"}:
+            continue
+        lhs, rhs = _split_around_eq(d)
+        if lhs is None or rhs is None:
+            continue
+        lhs_name = _lhs_target_name(lhs)
+        if lhs_name:
+            tgt = _resolve(lhs_name, scope=scope, name_index=name_index,
+                           leaks=leaks,
+                           context=f"initial.drives[{gid}]",
+                           scope_path=scope_path)
+            if tgt is not None and not _has_edge(graph, gid, tgt, "drives"):
+                _add_edge(graph, gid, tgt, "drives")
+        for rname in _identifier_names_in(rhs):
+            if rname == lhs_name:
+                continue
+            src = _resolve(rname, scope=scope, name_index=name_index,
+                           leaks=leaks,
+                           context=f"initial.reads[{gid}]",
+                           scope_path=scope_path)
+            if src is not None and not _has_edge(graph, gid, src, "reads"):
+                _add_edge(graph, gid, src, "reads")
+
+
 def rule_s35(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", **_):
     """S35: ProceduralBlockSyntax[AlwaysLatchBlock] → role="procedural_block",
     kind="always_latch".
@@ -359,6 +406,7 @@ _s4_identifier_name.__rule_id__ = "S4"
 _s8_alwayscomb.__rule_id__ = "S8"
 rule_s34.__rule_id__ = "S34"
 rule_s35.__rule_id__ = "S35"
+rule_s36.__rule_id__ = "S36"
 
 
 RULES: list[tuple] = [
@@ -367,6 +415,7 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.AlwaysCombBlock, _s8_alwayscomb),
     (pyslang.SyntaxKind.AlwaysBlock, rule_s34),
     (pyslang.SyntaxKind.AlwaysLatchBlock, rule_s35),
+    (pyslang.SyntaxKind.InitialBlock, rule_s36),
     (pyslang.SyntaxKind.IdentifierSelectName, rule_s4),
     (pyslang.SyntaxKind.IdentifierName, _s4_identifier_name),
     (pyslang.SyntaxKind.SystemName, rule_s5),

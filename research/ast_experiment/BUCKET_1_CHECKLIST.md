@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 49 | 80 | 0 | 55 |
+| PROMOTE | 135 | 49 | 81 | 0 | 54 |
 | CONTAINER | 88 | 23 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -98,7 +98,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ImplementsClause` | ⬜ | ✅ | S25 |
 | `ImplicitAnsiPort` | ✅ | ✅ | S1 |
 | `ImplicitNonAnsiPort` | ⬜ | ⬜ | future |
-| `InitialBlock` | ⬜ | ⬜ | future |
+| `InitialBlock` | ⬜ | ✅ | S36 |
 | `InstanceName` | ✅ | ✅ | S6 |
 | `InterfaceDeclaration` | ⬜ | ✅ | S11a |
 | `InterfaceHeader` | ⬜ | ⬜ | future |
