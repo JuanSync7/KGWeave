@@ -126,7 +126,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52"}
 
 
 def _is_active(fn) -> bool:
@@ -1044,6 +1044,47 @@ def promote(
                           name=cname, path=cpath, attributes=attrs)
                     _add_edge(graph, cls_gid, gid, "has_constraint")
                     name_index[cpath] = gid
+        elif c == "ConstraintBlockSyntax":
+            # S52 — promote a ``ConstraintBlock`` that appears as the inline
+            # constraint argument to ``obj.randomize() with { <expr>; ... }``.
+            #
+            # A ConstraintBlock appears in two structural positions:
+            #   1. As the body child of ConstraintDeclaration / ConstraintPrototype
+            #      (S27 already covers the parent; the block itself stays BLOB).
+            #   2. Directly inside ArrayOrRandomizeMethodExpression — the ``with
+            #      { ... }`` inline form (SV §18.12).  This second form has no
+            #      named declaration wrapping it and is independently queryable.
+            #
+            # We discriminate via the pyslang ``.parent`` attribute (available on
+            # all SyntaxNode objects).  Only form 2 gets promoted.
+            #
+            # Path: ``<scope>.__inline_constraint_<offset>__`` where <offset> is
+            # the byte offset of the opening brace token — unique per
+            # compilation unit even when multiple inline constraints appear in
+            # the same file.  The name is the same synthetic key.
+            #
+            # Edge: ``has_inline_constraint`` from the enclosing module / class /
+            # package (whichever is on the ``module_stack`` top, mirroring how
+            # S28/S29 attach checker-scope items).
+            parent_node = getattr(node, "parent", None)
+            parent_cls = _cls(parent_node) if parent_node is not None else ""
+            if parent_cls == "ArrayOrRandomizeMethodExpressionSyntax":
+                mod_gid, mname = _cur_module()
+                if mod_gid is not None:
+                    # Byte offset of the ``{`` token for a stable unique key.
+                    try:
+                        open_tok = node.getFirstToken()
+                        loc = getattr(open_tok, "location", None)
+                        cb_offset = getattr(loc, "offset", 0) or 0
+                    except Exception:
+                        cb_offset = 0
+                    cb_name = f"__inline_constraint_{cb_offset}__"
+                    cb_path = f"{mname}.{cb_name}"
+                    _mark(nodes_list[node_offset + idx],
+                          role="inline_constraint_block",
+                          name=cb_name, path=cb_path)
+                    _add_edge(graph, mod_gid, gid, "has_inline_constraint")
+                    name_index[cb_path] = gid
         elif c == "CheckerDeclarationSyntax":
             # S28 — promote ``checker <name> [(ports)]; <items> endchecker``
             # as a queryable node. Parent is the enclosing module / package /

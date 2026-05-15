@@ -42,3 +42,16 @@ package cls_pkg;
   endclass
 
 endpackage
+
+// S52 corpus: inline randomize() with { ... } — ConstraintBlock appears
+// directly inside ArrayOrRandomizeMethodExpression (not inside a named
+// ConstraintDeclaration).  Two inline blocks so the byte-offset uniqueness
+// of __inline_constraint_<offset>__ can be verified by tests.
+module s52_inline_top;
+  initial begin
+    automatic cls_pkg::data_xact t = new;
+    int ok;
+    ok = t.randomize() with { payload < 100; };
+    ok = t.randomize() with { payload > 10; rnd_field < 50; };
+  end
+endmodule
