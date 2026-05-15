@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 49 | 98 | 0 | 37 |
+| PROMOTE | 135 | 49 | 99 | 0 | 36 |
 | CONTAINER | 88 | 23 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -122,7 +122,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `NamedPortConnection` | ✅ | ✅ | S6 |
 | `NetAlias` | ⬜ | ✅ | S46 |
 | `NetDeclaration` | ⬜ | ⬜ | future |
-| `NetTypeDeclaration` | ⬜ | ⬜ | future |
+| `NetTypeDeclaration` | ⬜ | ✅ | S53 |
 | `NonblockingEventTriggerStatement` | ⬜ | ✅ | S21 |
 | `OrderedParamAssignment` | ⬜ | ✅ | S7 |
 | `OrderedPortConnection` | ⬜ | ⬜ | future |

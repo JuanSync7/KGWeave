@@ -7,5 +7,7 @@ package fifo_pkg;
   typedef union { int i; bit [31:0] b; } fifo_iu_t;
   typedef fifo_fwd_t;
   parameter int DEFAULT_DEPTH = 8;
+  nettype logic [7:0] data_net_t;
+  nettype logic [7:0] resolved_net_t with fifo_resolver;
   export *::*;
 endpackage

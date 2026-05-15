@@ -593,3 +593,95 @@ def test_s51_module_scope_works():
     ]
     assert len(edges) == 1, f"expected one exports_all from module scope, got {edges}"
     assert edges[0]["payload"].get("wildcard") is True
+
+
+# ---------------------------------------------------------------------------
+# S53: NetTypeDeclaration — user-defined net type promotion
+# ---------------------------------------------------------------------------
+
+
+def test_s53_nettype_node_role(pkg_graph):
+    """``nettype logic [7:0] data_net_t;`` in fifo_pkg promotes to a node
+    with role=nettype and path=fifo_pkg.data_net_t."""
+    node = _by_path(pkg_graph, "fifo_pkg.data_net_t")
+    assert node is not None, "fifo_pkg.data_net_t not found in graph"
+    sem = node["semantic"]
+    assert sem["role"] == "nettype"
+    assert sem["name"] == "data_net_t"
+
+
+def test_s53_nettype_data_type_attr(pkg_graph):
+    """The promoted nettype node carries a data_type attribute capturing the
+    source data type token text (e.g. ``logic [7:0]``)."""
+    node = _by_path(pkg_graph, "fifo_pkg.data_net_t")
+    assert node is not None
+    dt = node["semantic"]["attributes"].get("data_type", "")
+    assert dt != "", "data_type attribute must be non-empty"
+    assert "logic" in dt
+
+
+def test_s53_nettype_no_resolver(pkg_graph):
+    """A nettype without a ``with`` clause has resolver=None in attributes."""
+    node = _by_path(pkg_graph, "fifo_pkg.data_net_t")
+    assert node is not None
+    resolver = node["semantic"]["attributes"].get("resolver")
+    assert resolver is None, f"expected no resolver, got {resolver!r}"
+
+
+def test_s53_nettype_with_resolver_attr(pkg_graph):
+    """``nettype logic [7:0] resolved_net_t with fifo_resolver;`` carries
+    resolver=``fifo_resolver`` in its attributes."""
+    node = _by_path(pkg_graph, "fifo_pkg.resolved_net_t")
+    assert node is not None, "fifo_pkg.resolved_net_t not found"
+    sem = node["semantic"]
+    assert sem["role"] == "nettype"
+    assert sem["attributes"].get("resolver") == "fifo_resolver"
+
+
+def test_s53_has_nettype_edge(pkg_graph):
+    """A ``has_nettype`` edge is emitted from the enclosing package to the
+    nettype node."""
+    pkg = _by_path(pkg_graph, "fifo_pkg")
+    node = _by_path(pkg_graph, "fifo_pkg.data_net_t")
+    assert pkg is not None and node is not None
+    edges = [
+        e for e in pkg_graph["edges"]
+        if e["src"] == pkg["id"] and e["dst"] == node["id"]
+        and e["type"] == "has_nettype"
+    ]
+    assert len(edges) == 1
+
+
+def test_s53_name_index_registration(pkg_graph):
+    """Both nettypes are registered in the semantic_name_index."""
+    idx = pkg_graph.get("semantic_name_index", {})
+    assert "fifo_pkg.data_net_t" in idx, "data_net_t not in name_index"
+    assert "fifo_pkg.resolved_net_t" in idx, "resolved_net_t not in name_index"
+
+
+def test_s53_byte_equal_roundtrip():
+    """Byte-equal round-trip: S53 must not mutate token payloads. An inline
+    snippet containing both nettype forms is used to avoid the pre-existing
+    emit trailing-newline limitation on fifo_pkg.sv (see test_s51_byte_equal_roundtrip
+    for the same pattern)."""
+    import tempfile
+
+    from research.ast_experiment.src.build import build_kg
+    from research.ast_experiment.src.unlift import emit
+
+    src = (
+        "package p;"
+        " nettype logic [7:0] data_net_t;"
+        " nettype logic [7:0] resolved_net_t with my_resolver;"
+        " endpackage"
+    )
+    tmpdir = Path(tempfile.mkdtemp(prefix="s53_rt_"))
+    p = tmpdir / "p.sv"
+    p.write_text(src)
+    graph, _trees, _ = build_kg([p])
+    result = emit(graph)
+    assert src == result, (
+        f"byte-equal round-trip failed after S53 promotion:\n"
+        f"  expected: {src!r}\n"
+        f"  got:      {result!r}"
+    )

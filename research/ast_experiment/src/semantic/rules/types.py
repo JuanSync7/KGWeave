@@ -1,6 +1,7 @@
 """Type rules — S9 (Package, Typedef, Enum), S31 (Struct/Union/Forward),
 S32 (PackageImport/Export), S48 (TypeParameterDeclaration),
-S50 (PackageImportItem), and S51 (PackageExportAllDeclaration).
+S50 (PackageImportItem), S51 (PackageExportAllDeclaration), and
+S53 (NetTypeDeclaration).
 
 The actual promotion of typedef-shaped nodes lives in dispatch.promote's
 pass 1 (declarative tree walk). The metadata entries below pin the rule_id
@@ -157,6 +158,148 @@ def _s51_stub(*args, **kwargs):
     return
 
 
+def rule_s53(graph, node, gid, gnode, scope, name_index, leaks, scope_path="",
+             module_gid=None, **_):
+    """S53 — NetTypeDeclaration → node with role=nettype + ``has_nettype`` edge.
+
+    ``nettype DATA_T my_net_t;`` / ``nettype DATA_T my_net_t with resolver;``
+    (SV §6.6.7 user-defined net types).
+
+    Node attributes:
+      data_type  — whitespace-joined token text of the data-type child node
+                   (everything between the ``nettype`` keyword and the name
+                   identifier).
+      resolver   — identifier string from the ``with <func>`` clause, or None
+                   when no resolver is specified.
+
+    Edge shape:
+      src  = enclosing module / package gid (passed as ``module_gid``)
+      dst  = this nettype node gid
+      type = "has_nettype"
+
+    If ``resolver`` resolves in name_index, an additional
+    ``nettype_resolved_by`` edge is emitted from the nettype node to the
+    resolver function node.
+
+    The nettype name is registered in name_index as ``<scope>.<name>`` so
+    downstream net declarations using this nettype can resolve it.
+
+    Compilation-unit-scope nettypes (``module_gid is None``) are skipped and
+    recorded in ``semantic_leaks`` — consistent with S50/S51 convention.
+    """
+    from ..common.tokens import _cls, _is_token, _token_kind_name
+
+    if module_gid is None:
+        graph.setdefault("semantic_leaks", []).append({
+            "kind": "NetTypeDeclaration",
+            "reason": "cu-scope NetTypeDeclaration skipped",
+        })
+        return
+
+    # Walk direct children to extract name, data_type tokens, and resolver.
+    # Layout: [SyntaxList] NetTypeKeyword <type_syntax> Identifier
+    #         [WithFunctionClauseSyntax] Semicolon
+    nettype_name = ""
+    data_type_tokens: list[str] = []
+    resolver_name: str | None = None
+    saw_keyword = False
+    saw_type = False  # True after we've passed the first non-keyword syntax node
+
+    for ch in node:
+        if ch is None:
+            continue
+        if _is_token(ch):
+            tok_kind = _token_kind_name(ch)
+            if tok_kind == "NetTypeKeyword":
+                saw_keyword = True
+                continue
+            if tok_kind in {"Semicolon"}:
+                continue
+            if tok_kind == "Identifier" and saw_keyword and saw_type:
+                # Name identifier comes AFTER the data-type syntax node.
+                nettype_name = ch.valueText
+            elif saw_keyword and not saw_type:
+                # Keyword token that is part of the data type (shouldn't happen
+                # for common cases where the type is a syntax node, but guard
+                # for scalar primitive types).
+                v = ch.valueText
+                if v:
+                    data_type_tokens.append(v)
+        else:
+            cn = _cls(ch)
+            if cn == "SyntaxNode" and not saw_keyword:
+                # Leading attribute SyntaxList — skip
+                continue
+            if cn == "WithFunctionClauseSyntax":
+                # ``with <func>`` clause — extract the identifier inside
+                for wch in ch:
+                    if wch is None:
+                        continue
+                    if _is_token(wch):
+                        if _token_kind_name(wch) == "WithKeyword":
+                            continue
+                        v = wch.valueText
+                        if v:
+                            resolver_name = v
+                    else:
+                        # IdentifierNameSyntax wrapping the identifier token
+                        for iwch in wch:
+                            if iwch is None:
+                                continue
+                            if _is_token(iwch) and _token_kind_name(iwch) == "Identifier":
+                                resolver_name = iwch.valueText
+            elif saw_keyword and not saw_type:
+                # This is the data-type syntax node — collect all tokens
+                def _collect_tokens(n: object, out: list) -> None:  # type: ignore[type-arg]
+                    try:
+                        for t in n:  # type: ignore[union-attr]
+                            if t is None:
+                                continue
+                            if _is_token(t):
+                                v = t.valueText
+                                if v:
+                                    out.append(v)
+                            else:
+                                _collect_tokens(t, out)
+                    except TypeError:
+                        pass
+                _collect_tokens(ch, data_type_tokens)
+                saw_type = True
+
+    if not nettype_name:
+        return
+
+    data_type_str = " ".join(data_type_tokens) if data_type_tokens else ""
+    net_path = f"{scope_path}.{nettype_name}" if scope_path else nettype_name
+
+    # Derive scope_path from module_gid via reverse lookup in name_index when
+    # scope_path is empty (shouldn't happen in practice but be defensive).
+    if not scope_path:
+        rev = {v: k for k, v in name_index.items()}
+        scope_path = rev.get(module_gid, "")
+        net_path = f"{scope_path}.{nettype_name}" if scope_path else nettype_name
+
+    attrs: dict = {"data_type": data_type_str, "resolver": resolver_name}
+    gnode["semantic"] = {
+        "rule_id": "S53",
+        "role": "nettype",
+        "name": nettype_name,
+        "path": net_path,
+        "attributes": attrs,
+    }
+
+    _add_edge(graph, module_gid, gid, "has_nettype")
+    name_index[net_path] = gid
+
+    # Optional nettype_resolved_by edge when the resolver is in name_index.
+    if resolver_name is not None:
+        resolver_gid = name_index.get(resolver_name) or name_index.get(
+            f"{scope_path}.{resolver_name}"
+        )
+        if resolver_gid is not None:
+            _add_edge(graph, gid, resolver_gid, "nettype_resolved_by")
+
+
 _s9a_package.__rule_id__ = "S9a"
 _s9b_typedef.__rule_id__ = "S9b"
 _s9c_enum_type.__rule_id__ = "S9c"
@@ -170,6 +313,7 @@ rule_s50.__rule_id__ = "S50"
 _s50_stub.__rule_id__ = "S50"
 rule_s51.__rule_id__ = "S51"
 _s51_stub.__rule_id__ = "S51"
+rule_s53.__rule_id__ = "S53"
 
 
 RULES: list[tuple] = [
@@ -184,4 +328,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.TypeParameterDeclaration, _s48_type_parameter_declaration),
     (pyslang.SyntaxKind.PackageImportItem, rule_s50),
     (pyslang.SyntaxKind.PackageExportAllDeclaration, rule_s51),
+    (pyslang.SyntaxKind.NetTypeDeclaration, rule_s53),
 ]
