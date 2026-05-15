@@ -1,3 +1,6 @@
+// S47 corpus: timeunit / timeprecision directives inside a module.
+// Both the keyword-separated form (two statements) and the combined
+// timeunit <unit> / <prec>; form are exercised here and in fifo_pkg.sv.
 module fifo
     import fifo_pkg::*;
 #(
@@ -14,6 +17,9 @@ module fifo
     output logic              empty,
     output fifo_status_e      status
 );
+
+    timeunit 1ns;
+    timeprecision 1ps;
 
     import fifo_pkg::FULL;
 

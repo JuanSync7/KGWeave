@@ -772,3 +772,102 @@ def test_s46_roundtrip_after_promote(s46_bundle):
     from test_roundtrip import _token_text_stream  # noqa: PLC0415
 
     assert _token_text_stream(reparsed.root) == _token_text_stream(tree.root)
+
+
+# ---------------------------------------------------------------------------
+# S47 — TimeUnitsDeclaration (``timeunit``/``timeprecision`` directives)
+#
+# ``fifo`` module in corpus/fifo.sv now contains:
+#   timeunit 1ns;
+#   timeprecision 1ps;
+#
+# S47 promotes each TimeUnitsDeclaration to role=time_units with:
+#   - name: "__timeunits__"
+#   - path: "<scope>.__timeunits__"  (scope = enclosing module/package)
+#   - attributes["unit"]:      the timeunit literal (e.g. "1ns")
+#   - attributes["precision"]: the timeprecision literal (e.g. "1ps"),
+#                              present only on the timeprecision statement
+# An edge ``has_timeunits`` runs from the enclosing scope node to the
+# promoted node.
+# ---------------------------------------------------------------------------
+
+TIMEUNITS_SRC = HERE / "corpus" / "fifo.sv"
+
+
+@pytest.fixture(scope="module")
+def s47_bundle():
+    """Lift + promote corpus/fifo.sv (which now contains timeunit/timeprecision
+    directives inside module fifo) and return the graph."""
+    text = TIMEUNITS_SRC.read_text()
+    tree = pyslang.SyntaxTree.fromText(text)
+    comp = pyslang.Compilation()
+    comp.addSyntaxTree(tree)
+    from research.ast_experiment.src.lift import lift
+    from research.ast_experiment.src.semantic import promote
+
+    graph = lift(tree)
+    promote(graph, tree, comp)
+    return graph
+
+
+def test_s47_timeunits_node_promoted(s47_bundle):
+    """S47: timeunit 1ns inside module fifo promotes a role=time_units node
+    with unit attribute = '1ns'."""
+    tu_nodes = [n for n in s47_bundle["nodes"]
+                if n.get("semantic", {}).get("role") == "time_units"]
+    assert len(tu_nodes) >= 1, (
+        f"expected at least one time_units node, got 0; "
+        f"semantic nodes: {[n.get('semantic') for n in s47_bundle['nodes'] if n.get('semantic')]}"
+    )
+    unit_nodes = [n for n in tu_nodes
+                  if n["semantic"].get("attributes", {}).get("unit") == "1ns"]
+    assert unit_nodes, (
+        f"no time_units node with unit='1ns'; time_units nodes: "
+        f"{[n['semantic'] for n in tu_nodes]}"
+    )
+
+
+def test_s47_precision_node_promoted(s47_bundle):
+    """S47: timeprecision 1ps inside module fifo promotes a role=time_units
+    node with precision attribute = '1ps'."""
+    tu_nodes = [n for n in s47_bundle["nodes"]
+                if n.get("semantic", {}).get("role") == "time_units"]
+    prec_nodes = [n for n in tu_nodes
+                  if n["semantic"].get("attributes", {}).get("precision") == "1ps"]
+    assert prec_nodes, (
+        f"no time_units node with precision='1ps'; time_units nodes: "
+        f"{[n['semantic'] for n in tu_nodes]}"
+    )
+
+
+def test_s47_has_timeunits_edge(s47_bundle):
+    """S47: the enclosing scope emits a has_timeunits edge to the promoted node."""
+    tu_edges = [e for e in s47_bundle["edges"] if e["type"] == "has_timeunits"]
+    assert len(tu_edges) >= 1, (
+        f"expected at least one has_timeunits edge, got {len(tu_edges)}"
+    )
+
+
+def test_s47_path_under_scope(s47_bundle):
+    """S47: the promoted node path must be '<scope>.__timeunits__'."""
+    tu_nodes = [n for n in s47_bundle["nodes"]
+                if n.get("semantic", {}).get("role") == "time_units"]
+    for node in tu_nodes:
+        path = node["semantic"].get("path", "")
+        assert path.endswith(".__timeunits__"), (
+            f"path '{path}' does not end with '.__timeunits__'"
+        )
+
+
+def test_s47_roundtrip_after_promote(s47_bundle):
+    """S47 must not mutate token payloads — emit() reproduces fifo.sv
+    byte-for-byte after TimeUnitsDeclaration nodes are promoted."""
+    text = TIMEUNITS_SRC.read_text()
+    tree = pyslang.SyntaxTree.fromText(text)
+    from research.ast_experiment.src.unlift import emit
+
+    emitted = emit(s47_bundle)
+    reparsed = pyslang.SyntaxTree.fromText(emitted)
+    from test_roundtrip import _token_text_stream  # noqa: PLC0415
+
+    assert _token_text_stream(reparsed.root) == _token_text_stream(tree.root)

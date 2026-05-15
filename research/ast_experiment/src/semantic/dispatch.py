@@ -125,7 +125,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47"}
 
 
 def _is_active(fn) -> bool:
@@ -1223,6 +1223,72 @@ def promote(
                             extra["unresolved"] = True
                         _add_edge(graph, a_gid, b_gid, "aliases", **extra)
                         _add_edge(graph, b_gid, a_gid, "aliases", **extra)
+        elif c == "TimeUnitsDeclarationSyntax":
+            # S47 — promote ``timeunit <lit>;`` and ``timeprecision <lit>;``
+            # (SV §22.7 time-unit / time-precision directive).
+            #
+            # Each statement is a separate TimeUnitsDeclaration node carrying
+            # either a TimeUnitKeyword or TimePrecisionKeyword child, followed
+            # by a TimeLiteral token.  The combined form ``timeunit <lit> /
+            # <prec>;`` has a DividerClause child after the first literal.
+            #
+            # Promotion strategy:
+            #   - role: "time_units"
+            #   - name: "__timeunits__"
+            #   - path: "<scope>.__timeunits__"  (scope from module_stack; if
+            #     empty, use "__compilation__")
+            #   - attributes["unit"]: TimeLiteral text (timeunit stmt only)
+            #   - attributes["precision"]: TimeLiteral text (timeprecision stmt
+            #     or the DividerClause literal of the combined form)
+            #   - edge: has_timeunits from enclosing scope to this node
+            #
+            # Token traversal — no regex (lesson 4 of CLAUDE.md §6).
+            mod_gid, mname = _cur_module()
+            scope = mname if mname else "__compilation__"
+            tpath = f"{scope}.__timeunits__"
+            attrs: dict[str, Any] = {}
+            # Walk direct children to classify keyword and extract literals.
+            kw_kind: str | None = None
+            unit_lit: str | None = None
+            prec_lit: str | None = None
+            try:
+                children_seq = list(node)
+            except TypeError:
+                children_seq = []
+            for ch in children_seq:
+                if ch is None:
+                    continue
+                if _is_token(ch):
+                    tok_kind = _token_kind_name(ch)
+                    if tok_kind == "TimeUnitKeyword":
+                        kw_kind = "timeunit"
+                    elif tok_kind == "TimePrecisionKeyword":
+                        kw_kind = "timeprecision"
+                    elif tok_kind == "TimeLiteral" and unit_lit is None:
+                        unit_lit = ch.valueText
+                else:
+                    # DividerClauseSyntax — combined ``timeunit X / P;``
+                    div_kind = str(getattr(ch, "kind", "")).rsplit(".", 1)[-1]
+                    if div_kind == "DividerClause":
+                        try:
+                            for dch in ch:
+                                if dch is not None and _is_token(dch):
+                                    if _token_kind_name(dch) == "TimeLiteral":
+                                        prec_lit = dch.valueText
+                        except TypeError:
+                            pass
+            if kw_kind == "timeunit" and unit_lit is not None:
+                attrs["unit"] = unit_lit
+                if prec_lit is not None:
+                    attrs["precision"] = prec_lit
+            elif kw_kind == "timeprecision" and unit_lit is not None:
+                attrs["precision"] = unit_lit
+            if attrs:
+                _mark(nodes_list[node_offset + idx], role="time_units",
+                      name="__timeunits__", path=tpath, attributes=attrs)
+                if mod_gid is not None:
+                    _add_edge(graph, mod_gid, gid, "has_timeunits")
+                name_index[tpath] = gid
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
             if mod_gid is not None:
