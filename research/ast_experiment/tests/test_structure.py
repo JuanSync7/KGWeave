@@ -358,6 +358,7 @@ def test_scripts_directory_only_has_entry_points():
         "render_graph.py",
         "render_kgweave.py",
         "inventory.py",
+        "export_demo_graph.py",
     }
     actual = {
         p.name for p in _SCRIPTS_DIR.iterdir()
