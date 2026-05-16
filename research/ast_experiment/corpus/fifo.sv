@@ -223,10 +223,12 @@ endmodule
 // a PortReferenceSyntax child carrying the identifier; directions/types
 // arrive via separate input/output statements in the body (S55). The
 // concatenation entry ``{x, y}`` parses as ImplicitNonAnsiPort wrapping a
-// PortConcatenationSyntax — S66 currently skips emission for the
-// concatenation form (deferred to a future rule) since there is no single
-// port name to key on. Sibling of S1 ImplicitAnsiPort, S64 ExplicitAnsiPort,
-// S65 ExplicitNonAnsiPort.
+// PortConcatenationSyntax — S66 skips emission for the concatenation form
+// (no single port name to key on); S68 promotes the PortConcatenation
+// itself as role=port_concat at the synthetic path
+// ``legacy_implicit_demo.__port_concat_0__`` and emits groups_port_ref
+// edges to its constituent PortReference members (x, y). Sibling of S1
+// ImplicitAnsiPort, S64 ExplicitAnsiPort, S65 ExplicitNonAnsiPort.
 module legacy_implicit_demo(a, b, {x, y});
     input a;
     output b;

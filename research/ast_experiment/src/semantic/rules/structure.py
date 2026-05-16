@@ -159,6 +159,38 @@ def _s67_port_reference(*args, **kwargs):
 _s67_port_reference.__rule_id__ = "S67"
 
 
+def _s68_port_concatenation(*args, **kwargs):
+    """PortConcatenation — ``{a, b}`` curly-grouped port entry in non-ANSI
+    port lists.
+
+    Sibling of S66 ImplicitNonAnsiPort: the PortConcatenation appears as the
+    ``expr`` child of an ImplicitNonAnsiPortSyntax when the user writes
+    ``module m({a, b}, c);``. The concatenation is one external port that
+    bundles multiple internal nets (each net surfaces as a PortReference
+    member promoted by S67 at ``<module>.port_reference.<name>``). S66
+    intentionally skips emission for this expr-shape because there is no
+    single port name to key on; S68 fills the gap by promoting the
+    PortConcatenationSyntax itself as ``role=port_concat`` with a synthetic
+    anonymous path ``<module>.__port_concat_<offset>__`` (per-module
+    monotonically-increasing index, matching the S19/S20/S21 convention for
+    nameless promotions).
+
+    Edges:
+      * ``(module) -[has_port]-> (port_concat)`` — the concat IS one
+        external port externally.
+      * ``(port_concat) -[groups_port_ref]-> (port_reference)`` — one edge
+        per member PortReference. The member PortReferences keep their S67
+        promotion (path key unchanged) so they remain queryable both
+        directly and via the grouping edge.
+
+    Actual implementation lives in dispatch.promote (pass-1 branch).
+    """
+    return
+
+
+_s68_port_concatenation.__rule_id__ = "S68"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ModuleDeclaration, _s1_module_decl),
     (pyslang.SyntaxKind.ImplicitAnsiPort, _s1_port),
@@ -171,4 +203,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.ExplicitNonAnsiPort, _s65_explicit_non_ansi_port),
     (pyslang.SyntaxKind.ImplicitNonAnsiPort, _s66_implicit_non_ansi_port),
     (pyslang.SyntaxKind.PortReference, _s67_port_reference),
+    (pyslang.SyntaxKind.PortConcatenation, _s68_port_concatenation),
 ]

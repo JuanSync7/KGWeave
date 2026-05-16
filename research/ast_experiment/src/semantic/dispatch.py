@@ -128,7 +128,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68"}
 
 
 def _is_active(fn) -> bool:
@@ -184,6 +184,11 @@ def promote(
     # different covergroups don't collide on ``coverpoint_0``.
     coverpoint_counters: dict[str, int] = {}
     cross_counters: dict[str, int] = {}
+    # S68: per-module counter for anonymous PortConcatenation header entries
+    # (``module m({a, b}, c);``). The concat has no source-level name; the
+    # counter yields a synthetic ``__port_concat_<offset>__`` suffix that
+    # makes the path key unique per module.
+    port_concat_counters: dict[str, int] = {}
     # S29: deferred resolution of ``declares`` edges from extern decls to
     # the full module / interface / program declaration. Pass 1 visits in
     # source order; when the extern header precedes the body in the same
@@ -283,6 +288,14 @@ def promote(
         # same path) or None (S65 / concatenation case — emit at
         # ``<module>.port_reference.<name>``).
         "port_ref_parent_stack": [],
+        # S68: port_concat_stack tracks the enclosing PortConcatenationSyntax
+        # (``{a, b}`` in a non-ANSI port list) so that PortReference children
+        # — already promoted by S67 at ``<module>.port_reference.<name>`` —
+        # also receive a ``groups_port_ref`` edge from the concat node.
+        # Entries are ``concat_gid`` strings (or None when the concat itself
+        # was not promoted — kept for symmetric pop). Pushed on entering a
+        # PortConcatenationSyntax branch, popped on exit.
+        "port_concat_stack": [],
     }
 
     def _cur_module():
@@ -2376,6 +2389,43 @@ def promote(
                         # Only register the standalone path; never overwrite
                         # the S66 port entry already at ``<module>.<name>``.
                         name_index.setdefault(pref_path, gid)
+                    # S68: if this PortReference sits inside a
+                    # PortConcatenation, the concat groups it. Emit one
+                    # ``groups_port_ref`` edge per member so callers can walk
+                    # from the concat down to its constituent PortReferences.
+                    if state["port_concat_stack"]:
+                        concat_gid = state["port_concat_stack"][-1]
+                        if concat_gid is not None:
+                            _add_edge(graph, concat_gid, gid,
+                                      "groups_port_ref")
+        elif c == "PortConcatenationSyntax":
+            # S68 — ``{a, b}`` curly-grouped port entry inside a non-ANSI
+            # port list. Sits as the ``expr`` child of an
+            # ImplicitNonAnsiPortSyntax (S66 intentionally skips emission
+            # for this expr-shape — no single name to key on). The concat
+            # IS one external port externally that bundles multiple
+            # internal nets; each internal net surfaces as a PortReference
+            # member promoted by S67 at
+            # ``<module>.port_reference.<name>``. Path key for the concat
+            # itself is anonymous-synthetic — ``<module>.__port_concat_N__``
+            # — following the S19/S20/S21 convention for nameless
+            # promotions. Edges: ``has_port`` from the module (the concat
+            # is a port) and ``groups_port_ref`` to each member (emitted
+            # from the PortReference branch above when port_concat_stack is
+            # non-empty).
+            mod_gid, mname = _cur_module()
+            concat_gid: str | None = None
+            if mod_gid is not None:
+                n_idx = port_concat_counters.get(mname, 0)
+                port_concat_counters[mname] = n_idx + 1
+                cpath = f"{mname}.__port_concat_{n_idx}__"
+                _mark(nodes_list[node_offset + idx], role="port_concat",
+                      name=f"__port_concat_{n_idx}__", path=cpath)
+                _add_edge(graph, mod_gid, gid, "has_port")
+                name_index.setdefault(cpath, gid)
+                concat_gid = gid
+            state["port_concat_stack"].append(concat_gid)
+            pushed = "in_port"
         elif c == "GenvarDeclarationSyntax":
             # S38 — promote ``genvar <id1>, <id2>, ...;`` declarations.
             # A single GenvarDeclarationSyntax may declare multiple identifiers
@@ -3057,6 +3107,12 @@ def promote(
         if (c in ("ExplicitNonAnsiPortSyntax", "ImplicitNonAnsiPortSyntax")
                 and state["port_ref_parent_stack"]):
             state["port_ref_parent_stack"].pop()
+        # S68: pop port_concat_stack frame pushed by PortConcatenation
+        # branch above. The push is unconditional in that branch, so the
+        # pop is too.
+        if (c == "PortConcatenationSyntax"
+                and state["port_concat_stack"]):
+            state["port_concat_stack"].pop()
         if popped_module:
             state["module_stack"].pop()
 
