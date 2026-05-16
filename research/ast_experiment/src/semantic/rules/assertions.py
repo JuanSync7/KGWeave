@@ -42,9 +42,12 @@ sequence / let scope (top of ``sva_decl_stack``, extended in S77 to
 also push for ``LetDeclaration``). Promotion lives in pass 1 of
 ``dispatch.promote``.
 
-Planned future S-rule owners under this module (still stubs):
-
-* AssertionItemPortList
+S78 owns the ``AssertionItemPortList`` wrapper — the parenthesised list
+holding the ``AssertionItemPort`` entries of a parameterised property /
+sequence / let. Per CLAUDE.md lesson 5 (wrapper-kind dedup), the
+wrapper carries no independent identity beyond its children; only the
+inner ports promote (via S77). S78 ships as an ownership-only stub —
+no dispatch branch, mirroring S75 (FunctionPortList).
 """
 
 from __future__ import annotations
@@ -155,6 +158,31 @@ def _s77_assertion_item_port(*args, **kwargs):
 _s77_assertion_item_port.__rule_id__ = "S77"
 
 
+def _s78_stub(*args, **kwargs):
+    """AssertionItemPortList — wrapper ownership marker only.
+
+    ``AssertionItemPortListSyntax`` is the parenthesised wrapper holding
+    one or more ``AssertionItemPortSyntax`` entries inside a
+    parameterised property / sequence / let signature
+    (``property p(logic sig, int n); ...`` — the
+    ``(logic sig, int n)`` is the AssertionItemPortList).
+
+    Per ``CLAUDE.md`` lesson 5 (wrapper-kind dedup), the wrapper carries
+    no independent identity — its only role is to group the inner
+    ``AssertionItemPort`` children. We therefore leave it as CONTAINER
+    for structural traversal and only register an ownership stub here
+    so the Bucket-1 checklist regenerator attributes
+    ``AssertionItemPortList`` to S78 via ``__rule_id__`` introspection.
+    Runtime promotion fires per child via the inner ``AssertionItemPort``
+    kind (S77). No dispatch branch. Pattern mirrors S75
+    (``FunctionPortList``).
+    """
+    return
+
+
+_s78_stub.__rule_id__ = "S78"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.AssertPropertyStatement, _s16_assertion),
     (pyslang.SyntaxKind.AssumePropertyStatement, _s16_assertion),
@@ -177,4 +205,7 @@ RULES: list[tuple] = [
     # S77: AssertionItemPort — port-formal of property/sequence/let.
     # Runtime promotion lives in pass 1 of dispatch.promote.
     (pyslang.SyntaxKind.AssertionItemPort, _s77_assertion_item_port),
+    # S78: Wrapper ownership marker per lesson 5; children promote via S77.
+    # No dispatch branch.
+    (pyslang.SyntaxKind.AssertionItemPortList, _s78_stub),
 ]
