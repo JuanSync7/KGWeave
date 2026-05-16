@@ -203,3 +203,17 @@ module ansi_explicit_demo(
     wire x, z;
     wire [3:0] y;
 endmodule
+
+// S65 corpus: legacy Verilog-2001 non-ANSI explicit port form. Each
+// ``.name(expr)`` inside a NonAnsiPortList (no direction keyword in the
+// header — directions arrive via separate input/output statements in the
+// body) parses as SyntaxKind.ExplicitNonAnsiPort. The explicit empty-connect
+// ``.b()`` form is also ExplicitNonAnsiPort (pyslang surfaces it with no
+// PortReference child); the bare ``.b`` shorthand is intentionally NOT used
+// here because the structural round-trip currently normalises it to
+// ``.b()`` — a known pre-existing lift/unlift limitation independent of
+// S65. Sibling of S1's ImplicitAnsiPort and S64's ExplicitAnsiPort;
+// direction lives on the body PortDeclaration (S55).
+module legacy_explicit_demo(.a(p), .b());
+    input p, b;
+endmodule

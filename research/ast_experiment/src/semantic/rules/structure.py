@@ -91,6 +91,23 @@ _s55_port_decl.__rule_id__ = "S55"
 _s64_explicit_ansi_port.__rule_id__ = "S64"
 
 
+def _s65_explicit_non_ansi_port(*args, **kwargs):
+    """ExplicitNonAnsiPort — non-ANSI ``.name(expr)`` header port form.
+
+    Sibling of S1 ImplicitAnsiPort and S64 ExplicitAnsiPort. Lives inside a
+    NonAnsiPortList under the ModuleHeader: the header only carries the
+    external port name + an optional internal connect expression; direction
+    and type arrive separately via PortDeclaration statements in the module
+    body (S55). The bare ``.b`` header form is also parsed as
+    ExplicitNonAnsiPort with an empty connect expression. Actual
+    implementation lives in dispatch.promote (pass-1 branch).
+    """
+    return
+
+
+_s65_explicit_non_ansi_port.__rule_id__ = "S65"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ModuleDeclaration, _s1_module_decl),
     (pyslang.SyntaxKind.ImplicitAnsiPort, _s1_port),
@@ -100,4 +117,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.TimeUnitsDeclaration, rule_s47),
     (pyslang.SyntaxKind.PortDeclaration, _s55_port_decl),
     (pyslang.SyntaxKind.ExplicitAnsiPort, _s64_explicit_ansi_port),
+    (pyslang.SyntaxKind.ExplicitNonAnsiPort, _s65_explicit_non_ansi_port),
 ]
