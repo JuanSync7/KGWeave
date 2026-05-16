@@ -309,7 +309,10 @@ class TestGroupG:
         paths = [i["semantic"]["path"] for i in insts]
         # Direct named instances under top; generate-block fifos are owned by
         # their generate_block node, not by top itself.
-        assert set(paths) == {"top.u_fifo", "top.u_fifo_a", "top.u_fifo_b", "top.u_if"}
+        # ``top.u_pos`` is the S69 OrderedPortConnection corpus instance
+        # (positional ``dut_positional u_pos(clk, rst_n, push);``).
+        assert set(paths) == {"top.u_fifo", "top.u_fifo_a", "top.u_fifo_b",
+                              "top.u_if", "top.u_pos"}
 
     def test_G2_u_fifo_is_of_module_fifo(self, gbundle):
         """G2: top.u_fifo's of_module edge points at module `fifo`."""

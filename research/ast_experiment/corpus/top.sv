@@ -1,3 +1,13 @@
+// Tiny leaf module used by ``top`` to exercise S69 ordered port connections
+// (positional ``module u_inst(a, b, c);`` form). Port order = clk, rst, q.
+module dut_positional (
+    input  logic clk,
+    input  logic rst,
+    output logic q
+);
+    assign q = 1'b0;
+endmodule
+
 module top #(
     parameter int NUM_FIFOS = 2
 ) (
@@ -60,6 +70,11 @@ module top #(
         .full  (full_b),
         .empty (empty_b)
     );
+
+    // S69 — positional (ordered) port connection form. Sibling of the S6
+    // named ``.port(net)`` form above. Each entry in the connection list
+    // is matched to the dut's declared ports in declaration order.
+    dut_positional u_pos (clk, rst_n, push);
 
     defparam u_fifo.DEPTH = 8;
 

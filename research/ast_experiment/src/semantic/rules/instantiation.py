@@ -222,6 +222,64 @@ def rule_s6(graph, node, gid, gnode, scope, name_index, leaks,
             if not _has_edge(graph, hi_gid, child_param_id, "param_override"):
                 _add_edge(graph, hi_gid, child_param_id, "param_override",
                           instance=inst_path, name=pname, value=pvalue)
+        # S69 — OrderedPortConnection: positional port hookups like
+        # ``dut u1(clk, rst, q);``. Sibling of NamedPortConnection below;
+        # owns SyntaxKind.OrderedPortConnection via the _s69_stub metadata
+        # entry. Runtime lives inline here so hi_gid / inst_path are bound.
+        #
+        # Direction matches S6 NamedPortConnection: src=parent_net,
+        # dst=child_port (inv5 connects-endpoint invariant requires the
+        # dst to be a role=port queryable node whose owning module differs
+        # from src's). The child port is resolved POSITIONALLY by walking
+        # the of_module's ``has_port`` edges in graph (= declaration)
+        # order — ordered connections carry no port name lexically, so
+        # the LRM positional rule is the only way to map them.
+        ordered_child_ports: list[str] = []
+        if type_node_id is not None:
+            for e in graph["edges"]:
+                if (e.get("src") == type_node_id
+                        and e.get("type") == "has_port"):
+                    ordered_child_ports.append(e["dst"])
+        ord_position = 0
+        for opc in _descendants(d):
+            if _cls(opc) != "OrderedPortConnectionSyntax":
+                continue
+            ident_toks = _identifier_tokens(opc)
+            rhs_name = ident_toks[0].valueText if ident_toks else ""
+            # Resolve child port by position; fall back to _unresolved
+            # when the of_module isn't in name_index (cross-file forward
+            # ref) or when the position overruns the declared port list.
+            if ord_position < len(ordered_child_ports):
+                dst_id: str = ordered_child_ports[ord_position]
+                dst_unresolved = False
+            else:
+                dst_id = f"_unresolved.{type_name}.__pos_{ord_position}__"
+                dst_unresolved = True
+            if rhs_name:
+                src_id = (name_index.get(f"{scope_path}.{rhs_name}")
+                          if scope_path else None)
+                if src_id is None:
+                    src_id = name_index.get(rhs_name)
+            else:
+                src_id = None
+            if src_id is None:
+                # No resolvable RHS — record a leak and skip emitting the
+                # connects edge (inv5 requires both endpoints queryable).
+                leaks.append({
+                    "context": f"ordered_port_connection[{hi_gid}.{ord_position}]",
+                    "name": rhs_name or f"__pos_{ord_position}__",
+                    "reason": "no_promoted_anchor",
+                })
+                ord_position += 1
+                continue
+            payload: dict = {"position": ord_position,
+                             "instance": inst_path,
+                             "name": rhs_name}
+            if dst_unresolved:
+                payload["unresolved"] = True
+            if not _has_edge(graph, src_id, dst_id, "connects"):
+                _add_edge(graph, src_id, dst_id, "connects", **payload)
+            ord_position += 1
         for npc in _descendants(d):
             if _cls(npc) != "NamedPortConnectionSyntax":
                 continue
@@ -721,6 +779,20 @@ def _s61_stub(*args, **kwargs):
 _s61_stub.__rule_id__ = "S61"
 
 
+def _s69_stub(*args, **kwargs):
+    """S69 ownership marker — OrderedPortConnection runtime lives inside
+    rule_s6 (parent's HierarchicalInstance walk where hi_gid / inst_path
+    are bound). This stub exists so the bucket1 checklist sees an owner
+    for SyntaxKind.OrderedPortConnection. Lesson 4 edge-only kind — the
+    OrderedPortConnection has no independent identity, just a
+    ``connects`` edge from the instance to the connected net with a
+    ``position`` payload."""
+    return
+
+
+_s69_stub.__rule_id__ = "S69"
+
+
 rule_s6.__rule_id__ = "S6"
 rule_s13.__rule_id__ = "S13"
 rule_s33.__rule_id__ = "S33"
@@ -757,4 +829,9 @@ RULES: list[tuple] = [
     # rule_s13 above (parent's branch where binder_gid is bound); this
     # stub is the ownership marker for the bucket1 checklist.
     (pyslang.SyntaxKind.BindTargetList, _s61_stub),
+    # S69 — OrderedPortConnection: positional port hookup form. Edge-only
+    # (lesson 4) — runtime lives inside rule_s6 above (where hi_gid and
+    # inst_path are bound). This stub is the ownership marker for the
+    # bucket1 checklist.
+    (pyslang.SyntaxKind.OrderedPortConnection, _s69_stub),
 ]

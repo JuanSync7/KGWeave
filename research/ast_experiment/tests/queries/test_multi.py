@@ -72,7 +72,8 @@ def test_instantiates_of_top(multi_bundle):
     paths = [i["semantic"]["path"] for i in insts]
     # The syntactic instances under top — generate-block instances are
     # contained under their generate_block, not directly under the module.
-    assert set(paths) == {"top.u_fifo", "top.u_fifo_a", "top.u_fifo_b", "top.u_if"}
+    assert set(paths) == {"top.u_fifo", "top.u_fifo_a", "top.u_fifo_b",
+                          "top.u_if", "top.u_pos"}
 
 
 def test_module_of_top_u_fifo(multi_bundle):
