@@ -55,7 +55,33 @@ def _s28_checker_instantiation(*args, **kwargs):
 _s28_checker_instantiation.__rule_id__ = "S28"
 
 
+def _s62_checker_data_declaration(*args, **kwargs):
+    """CheckerDataDeclaration is promoted in pass 1 of dispatch.promote — see
+    the S62 branch keyed on ``CheckerDataDeclarationSyntax``. The syntax
+    surfaces only for ``rand``-prefixed checker-local data decls (plain
+    ``logic x;`` inside a checker parses as DataDeclarationSyntax instead,
+    handled by the existing in_data → net path under the checker_stack-
+    augmented module_stack).
+
+    Strategy: one queryable ``checker_data`` node per Declarator (S38-style
+    fan-out for ``rand bit [1:0] a, b;``), attached to the enclosing checker
+    via ``has_checker_data``. Attrs: data_type, has_initializer, is_rand
+    (always True at this kind). Path key: ``<checker>.<name>``. The inner
+    DataDeclaration wrapper is suppressed from the in_data → net path so the
+    same names don't double-surface as nets — the S62 branch sets
+    ``in_checker_data`` for the wrapper's subtree and the DataDeclaration
+    branch short-circuits on that flag.
+
+    This stub exists only to register the SyntaxKind under an active
+    ``__rule_id__`` for the Bucket-1 checklist owner column."""
+    return
+
+
+_s62_checker_data_declaration.__rule_id__ = "S62"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.CheckerDeclaration, _s28_checker_declaration),
     (pyslang.SyntaxKind.CheckerInstantiation, _s28_checker_instantiation),
+    (pyslang.SyntaxKind.CheckerDataDeclaration, _s62_checker_data_declaration),
 ]

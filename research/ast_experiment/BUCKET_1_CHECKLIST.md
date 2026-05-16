@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 136 | 50 | 108 | 0 | 28 |
+| PROMOTE | 136 | 50 | 109 | 0 | 27 |
 | CONTAINER | 87 | 22 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -36,7 +36,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `BindTargetList` | ⬜ | ✅ | S61 |
 | `BlockingEventTriggerStatement` | ⬜ | ✅ | S21 |
 | `CaseGenerate` | ⬜ | ✅ | S12c |
-| `CheckerDataDeclaration` | ⬜ | ⬜ | future |
+| `CheckerDataDeclaration` | ⬜ | ✅ | S62 |
 | `CheckerDeclaration` | ⬜ | ✅ | S28 |
 | `CheckerInstanceStatement` | ⬜ | ⬜ | future |
 | `CheckerInstantiation` | ⬜ | ✅ | S28 |

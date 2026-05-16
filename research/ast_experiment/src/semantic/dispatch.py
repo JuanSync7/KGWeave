@@ -128,7 +128,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62"}
 
 
 def _is_active(fn) -> bool:
@@ -219,6 +219,12 @@ def promote(
         "checker_stack": [],
         "in_param": 0,
         "in_data": 0,
+        # S62: nonzero inside the subtree of a CheckerDataDeclarationSyntax.
+        # The DataDeclaration child of that wrapper short-circuits its
+        # ``pushed = "in_data"`` push when this is set, so the rand-prefixed
+        # declarators don't double-surface as role=net under the checker —
+        # they are promoted as role=checker_data by the S62 branch directly.
+        "in_checker_data": 0,
         "in_port": 0,
         "in_typedef": 0,
         "in_function": 0,
@@ -2284,8 +2290,134 @@ def promote(
                 )
         elif c == "ParameterDeclarationSyntax":
             pushed = "in_param"
+        elif c == "CheckerDataDeclarationSyntax":
+            # S62 — promote ``rand <type> <name>[, <name>...];`` declarations
+            # that appear inside a checker body. pyslang surfaces these as a
+            # dedicated ``CheckerDataDeclarationSyntax`` whose direct children
+            # are ``[SyntaxList(attrs), RandKeyword, DataDeclarationSyntax]``
+            # (verified via SyntaxTree probe). Non-rand checker-local decls
+            # (``logic x;`` / ``bit [3:0] cnt;``) parse as plain
+            # DataDeclarationSyntax and stay on the in_data → net path that
+            # the checker_stack-augmented module_stack already supports.
+            #
+            # Strategy mirrors S57 (LocalVariableDeclaration): fan-out one
+            # ``checker_data`` node per Declarator under the inner
+            # DataDeclaration's SeparatedList. Canonical syntax node carries
+            # the first name; 2nd+ get S38-style synthetic sibling nodes
+            # appended to nodes_list. Each emits ``has_checker_data`` from
+            # the enclosing checker.
+            #
+            # Parent resolution: the CheckerDeclaration branch pushes the
+            # checker onto both checker_stack and module_stack; we read the
+            # top of checker_stack so the parent path is unambiguously the
+            # checker even if a nested rule had layered another module_stack
+            # frame on top (none today, but defensive).
+            #
+            # Suppression: push ``in_checker_data`` for the duration of this
+            # subtree so the inner DataDeclarationSyntax does NOT set
+            # ``pushed = "in_data"`` — without this, every rand declarator
+            # would also surface as role=net under the same path.
+            parent_gid: str | None = None
+            parent_path = ""
+            if state["checker_stack"]:
+                parent_gid, parent_path = state["checker_stack"][-1]
+            if parent_gid is not None:
+                # Find the inner DataDeclarationSyntax wrapper. Its kind is
+                # ``DataDeclaration`` regardless of nesting (lesson 1: kind
+                # discriminator, not class identity).
+                inner_dd = None
+                for ch in node:
+                    if ch is None or _is_token(ch):
+                        continue
+                    ck = str(getattr(ch, "kind", "")).rsplit(".", 1)[-1]
+                    if ck == "DataDeclaration":
+                        inner_dd = ch
+                        break
+                type_node = None
+                decl_list = None
+                if inner_dd is not None:
+                    for sub in inner_dd:
+                        if sub is None or _is_token(sub):
+                            continue
+                        sk = str(getattr(sub, "kind", "")).rsplit(".", 1)[-1]
+                        if sk in ("SyntaxList", "TokenList"):
+                            continue
+                        if sk == "SeparatedList":
+                            decl_list = sub
+                            continue
+                        if type_node is None:
+                            type_node = sub
+                type_text = _type_text_of(type_node)
+                declarators: list[tuple[str, bool]] = []
+                if decl_list is not None:
+                    try:
+                        kids = list(decl_list)
+                    except TypeError:
+                        kids = []
+                    for d in kids:
+                        if d is None or _is_token(d):
+                            continue
+                        if _cls(d) != "DeclaratorSyntax":
+                            continue
+                        ids = _identifier_tokens(d)
+                        if not ids:
+                            continue
+                        dname = ids[0].valueText
+                        has_init = False
+                        for dch in d:
+                            if (dch is not None and not _is_token(dch)
+                                    and _cls(dch) == "EqualsValueClauseSyntax"):
+                                has_init = True
+                                break
+                        declarators.append((dname, has_init))
+                if declarators:
+                    first_name, first_init = declarators[0]
+                    first_path = f"{parent_path}.{first_name}"
+                    _mark(nodes_list[node_offset + idx],
+                          role="checker_data",
+                          name=first_name, path=first_path,
+                          attributes={
+                              "data_type": type_text,
+                              "has_initializer": first_init,
+                              "is_rand": True,
+                          })
+                    _add_edge(graph, parent_gid, gid, "has_checker_data")
+                    name_index[first_path] = gid
+                    # S38-style synthetic siblings for the 2nd+ declarators.
+                    for extra_name, extra_init in declarators[1:]:
+                        extra_path = f"{parent_path}.{extra_name}"
+                        extra_id = f"checker_data:{extra_path}"
+                        nodes_list.append({
+                            "id": extra_id,
+                            "type": "CheckerDataDeclarationSyntax",
+                            "kind": "CheckerDataDeclaration",
+                            "is_token": False,
+                            "payload": {"synthetic": True},
+                            "queryable": True,
+                            "semantic": {
+                                "role": "checker_data",
+                                "name": extra_name,
+                                "path": extra_path,
+                                "attributes": {
+                                    "data_type": type_text,
+                                    "has_initializer": extra_init,
+                                    "is_rand": True,
+                                },
+                            },
+                        })
+                        _add_edge(graph, parent_gid, extra_id,
+                                  "has_checker_data")
+                        name_index[extra_path] = extra_id
+            pushed = "in_checker_data"
         elif c == "DataDeclarationSyntax":
-            pushed = "in_data"
+            # S62: when wrapped by a CheckerDataDeclarationSyntax (rand
+            # checker-local data decl), suppress the in_data push so the
+            # inner Declarators don't re-promote as role=net — they were
+            # already surfaced as role=checker_data by the S62 branch above.
+            if state["in_checker_data"] > 0:
+                pass
+            else:
+                pushed = "in_data"
         elif c == "NetDeclarationSyntax":
             # S54 — promote NetDeclaration as a group node (role="net_decl")
             # carrying net_type + signed attributes, with a ``has_net_decl``

@@ -137,3 +137,105 @@ def test_s28_checker_name_index_registered(chk_graph):
     assert "c_mutex" in idx
     assert "checker:c_mutex" in idx
     assert idx["c_mutex"] == idx["checker:c_mutex"]
+
+
+# ---------------------------------------------------------------------------
+# S62 — CheckerDataDeclaration (rand-prefixed checker-local data decls).
+# ---------------------------------------------------------------------------
+
+
+def test_s62_checker_data_nodes_promoted(chk_graph):
+    """rand-prefixed checker-local data decls surface as role=checker_data
+    nodes — ``rand bit r_flag;`` plus the fan-out ``rand bit [1:0] r_mode,
+    r_dir;`` together yield three checker_data nodes attached to c_mutex."""
+    cds = _by_role(chk_graph, "checker_data")
+    names = sorted(n["semantic"]["name"] for n in cds)
+    assert names == ["r_dir", "r_flag", "r_mode"], names
+    paths = sorted(n["semantic"]["path"] for n in cds)
+    assert paths == ["c_mutex.r_dir", "c_mutex.r_flag", "c_mutex.r_mode"], paths
+
+
+def test_s62_checker_data_attrs(chk_graph):
+    """data_type, has_initializer, and is_rand are stamped per declarator.
+    All three rand entries carry is_rand=True; types are bit / bit[1:0]."""
+    by_name = {n["semantic"]["name"]: n for n in _by_role(chk_graph, "checker_data")}
+    r_flag = by_name["r_flag"]["semantic"]["attributes"]
+    assert r_flag["is_rand"] is True
+    assert r_flag["has_initializer"] is False
+    assert r_flag["data_type"].strip().startswith("bit")
+    assert "[" not in r_flag["data_type"]  # no packed dim on r_flag
+    r_mode = by_name["r_mode"]["semantic"]["attributes"]
+    assert r_mode["is_rand"] is True
+    assert "[" in r_mode["data_type"] and "1" in r_mode["data_type"]
+    # r_mode and r_dir share the same data_type (fan-out preserves type_text).
+    assert r_mode["data_type"] == by_name["r_dir"]["semantic"]["attributes"]["data_type"]
+
+
+def test_s62_checker_data_fanout_multi_declarator(chk_graph):
+    """A single ``rand bit [1:0] r_mode, r_dir;`` produces two distinct
+    checker_data nodes (S38-style fan-out — canonical + synthetic sibling)."""
+    cds = [n for n in _by_role(chk_graph, "checker_data")
+           if n["semantic"]["name"] in ("r_mode", "r_dir")]
+    assert len(cds) == 2
+    # The two nodes have distinct ids.
+    assert cds[0]["id"] != cds[1]["id"]
+
+
+def test_s62_has_checker_data_edges(chk_graph):
+    """Each checker_data node has exactly one has_checker_data edge from
+    the enclosing c_mutex checker."""
+    chk = _by_role(chk_graph, "checker")[0]
+    cds = _by_role(chk_graph, "checker_data")
+    assert cds
+    for cd in cds:
+        edges = [e for e in chk_graph["edges"]
+                 if e["type"] == "has_checker_data"
+                 and e["src"] == chk["id"]
+                 and e["dst"] == cd["id"]]
+        assert len(edges) == 1, (cd["semantic"]["name"], len(edges))
+
+
+def test_s62_is_rand_discrimination(chk_graph):
+    """is_rand on a checker_data is True; the non-rand DataDeclarations
+    inside the same checker (``logic loc_a, loc_b;`` / ``bit [3:0] cnt;``)
+    are NOT promoted as checker_data — they remain plain nets."""
+    cds = _by_role(chk_graph, "checker_data")
+    cd_names = {n["semantic"]["name"] for n in cds}
+    assert "loc_a" not in cd_names
+    assert "loc_b" not in cd_names
+    assert "cnt" not in cd_names
+    # All checker_data entries have is_rand=True (this is the LRM-defined
+    # discriminator — only ``rand`` decls become CheckerDataDeclaration).
+    for cd in cds:
+        assert cd["semantic"]["attributes"]["is_rand"] is True
+    # The non-rand checker-local decls still surface (as nets) — confirm
+    # they didn't get accidentally suppressed.
+    nets = [n for n in chk_graph["nodes"]
+            if n.get("semantic", {}).get("role") == "net"
+            and n["semantic"]["path"].startswith("c_mutex.")]
+    net_names = {n["semantic"]["name"] for n in nets}
+    assert {"loc_a", "loc_b", "cnt"} <= net_names
+
+
+def test_s62_checker_data_name_index(chk_graph):
+    """Each checker_data node is registered in the name index at its
+    qualified path so consumers can resolve ``c_mutex.r_flag``."""
+    idx = chk_graph.get("semantic_name_index", {})
+    cds = _by_role(chk_graph, "checker_data")
+    for cd in cds:
+        path = cd["semantic"]["path"]
+        assert path in idx
+        assert idx[path] == cd["id"]
+
+
+def test_s62_checker_corpus_roundtrips():
+    """checker_corpus.sv survives the lift → unlift byte-equal round-trip
+    after the S62 corpus extension (logic/bit/rand decls added)."""
+    text = CHK.read_text()
+    from research.ast_experiment.src.lift import lift
+    from research.ast_experiment.src.unlift import emit
+
+    tree = pyslang.SyntaxTree.fromText(text)
+    graph = lift(tree)
+    reconstructed = emit(graph)
+    assert reconstructed == text
