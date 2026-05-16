@@ -56,6 +56,19 @@ def rule_s47(*args, **kwargs):
     return
 
 
+def _s64_explicit_ansi_port(*args, **kwargs):
+    """ExplicitAnsiPort — ``.name(expr)`` ANSI port form, promoted in pass 1.
+
+    Sibling of S1 ImplicitAnsiPort. Lives only inside AnsiPortList (under the
+    ModuleHeader of a Module / Interface / Program declaration). The leading
+    direction token (input/output/inout/ref) is lifted onto the port node as
+    the ``direction`` attribute; the connect expression stays a child blob.
+    The empty-connect form ``.foo()`` (expr=None) is supported. Actual
+    implementation lives in dispatch.promote (pass-1 branch).
+    """
+    return
+
+
 def _s55_port_decl(*args, **kwargs):
     """PortDeclaration — non-ANSI port body decls, promoted in pass 1.
 
@@ -75,6 +88,7 @@ _s1_variable_port_header.__rule_id__ = "S1"
 _s1_declarator.__rule_id__ = "S1"
 rule_s47.__rule_id__ = "S47"
 _s55_port_decl.__rule_id__ = "S55"
+_s64_explicit_ansi_port.__rule_id__ = "S64"
 
 
 RULES: list[tuple] = [
@@ -85,4 +99,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.Declarator, _s1_declarator),
     (pyslang.SyntaxKind.TimeUnitsDeclaration, rule_s47),
     (pyslang.SyntaxKind.PortDeclaration, _s55_port_decl),
+    (pyslang.SyntaxKind.ExplicitAnsiPort, _s64_explicit_ansi_port),
 ]

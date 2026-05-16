@@ -128,7 +128,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64"}
 
 
 def _is_active(fn) -> bool:
@@ -2184,6 +2184,44 @@ def promote(
                     pname = ids[0].valueText
                     ppath = f"{mname}.{pname}"
                     _mark(nodes_list[node_offset + idx], role="port", name=pname, path=ppath)
+                    _add_edge(graph, mod_gid, gid, "has_port")
+                    name_index[ppath] = gid
+                    port_names_by_module.setdefault(mname, set()).add(pname)
+            pushed = "in_port"
+        elif c == "ExplicitAnsiPortSyntax":
+            # S64 — ``.name(expr)`` ANSI port form (sibling of S1
+            # ImplicitAnsiPort). The leading direction keyword
+            # (input/output/inout/ref) is the first non-attribute Token among
+            # the node's children; the port name is the Identifier token
+            # immediately following the ``.`` (Dot) token. The connect
+            # expression — if present — stays a child blob (graph-as-index,
+            # blob-as-detail). Empty-connect form ``.foo()`` is legal and
+            # surfaces as expr=None on the syntax object; we still promote.
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                direction = ""
+                pname = ""
+                saw_dot = False
+                for ch in node:
+                    if ch is None or not _is_token(ch):
+                        continue
+                    tk = _token_kind_name(ch)
+                    if tk in {"InputKeyword", "OutputKeyword",
+                              "InOutKeyword", "RefKeyword"}:
+                        if not direction:
+                            direction = ch.valueText
+                    elif tk == "Dot":
+                        saw_dot = True
+                    elif saw_dot and tk == "Identifier" and not pname:
+                        pname = ch.valueText
+                        break
+                if pname:
+                    ppath = f"{mname}.{pname}"
+                    attrs: dict[str, Any] = {}
+                    if direction:
+                        attrs["direction"] = direction
+                    _mark(nodes_list[node_offset + idx], role="port",
+                          name=pname, path=ppath, attributes=attrs)
                     _add_edge(graph, mod_gid, gid, "has_port")
                     name_index[ppath] = gid
                     port_names_by_module.setdefault(mname, set()).add(pname)

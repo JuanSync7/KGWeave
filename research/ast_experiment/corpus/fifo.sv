@@ -186,3 +186,20 @@ module nonansi_demo(a, b, c, d, e, f);
     input  signed [3:0] d;
     output e, f;
 endmodule
+
+// S64 corpus: ANSI module header with ExplicitAnsiPort entries.
+// Each ``.name(expr)`` form in the ANSI port list — prefixed with a direction
+// keyword — parses as SyntaxKind.ExplicitAnsiPort (sibling of S1's
+// ImplicitAnsiPort). The port name is the identifier after the dot; the
+// optional connect expression remaps the public name onto an internal signal.
+// The empty-connect form ``.pd()`` is legal SV (declares a port with no
+// internal connection) and must not crash the rule.
+module ansi_explicit_demo(
+    input  .pa(x),
+    output .pb(y[3:0]),
+    inout  .pc(z),
+    input  .pd()
+);
+    wire x, z;
+    wire [3:0] y;
+endmodule
