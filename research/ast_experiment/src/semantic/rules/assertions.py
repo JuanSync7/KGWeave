@@ -19,9 +19,11 @@ which dedupes both forms naturally.
 
 S17 also recognises the ``DeferredAssertion`` child node (carrying the
 ``#0`` delay or ``final`` keyword) attached to an immediate-assert
-statement to set ``attributes["deferred"] = True`` on the promoted node.
+statement to set ``attributes["deferred"] = True`` and lift
+``attributes["defer_mode"]`` ("zero" / "final") onto the promoted node.
 ``DeferredAssertion`` itself stays CONTAINER (it is a modifier, not a
-queryable entity).
+queryable entity) — S72 owns the wrapper kind as an ownership /
+attribute-augmentation stub.
 
 S39 promotes ``default disable iff <expr>;`` — the implicit disable
 condition for all concurrent assertions in a scope. One per enclosing
@@ -104,6 +106,39 @@ def _s71_immediate_assertion_member(*args, **kwargs):
 _s71_immediate_assertion_member.__rule_id__ = "S71"
 
 
+def _s72_deferred_assertion(*args, **kwargs):
+    """Wrapper-with-lifted-attribute ownership marker per CLAUDE.md lesson 5.
+
+    ``DeferredAssertion`` is the ``#0`` / ``final`` modifier wrapper that
+    appears as a direct CHILD of an immediate-assertion statement
+    (``ImmediateAssertStatement`` / ``ImmediateAssumeStatement`` /
+    ``ImmediateCoverStatement``, registered by S17). It is **not** a
+    queryable entity on its own — it carries no identity beyond the
+    deferral mode it tags onto the surrounding assert.
+
+    Per lesson 5 we leave the wrapper as CONTAINER (no semantic
+    promotion of a separate ``DeferredAssertion`` node — that would
+    double-count one user-level assertion). The discriminating
+    attribute (``#0`` vs ``final``) is lifted onto the inner immediate
+    assertion's ``semantic.attributes`` as ``defer_mode`` ("zero" /
+    "final") by the S17 branch in ``dispatch.promote``. Detection is
+    structural: ``DeferredAssertionSyntax`` exposes ``finalKeyword`` /
+    ``zero`` / ``hash`` data descriptors — we check ``finalKeyword`` to
+    discriminate, no token-text scan needed.
+
+    This stub exists only so ``build_bucket1_checklist.py`` can attribute
+    the SyntaxKind to S72 via ``__rule_id__`` introspection — no
+    dispatch branch on the wrapper itself. Pattern mirrors S63
+    (``ForwardTypeRestriction``): wrapper kind owns an ownership stub;
+    runtime augments the inner node it modifies (attribute-augmentation
+    rather than pure ownership stub).
+    """
+    return
+
+
+_s72_deferred_assertion.__rule_id__ = "S72"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.AssertPropertyStatement, _s16_assertion),
     (pyslang.SyntaxKind.AssumePropertyStatement, _s16_assertion),
@@ -119,4 +154,8 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.ConcurrentAssertionMember, _s70_concurrent_assertion_member),
     # S71: wrapper-only ownership stub (no dispatch branch — see lesson 5).
     (pyslang.SyntaxKind.ImmediateAssertionMember, _s71_immediate_assertion_member),
+    # S72: wrapper with lifted ``defer_mode`` attribute (see lesson 5).
+    # Wrapper itself stays CONTAINER; runtime augmentation of the inner
+    # ImmediateAssert* node happens in the S17 dispatch branch.
+    (pyslang.SyntaxKind.DeferredAssertion, _s72_deferred_assertion),
 ]

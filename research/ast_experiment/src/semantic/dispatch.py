@@ -111,16 +111,43 @@ def _has_deferred_modifier(node) -> bool:
     Walks direct children only; ``DeferredAssertion`` is always a direct
     child of the immediate-assertion statement when present.
     """
+    return _deferred_mode_of(node) is not None
+
+
+def _deferred_mode_of(node):
+    """Return ``"zero"`` for ``assert #0 (...)``, ``"final"`` for
+    ``assert final (...)``, or ``None`` for a plain immediate assertion.
+
+    Lesson-5 attribute-augmentation (S72): the ``DeferredAssertion``
+    wrapper itself stays CONTAINER, but it carries the only attribute
+    distinguishing the two deferral modes — so we lift that attribute
+    onto the inner ImmediateAssert* node that S17 promotes. Walks direct
+    children only; ``DeferredAssertion`` is always a direct child of the
+    immediate-assertion statement when present. Discriminates via the
+    structural ``finalKeyword`` / ``zero`` / ``hash`` data descriptors
+    on ``DeferredAssertionSyntax`` (no token-text scan, no regex).
+    """
     try:
         children = list(node)
     except TypeError:
-        return False
+        return None
     for ch in children:
         if ch is None or _is_token(ch):
             continue
         if _cls(ch) == "DeferredAssertionSyntax":
-            return True
-    return False
+            # The pyslang data descriptors (``finalKeyword`` / ``hash`` /
+            # ``zero``) always return a Token object; an absent token
+            # surfaces as a ``Token(TokenKind.Unknown)`` sentinel rather
+            # than ``None``. pyslang implements ``__bool__`` on Token so
+            # the sentinel is falsy and a real token is truthy —
+            # discriminate via plain truthiness rather than ``.kind``
+            # (which returns the ``TokenKind.Unknown`` enum, also truthy
+            # as an enum value).
+            final_tok = getattr(ch, "finalKeyword", None)
+            if final_tok:
+                return "final"
+            return "zero"
+    return None
 
 
 # Active pass-2 rules — these are the only RULE_TABLE entries whose callable
@@ -128,7 +155,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72"}
 
 
 def _is_active(fn) -> bool:
@@ -658,10 +685,19 @@ def promote(
                     label = f"{kind_label}_{n_seen}"
                     assertion_counters[mname] = n_seen + 1
                 apath = f"{mname}.{label}"
-                deferred = _has_deferred_modifier(node)
+                # S17: ``deferred`` is the legacy boolean. S72 augments it
+                # with ``defer_mode`` ("zero" for ``assert #0``, "final" for
+                # ``assert final``) lifted off the DeferredAssertion wrapper
+                # — the wrapper itself stays CONTAINER per lesson 5, but its
+                # discriminating attribute rides onto the inner promoted
+                # node. Plain immediate asserts have no ``defer_mode`` key.
+                defer_mode = _deferred_mode_of(node)
+                attrs = {"kind": kind_label, "deferred": defer_mode is not None}
+                if defer_mode is not None:
+                    attrs["defer_mode"] = defer_mode
                 _mark(nodes_list[node_offset + idx], role="assertion",
                       name=label, path=apath,
-                      attributes={"kind": kind_label, "deferred": deferred})
+                      attributes=attrs)
                 _add_edge(graph, mod_gid, gid, "has_assertion")
                 name_index[apath] = gid
         elif c == "ClockingDeclarationSyntax":
