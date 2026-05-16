@@ -78,3 +78,42 @@ html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: 
   max-width: 320px; pointer-events: none; white-space: pre-wrap;
   border: 1px solid #555;
 }
+
+/* ---- SA4: query panel + results + animation ----------------------------- */
+
+#query-bar {
+  display: flex; gap: 0.4rem; align-items: center; margin-left: auto;
+  flex-wrap: wrap;
+}
+#query-bar select, #query-bar input, #query-bar button {
+  background: var(--panel-2); color: var(--fg);
+  border: 1px solid #2a2f3a; border-radius: 3px;
+  padding: 0.25rem 0.5rem; font-size: 0.8rem;
+  font-family: inherit;
+}
+#query-bar input { min-width: 280px; font-family: ui-monospace, Menlo, monospace; }
+#query-bar button { cursor: pointer; }
+#query-bar button:hover { background: var(--accent); border-color: var(--accent); }
+
+#results {
+  position: absolute; top: 48px; right: 12px;
+  width: 280px; max-height: 50vh; overflow: auto;
+  background: rgba(24, 27, 34, 0.96);
+  border: 1px solid #2a2f3a; border-radius: 4px;
+  padding: 0.4rem 0.6rem; z-index: 30;
+  font-size: 0.78rem;
+}
+#results header { display: flex; justify-content: space-between; align-items: baseline; gap: 0.4rem; padding-bottom: 0.25rem; border-bottom: 1px solid #2a2f3a; margin-bottom: 0.25rem; }
+#results ol { list-style: decimal inside; margin: 0; padding: 0; }
+#results li {
+  cursor: pointer; padding: 2px 4px; border-radius: 2px;
+  font-family: ui-monospace, Menlo, monospace;
+}
+#results li:hover { background: var(--panel-2); }
+#query-error { color: #ff6b6b; padding-top: 0.3rem; font-family: ui-monospace, Menlo, monospace; }
+
+/* Cytoscape annotations driven by query.js — applied as element classes. */
+.match { /* placeholder selector — actual styling is in the cy stylesheet */ }
+.path-active { /* ditto — see app.js cytoscape() style block */ }
+.query-dim { /* ditto */ }
+

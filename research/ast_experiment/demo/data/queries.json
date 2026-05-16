@@ -1,0 +1,65 @@
+{
+  "version": "1",
+  "queries": [
+    {
+      "id": "q1_all_modules",
+      "label": "All modules",
+      "blurb": "Filter every node whose semantic.role is 'module'.",
+      "kind": "filter",
+      "filter": { "role": "module" }
+    },
+    {
+      "id": "q2_instances_of_fifo",
+      "label": "All instances of module `fifo`",
+      "blurb": "Reverse-BFS over `of_module` edges landing on module:fifo. Result = instance nodes + their target.",
+      "kind": "reverse_traverse",
+      "anchor": { "role": "module", "name": "fifo" },
+      "via": ["of_module"],
+      "depth": 1
+    },
+    {
+      "id": "q3_drives_full",
+      "label": "What drives port `fifo.full`?",
+      "blurb": "Reverse-BFS over `drives` edges from the `full` port. Multi-hop: walks back through every continuous-assign LHS chain.",
+      "kind": "reverse_traverse",
+      "anchor": { "role": "port", "path": "fifo.full" },
+      "via": ["drives"],
+      "depth": 5
+    },
+    {
+      "id": "q4_sensitivity_chain_always_ff",
+      "label": "Sensitivity chains of every `always_ff` block",
+      "blurb": "Each always_ff procedural_block + every `sensitive_to` edge it owns. Animates one edge per signal.",
+      "kind": "multi_anchor_traverse",
+      "anchor": { "role": "always_ff" },
+      "via": ["sensitive_to"],
+      "depth": 1
+    },
+    {
+      "id": "q5_top_to_fifo_path",
+      "label": "Cross-module: `top` reaches `fifo`",
+      "blurb": "Multi-hop path module:top -instantiates-> instance -of_module-> module:fifo. Animates each hop in sequence.",
+      "kind": "path",
+      "from": { "role": "module", "name": "top" },
+      "to": { "role": "module", "name": "fifo" },
+      "via": ["instantiates", "of_module", "connects"],
+      "depth": 4
+    },
+    {
+      "id": "q6_all_assertions",
+      "label": "All assertion-bearing constructs",
+      "blurb": "Nodes whose semantic.role is one of {assertion, property, sequence}.",
+      "kind": "filter",
+      "filter": { "role_in": ["assertion", "property", "sequence"] }
+    },
+    {
+      "id": "q7_class_extends_chain",
+      "label": "Class inheritance: every `extends` edge",
+      "blurb": "All class nodes plus every outgoing `extends` edge. Animates the edge from derived -> base.",
+      "kind": "multi_anchor_traverse",
+      "anchor": { "role": "class" },
+      "via": ["extends"],
+      "depth": 2
+    }
+  ]
+}

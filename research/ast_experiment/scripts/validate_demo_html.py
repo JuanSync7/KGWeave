@@ -36,7 +36,7 @@ def _ok(msg: str) -> None:
 
 def main() -> int:
     print(f"validating {WEB}")
-    for name in ("index.html", "style.css", "app.js"):
+    for name in ("index.html", "style.css", "app.js", "query.js"):
         f = WEB / name
         if not f.is_file():
             _fail(f"missing {f}")
@@ -48,6 +48,11 @@ def main() -> int:
     if not graph.is_file():
         _fail(f"missing {graph}")
     _ok(f"graph.json present ({graph.stat().st_size} bytes)")
+
+    queries_json = DATA / "queries.json"
+    if not queries_json.is_file():
+        _fail(f"missing {queries_json}")
+    _ok(f"queries.json present ({queries_json.stat().st_size} bytes)")
 
     html = (WEB / "index.html").read_text(encoding="utf-8")
     js = (WEB / "app.js").read_text(encoding="utf-8")
@@ -103,16 +108,28 @@ def main() -> int:
         _fail(f"app.js performs remote runtime fetch: {bad!r}")
     _ok("no runtime remote fetch() calls")
 
-    # 8. node --check on app.js, if node available
+    # 8. node --check on app.js + query.js, if node available
     node = shutil.which("node")
     if node:
-        res = subprocess.run([node, "--check", str(WEB / "app.js")],
-                             capture_output=True, text=True)
-        if res.returncode != 0:
-            _fail(f"node --check app.js failed:\n{res.stderr}")
-        _ok("node --check app.js: syntax OK")
+        for js_name in ("app.js", "query.js"):
+            res = subprocess.run([node, "--check", str(WEB / js_name)],
+                                 capture_output=True, text=True)
+            if res.returncode != 0:
+                _fail(f"node --check {js_name} failed:\n{res.stderr}")
+            _ok(f"node --check {js_name}: syntax OK")
     else:
         print("  skip: node not available for --check")
+
+    # 9. SA4: query.js wired into app.js
+    if "./query.js" not in js:
+        _fail("app.js must import ./query.js")
+    _ok("app.js imports query.js")
+    # 10. Canned-query DOM hooks in index.html
+    for sel in ("query-select", "query-freeform", "query-run", "query-clear",
+                "results-list"):
+        if f'id="{sel}"' not in html:
+            _fail(f'index.html missing id="{sel}"')
+        _ok(f'query panel "#{sel}" present')
 
     print("VALIDATOR OK")
     return 0

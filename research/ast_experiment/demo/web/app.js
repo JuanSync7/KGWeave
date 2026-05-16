@@ -23,6 +23,12 @@ import {
   lineNumbers,
   highlightActiveLine,
 } from "https://esm.sh/@codemirror/view@6.26.3";
+import {
+  runCannedQuery,
+  parseAndRunFreeform,
+  runAndAnimate,
+  clearQueryViz,
+} from "./query.js";
 
 // -------------------------------------------------------------------------
 // Category + edge-type style maps
@@ -91,6 +97,8 @@ const state = {
   view: null,                  // CodeMirror EditorView
   currentFile: null,           // current FileEntry.id
   cy: null,                    // Cytoscape instance
+  queries: null,               // raw queries.json
+  queriesById: new Map(),      // canned query spec by id
   filters: {
     categoryVisible: { semantic: true, structural: true, blob: true, token: false },
     edgeChildVisible: false,
@@ -116,10 +124,23 @@ async function boot() {
   document.getElementById("stats").textContent =
     `${g.stats.nodeCount} nodes · ${g.stats.edgeCount} edges · ${g.files.length} files`;
 
+  // Load canned-query registry (non-fatal if missing).
+  try {
+    const qr = await fetch("../data/queries.json", { cache: "no-cache" });
+    if (qr.ok) {
+      const qj = await qr.json();
+      state.queries = qj;
+      for (const q of qj.queries) state.queriesById.set(q.id, q);
+    }
+  } catch (e) {
+    console.warn("queries.json not loaded:", e);
+  }
+
   buildFileRail();
   mountCodeMirror();
   mountCytoscape();
   wireFilters();
+  wireQueryPanel();
 
   // Open the first file
   if (g.files.length) selectFile(g.files[0].id);
@@ -278,6 +299,28 @@ function mountCytoscape() {
       {
         selector: ".dim",
         style: { "display": "none" },
+      },
+      {
+        selector: "node.match",
+        style: {
+          "border-color": "#ffe066",
+          "border-width": 3,
+          "background-blacken": -0.2,
+        },
+      },
+      {
+        selector: "edge.path-active",
+        style: {
+          "line-color": "#ffe066",
+          "target-arrow-color": "#ffe066",
+          "width": 4,
+          "transition-property": "line-color width",
+          "transition-duration": "200ms",
+        },
+      },
+      {
+        selector: ".query-dim",
+        style: { "opacity": 0.15 },
       },
     ],
     layout: { name: "concentric", concentric: () => 1, levelWidth: () => 1, animate: false },
@@ -459,6 +502,138 @@ function applyFilters() {
       e.toggleClass("dim", !(visType && srcVis && dstVis));
     });
   });
+}
+
+// -------------------------------------------------------------------------
+// Query panel — SA4
+// -------------------------------------------------------------------------
+
+function wireQueryPanel() {
+  const sel = document.getElementById("query-select");
+  const ff = document.getElementById("query-freeform");
+  const runBtn = document.getElementById("query-run");
+  const clearBtn = document.getElementById("query-clear");
+  if (!sel || !runBtn || !clearBtn) return;
+
+  // Populate dropdown from queries.json registry.
+  if (state.queries && state.queries.queries) {
+    for (const q of state.queries.queries) {
+      const opt = document.createElement("option");
+      opt.value = q.id;
+      opt.textContent = q.label;
+      opt.title = q.blurb || "";
+      sel.appendChild(opt);
+    }
+  }
+
+  sel.addEventListener("change", () => {
+    if (sel.value) runQuery({ canned: sel.value });
+  });
+  runBtn.addEventListener("click", () => {
+    const text = (ff && ff.value || "").trim();
+    if (text) runQuery({ freeform: text });
+    else if (sel.value) runQuery({ canned: sel.value });
+  });
+  ff.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      runBtn.click();
+    }
+  });
+  clearBtn.addEventListener("click", () => clearQuery());
+}
+
+async function runQuery({ canned, freeform }) {
+  if (!state.cy || !state.graph) return;
+  hideTooltip();
+  const errEl = document.getElementById("query-error");
+  if (errEl) { errEl.hidden = true; errEl.textContent = ""; }
+
+  let result;
+  let label;
+  if (canned) {
+    result = runCannedQuery(state.graph, canned, state.queriesById);
+    const spec = state.queriesById.get(canned) || {};
+    label = spec.label || canned;
+  } else if (freeform) {
+    result = parseAndRunFreeform(state.graph, freeform);
+    label = `freeform: ${freeform}`;
+  } else {
+    return;
+  }
+
+  if (result && result.error) {
+    if (errEl) { errEl.hidden = false; errEl.textContent = "Error: " + result.error; }
+    renderResultsHeader("0 results", label);
+    renderResultsList([]);
+    return;
+  }
+
+  renderResultsHeader(
+    `${(result.nodes || []).length} nodes · ${(result.edges || []).length} edges`,
+    label,
+  );
+  renderResultsList(result.nodes || []);
+  await runAndAnimate(state.cy, state.graph, result, { dimNonMatching: true });
+}
+
+function clearQuery() {
+  const sel = document.getElementById("query-select");
+  const ff = document.getElementById("query-freeform");
+  if (sel) sel.value = "";
+  if (ff) ff.value = "";
+  const errEl = document.getElementById("query-error");
+  if (errEl) { errEl.hidden = true; errEl.textContent = ""; }
+  renderResultsHeader("no query", "");
+  renderResultsList([]);
+  if (state.cy) clearQueryViz(state.cy);
+  // Re-apply SA3 filters to restore default visibility.
+  applyFilters();
+}
+
+function renderResultsHeader(summary, label) {
+  const s = document.getElementById("results-summary");
+  if (s) s.textContent = label ? `${label} — ${summary}` : summary;
+}
+
+function renderResultsList(nodeIds) {
+  const list = document.getElementById("results-list");
+  if (!list) return;
+  list.innerHTML = "";
+  const limit = 200; // perf bound — SPEC §6 SA4 requires ≤200ms result rendering
+  const shown = nodeIds.slice(0, limit);
+  for (const nid of shown) {
+    const n = state.nodesById.get(nid);
+    if (!n) continue;
+    const li = document.createElement("li");
+    const role = (n.semantic && n.semantic.role) || shortKind(n.kind);
+    const name = (n.semantic && n.semantic.name) || "";
+    const span = n.span
+      ? `${n.span.file}:${n.span.startLine}-${n.span.endLine}`
+      : "";
+    li.textContent = `${role}${name ? " " + name : ""}  ${span}`;
+    li.title = nid;
+    li.addEventListener("click", () => {
+      renderInspector(n, "node");
+      if (n.span) highlightSpanInCode(n.span);
+      if (state.cy) {
+        state.cy.elements().unselect();
+        const ele = state.cy.getElementById(nid);
+        if (ele && ele.length) {
+          ele.removeClass("dim");
+          ele.select();
+          try { state.cy.center(ele); } catch (_) {}
+        }
+      }
+    });
+    list.appendChild(li);
+  }
+  if (nodeIds.length > limit) {
+    const li = document.createElement("li");
+    li.className = "muted";
+    li.textContent = `… and ${nodeIds.length - limit} more (showing first ${limit})`;
+    list.appendChild(li);
+  }
 }
 
 // -------------------------------------------------------------------------
