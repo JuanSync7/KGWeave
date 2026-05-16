@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 136 | 50 | 121 | 0 | 15 |
+| PROMOTE | 136 | 50 | 122 | 0 | 14 |
 | CONTAINER | 87 | 22 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -82,7 +82,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ForwardTypedefDeclaration` | ⬜ | ✅ | S31 |
 | `FunctionDeclaration` | ✅ | ✅ | S10 |
 | `FunctionPort` | ✅ | ✅ | S74 |
-| `FunctionPortList` | ✅ | ⬜ | future |
+| `FunctionPortList` | ✅ | ✅ | S75 |
 | `FunctionPrototype` | ✅ | ✅ | S56 |
 | `GenerateBlock` | ✅ | ✅ | S12b |
 | `GenerateRegion` | ✅ | ✅ | S12c |

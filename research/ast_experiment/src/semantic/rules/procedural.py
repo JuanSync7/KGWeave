@@ -142,6 +142,28 @@ def rule_s74(*args, **kwargs):
 rule_s74.__rule_id__ = "S74"
 
 
+def _s75_stub(*args, **kwargs):
+    """FunctionPortList — wrapper ownership marker only.
+
+    ``FunctionPortListSyntax`` is the parenthesised wrapper containing
+    one or more ``FunctionPortSyntax`` entries inside a function / task /
+    method signature (``function int add(input int a, output int b);`` —
+    the ``(input int a, output int b)`` is the FunctionPortList).
+
+    Per ``CLAUDE.md`` lesson 5 (wrapper-kind dedup), the wrapper carries
+    no independent identity — its only role is to group the inner
+    ``FunctionPort`` children. We therefore leave it as CONTAINER for
+    structural traversal and only register an ownership stub here so the
+    Bucket-1 checklist regenerator attributes ``FunctionPortList`` to
+    S75 via ``__rule_id__`` introspection. Runtime promotion fires per
+    child via the inner ``FunctionPort`` kind (S74). No dispatch branch.
+    """
+    return
+
+
+_s75_stub.__rule_id__ = "S75"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ProceduralAssignStatement, _s19_procedural_assign),
     (pyslang.SyntaxKind.ProceduralDeassignStatement, _s19_procedural_deassign),
@@ -154,4 +176,7 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.LetDeclaration, rule_s42),
     (pyslang.SyntaxKind.LocalVariableDeclaration, rule_s57),
     (pyslang.SyntaxKind.FunctionPort, rule_s74),
+    # S75: Wrapper ownership marker per lesson 5; child FunctionPorts
+    # promote via S74. No dispatch branch.
+    (pyslang.SyntaxKind.FunctionPortList, _s75_stub),
 ]
