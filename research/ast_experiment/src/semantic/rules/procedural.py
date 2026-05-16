@@ -113,6 +113,35 @@ def rule_s57(*args, **kwargs):
 rule_s57.__rule_id__ = "S57"
 
 
+def rule_s74(*args, **kwargs):
+    """FunctionPort is promoted in pass 1 of dispatch.promote.
+
+    A ``FunctionPortSyntax`` is one argument inside a function / task /
+    method signature (``function int add(input int a, output int b);``).
+    Each port surfaces as a queryable ``role="function_port"`` node with
+    attrs ``{direction, data_type, name}`` attached to the enclosing
+    function / method via a ``has_function_port`` edge.
+
+    Parent resolution rides on a new ``function_stack`` (lesson 2:
+    standard variant — child kinds of a function / method are
+    semantically distinct from module members), pushed when dispatch
+    enters a FunctionDeclaration / ClassMethodDeclaration /
+    ClassMethodPrototype / extern-FunctionPrototype that successfully
+    promotes its enclosing scope. The frame carries
+    ``(parent_gid, parent_path)``; a sentinel ``(None, "")`` frame is
+    pushed on un-promoted scopes so pop-on-subtree-exit stays symmetric.
+
+    Path keys are ``<scope>.<function>.<port_name>`` and are *not*
+    registered in ``name_index`` (port names collide across functions
+    — ``add.a`` and ``sub.a`` are distinct ports, name-indexing would
+    overwrite). Cross-port references resolve via traversal.
+    """
+    return
+
+
+rule_s74.__rule_id__ = "S74"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ProceduralAssignStatement, _s19_procedural_assign),
     (pyslang.SyntaxKind.ProceduralDeassignStatement, _s19_procedural_deassign),
@@ -124,4 +153,5 @@ RULES: list[tuple] = [
      _s21_nonblocking_event_trigger),
     (pyslang.SyntaxKind.LetDeclaration, rule_s42),
     (pyslang.SyntaxKind.LocalVariableDeclaration, rule_s57),
+    (pyslang.SyntaxKind.FunctionPort, rule_s74),
 ]

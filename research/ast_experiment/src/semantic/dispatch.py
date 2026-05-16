@@ -155,7 +155,7 @@ def _deferred_mode_of(node):
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72", "S73"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72", "S73", "S74"}
 
 
 def _is_active(fn) -> bool:
@@ -323,6 +323,17 @@ def promote(
         # was not promoted — kept for symmetric pop). Pushed on entering a
         # PortConcatenationSyntax branch, popped on exit.
         "port_concat_stack": [],
+        # S74: function_stack tracks the enclosing function / task / method
+        # / extern-prototype scope so that FunctionPort children resolve
+        # their parent path and gid without a top-down rewalk. Pushed by
+        # FunctionDeclaration (S10/S33-bodied function), ClassMethodDeclaration
+        # / ClassMethodPrototype (S26), and FunctionPrototype-when-extern
+        # (S56). Entries are ``(parent_gid, parent_path)`` tuples; a
+        # sentinel ``(None, "")`` frame is pushed on the un-promoted path so
+        # pop-on-subtree-exit stays symmetric. The Subroutine name space
+        # (TaskDeclaration without dispatch promotion yet) is not pushed —
+        # task ports remain dormant until S10/S33's task-body branch lands.
+        "function_stack": [],
     }
 
     def _cur_module():
@@ -340,6 +351,7 @@ def promote(
         pushed_coverpoint = False
         pushed_struct_union = False
         pushed_clocking = False
+        pushed_function = False
 
         if c == "ModuleDeclarationSyntax":
             kind_name = str(getattr(node, "kind", "")).rsplit(".", 1)[-1]
@@ -491,14 +503,23 @@ def promote(
             # avoid double-promoting the method under the package as a free
             # function.
             mod_gid, mname = _cur_module()
+            # S74: only push a function_stack frame for module-scope
+            # functions — class methods are owned by the outer
+            # ClassMethodDeclaration branch (already pushed), so the inner
+            # FunctionDeclaration would just shadow it with a sentinel
+            # frame and hide the method path from FunctionPort children.
             if mod_gid is not None and not state["class_stack"]:
                 fname = _function_name_of(node)
+                fs_frame: tuple[str | None, str] = (None, "")
                 if fname:
                     fpath = f"{mname}.{fname}"
                     _mark(nodes_list[node_offset + idx], role="function",
                           name=fname, path=fpath)
                     _add_edge(graph, mod_gid, gid, "has_function")
                     name_index[fpath] = gid
+                    fs_frame = (gid, fpath)
+                state["function_stack"].append(fs_frame)
+                pushed_function = True
             pushed = "in_function"
         elif c == "PropertyDeclarationSyntax":
             mod_gid, mname = _cur_module()
@@ -1383,6 +1404,10 @@ def promote(
             # come from the inner FunctionPrototypeSyntax — the helper
             # disambiguates constructor (``new``) / task / function and
             # extracts the return-type text only for functions.
+            # S74: push a function_stack frame (sentinel by default, real
+            # when promotion succeeds) so FunctionPort children of the
+            # method body / prototype attach to the method.
+            cm_frame: tuple[str | None, str] = (None, "")
             if state["class_stack"]:
                 cls_gid, cls_path = state["class_stack"][-1]
                 name, kind_label, return_type = _class_method_name_and_kind(node)
@@ -1407,6 +1432,9 @@ def promote(
                           name=name, path=mpath, attributes=attrs)
                     _add_edge(graph, cls_gid, gid, "has_method")
                     name_index[mpath] = gid
+                    cm_frame = (gid, mpath)
+            state["function_stack"].append(cm_frame)
+            pushed_function = True
         elif c == "ClassPropertyDeclarationSyntax":
             # S26 — promote class data members. The declaration may carry
             # multiple comma-separated declarators (``int a, b, c;``); we
@@ -2972,6 +3000,77 @@ def promote(
                               })
                         _add_edge(graph, mod_gid, gid, "prototypes")
                         name_index[fp_path] = gid
+                        # S74: expose this prototype as the function_stack
+                        # parent so FunctionPort children attach to it.
+                        state["function_stack"].append((gid, fp_path))
+                        pushed_function = True
+        elif c == "FunctionPortSyntax":
+            # S74 — promote one argument of a function/task/method signature
+            # as role="function_port".  Parent is the enclosing function /
+            # method / extern-prototype scope on ``function_stack`` (pushed
+            # by FunctionDeclaration, ClassMethodDeclaration /
+            # ClassMethodPrototype, or the extern-FunctionPrototype branch
+            # in S56). Layout (verified via SyntaxTree probe):
+            #
+            #   SyntaxList                     -- leading attributes
+            #   [Direction keyword token]      -- Input/Output/InOut/Ref
+            #   [const/var/static keywords]    -- optional storage qualifiers
+            #   <dataType>                     -- IntegerTypeSyntax / NamedType /
+            #                                     ImplicitTypeSyntax / …
+            #   <DeclaratorSyntax>             -- carries the port name
+            #
+            # Direction is captured via TokenKind.* (no regex on source);
+            # an absent direction surfaces as the empty string (matches the
+            # pyslang convention — ``n.direction.valueText == ''`` when the
+            # parser doesn't see a leading direction keyword).
+            if state["function_stack"]:
+                parent_gid, parent_path = state["function_stack"][-1]
+            else:
+                parent_gid, parent_path = None, ""
+            if parent_gid is not None:
+                direction = ""
+                try:
+                    dir_tok = node.direction
+                    if dir_tok is not None:
+                        dv = dir_tok.valueText
+                        if dv:
+                            direction = dv
+                except Exception:
+                    direction = ""
+                # Data type via the structural helper (handles dims/signing).
+                dt_text = ""
+                try:
+                    dt_node = node.dataType
+                    if dt_node is not None:
+                        dt_text = _type_text_of(dt_node).strip()
+                except Exception:
+                    dt_text = ""
+                # Port name via the declarator's identifier token.
+                port_name = ""
+                try:
+                    decl = node.declarator
+                    if decl is not None:
+                        toks = _identifier_tokens(decl)
+                        if toks:
+                            port_name = toks[0].valueText
+                except Exception:
+                    port_name = ""
+                if port_name:
+                    fp_path = f"{parent_path}.{port_name}"
+                    _mark(nodes_list[node_offset + idx],
+                          role="function_port",
+                          name=port_name, path=fp_path,
+                          attributes={
+                              "direction": direction,
+                              "data_type": dt_text,
+                              "name": port_name,
+                          })
+                    _add_edge(graph, parent_gid, gid, "has_function_port")
+                    # Intentionally NOT registered in name_index — port
+                    # names collide across functions (``add.a`` vs
+                    # ``sub.a``) and the cross-file index keys on bare
+                    # path. Traversal via has_function_port edges is the
+                    # supported query path.
         elif c == "PortDeclarationSyntax":
             # S55 — promote non-ANSI port body declarations
             # (``module m(a,b); input a; output [7:0] b; ...``). Distinct from
@@ -3195,6 +3294,13 @@ def promote(
         if (c == "PortConcatenationSyntax"
                 and state["port_concat_stack"]):
             state["port_concat_stack"].pop()
+        # S74: pop function_stack frame pushed by the FunctionDeclaration
+        # (module-scope only), ClassMethodDeclaration / ClassMethodPrototype,
+        # or extern-FunctionPrototype (S56) branches above. The local
+        # ``pushed_function`` flag is True only on those paths, so the pop
+        # stays symmetric with the push.
+        if pushed_function and state["function_stack"]:
+            state["function_stack"].pop()
         if popped_module:
             state["module_stack"].pop()
 
