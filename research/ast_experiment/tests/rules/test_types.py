@@ -959,3 +959,90 @@ def test_s60_rule_id_marker_in_types_rules():
         f"expected __rule_id__='S60', got "
         f"{getattr(fn, '__rule_id__', None)!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# S63: ForwardTypeRestriction — attribute-augment S31 forward typedef nodes
+# ---------------------------------------------------------------------------
+
+
+def test_s63_plain_forward_typedef_restriction_none(pkg_graph):
+    """A bare ``typedef fifo_fwd_t;`` has no restriction tag — the
+    ``restriction`` attribute is None on the typedef_forward node."""
+    fwd = _by_path(pkg_graph, "fifo_pkg.fifo_fwd_t")
+    assert fwd is not None
+    assert fwd["semantic"]["attributes"].get("restriction") is None
+
+
+def test_s63_forward_typedef_enum_restriction(pkg_graph):
+    """``typedef enum fifo_fwd_enum_t;`` carries restriction='enum'."""
+    fwd = _by_path(pkg_graph, "fifo_pkg.fifo_fwd_enum_t")
+    assert fwd is not None
+    assert fwd["semantic"]["role"] == "typedef_forward"
+    assert fwd["semantic"]["attributes"]["restriction"] == "enum"
+
+
+def test_s63_forward_typedef_struct_restriction(pkg_graph):
+    """``typedef struct fifo_fwd_struct_t;`` carries restriction='struct'."""
+    fwd = _by_path(pkg_graph, "fifo_pkg.fifo_fwd_struct_t")
+    assert fwd is not None
+    assert fwd["semantic"]["attributes"]["restriction"] == "struct"
+
+
+def test_s63_forward_typedef_union_restriction(pkg_graph):
+    """``typedef union fifo_fwd_union_t;`` carries restriction='union'."""
+    fwd = _by_path(pkg_graph, "fifo_pkg.fifo_fwd_union_t")
+    assert fwd is not None
+    assert fwd["semantic"]["attributes"]["restriction"] == "union"
+
+
+def test_s63_forward_typedef_class_restriction(pkg_graph):
+    """``typedef class fifo_fwd_class_t;`` carries restriction='class'."""
+    fwd = _by_path(pkg_graph, "fifo_pkg.fifo_fwd_class_t")
+    assert fwd is not None
+    assert fwd["semantic"]["attributes"]["restriction"] == "class"
+
+
+def test_s63_forward_typedef_interface_class_restriction(pkg_graph):
+    """``typedef interface class fifo_fwd_iface_class_t;`` collapses the
+    two-keyword restriction into ``restriction='interface_class'``."""
+    fwd = _by_path(pkg_graph, "fifo_pkg.fifo_fwd_iface_class_t")
+    assert fwd is not None
+    assert fwd["semantic"]["attributes"]["restriction"] == "interface_class"
+
+
+def test_s63_roundtrip_fifo_pkg():
+    """Byte-equal round-trip on fifo_pkg.sv after extending it with five
+    restriction-tagged forward typedefs — lossless structural lift holds."""
+    from research.ast_experiment.src.lift import lift
+    from research.ast_experiment.src.unlift import emit
+
+    src = PKG.read_text()
+    tree = pyslang.SyntaxTree.fromText(src)
+    graph = lift(tree)
+    emitted = emit(graph)
+    # Match the global test_roundtrip.py contract: re-parse and confirm the
+    # emitted text reparses identically. Trailing-newline trivia is lossy at
+    # the file level but the structural tree is equivalent.
+    reparsed = pyslang.SyntaxTree.fromText(emitted)
+    assert reparsed.root.kind == tree.root.kind
+    assert emitted.rstrip("\n") == src.rstrip("\n")
+
+
+def test_s63_rule_id_marker_in_types_rules():
+    """S63 is registered in rules/types.py RULES with __rule_id__='S63'
+    on its metadata stub — required for the BUCKET_1 checklist derivation
+    to credit S63 as the owner of ForwardTypeRestriction."""
+    import pyslang as _ps
+
+    from research.ast_experiment.src.semantic.rules import types as types_mod
+
+    rules_dict = dict(types_mod.RULES)
+    assert _ps.SyntaxKind.ForwardTypeRestriction in rules_dict, (
+        "ForwardTypeRestriction missing from rules/types.py RULES"
+    )
+    fn = rules_dict[_ps.SyntaxKind.ForwardTypeRestriction]
+    assert getattr(fn, "__rule_id__", None) == "S63", (
+        f"expected __rule_id__='S63', got "
+        f"{getattr(fn, '__rule_id__', None)!r}"
+    )

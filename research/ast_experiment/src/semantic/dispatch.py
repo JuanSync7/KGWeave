@@ -128,7 +128,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63"}
 
 
 def _is_active(fn) -> bool:
@@ -1931,17 +1931,53 @@ def promote(
             # S31 — promote a bare ``typedef <name>;`` forward declaration as
             # its own node. Reuses the ``has_typedef`` edge type so existing
             # queries that list a package's typedefs see both full and forward
-            # declarations; the ``forward`` attribute discriminates. No body
-            # to scan — the syntax is just ``TypedefKeyword Identifier
-            # Semicolon`` (no class-restriction keyword in the simple form).
+            # declarations; the ``forward`` attribute discriminates.
+            #
+            # S63 — ForwardTypeRestriction: optional restriction tag on the
+            # forward decl (``typedef enum my_e;`` / ``typedef struct my_s;``
+            # / ``typedef union my_u;`` / ``typedef class my_c;`` /
+            # ``typedef interface class my_ic;``). The tag is surfaced as an
+            # attribute on this same node — it's a property of the forward
+            # decl, not an independent entity (lesson 4 attribute augmenta-
+            # tion). Walk direct children for a ForwardTypeRestrictionSyntax
+            # child and read its keyword token(s):
+            #   EnumKeyword       -> "enum"
+            #   StructKeyword     -> "struct"
+            #   UnionKeyword      -> "union"
+            #   ClassKeyword      -> "class"
+            #   InterfaceKeyword + ClassKeyword -> "interface_class"
+            # No restriction child -> restriction=None.
             mod_gid, mname = _cur_module()
             if mod_gid is not None:
                 fname = _forward_typedef_name_of(node)
                 if fname:
+                    restriction: str | None = None
+                    for ch in node:
+                        if ch is None or _is_token(ch):
+                            continue
+                        if _cls(ch) != "ForwardTypeRestrictionSyntax":
+                            continue
+                        kw_kinds: list[str] = []
+                        for tch in ch:
+                            if tch is None or not _is_token(tch):
+                                continue
+                            kw_kinds.append(_token_kind_name(tch))
+                        if "InterfaceKeyword" in kw_kinds and "ClassKeyword" in kw_kinds:
+                            restriction = "interface_class"
+                        elif "EnumKeyword" in kw_kinds:
+                            restriction = "enum"
+                        elif "StructKeyword" in kw_kinds:
+                            restriction = "struct"
+                        elif "UnionKeyword" in kw_kinds:
+                            restriction = "union"
+                        elif "ClassKeyword" in kw_kinds:
+                            restriction = "class"
+                        break
                     fpath = f"{mname}.{fname}"
                     _mark(nodes_list[node_offset + idx], role="typedef_forward",
                           name=fname, path=fpath,
-                          attributes={"forward": True})
+                          attributes={"forward": True,
+                                      "restriction": restriction})
                     _add_edge(graph, mod_gid, gid, "has_typedef")
                     name_index[fpath] = gid
         elif c == "TypeParameterDeclarationSyntax":

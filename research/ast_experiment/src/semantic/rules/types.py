@@ -364,6 +364,32 @@ def _s60_virtual_interface_type(*args, **kwargs):
 _s60_virtual_interface_type.__rule_id__ = "S60"
 
 
+def _s63_forward_type_restriction(*args, **kwargs):
+    """S63 — ForwardTypeRestriction promotion ownership marker.
+
+    The restriction tag (``enum`` / ``struct`` / ``union`` / ``class`` /
+    ``interface class``) on a bare forward typedef
+    (``typedef enum my_e;``, ``typedef interface class my_ic;`` …) is
+    surfaced as an attribute on the existing S31 ``typedef_forward`` node
+    rather than its own semantic node — the restriction is a property of
+    the forward decl, not an independently queryable entity (lesson 4).
+
+    Strategy: in dispatch.py's ``ForwardTypedefDeclarationSyntax`` branch,
+    walk direct children for a ``ForwardTypeRestrictionSyntax`` child and
+    read its keyword token(s). The two-keyword ``interface class`` form
+    collapses to the canonical string ``"interface_class"``. Plain
+    ``typedef my_e;`` (no restriction child) yields ``restriction=None``.
+
+    ForwardTypeRestriction is therefore an **attribute-augmenting** kind
+    (no independent node). This stub exists only as a bucket1 ownership
+    marker so the checklist credits S63 with the kind's promotion.
+    """
+    return
+
+
+_s63_forward_type_restriction.__rule_id__ = "S63"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.PackageDeclaration, _s9a_package),
     (pyslang.SyntaxKind.TypedefDeclaration, _s9b_typedef),
@@ -379,4 +405,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.NetTypeDeclaration, rule_s53),
     (pyslang.SyntaxKind.StructUnionMember, _s58_struct_union_member),
     (pyslang.SyntaxKind.VirtualInterfaceType, _s60_virtual_interface_type),
+    (pyslang.SyntaxKind.ForwardTypeRestriction, _s63_forward_type_restriction),
 ]
