@@ -67,6 +67,7 @@ from .common.tokens import (
     _struct_union_members_of,
     _struct_union_modifiers_of,
     _token_kind_name,
+    _type_text_of,
     _typedef_name_of,
 )
 from .rules import RULE_TABLE
@@ -127,7 +128,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57"}
 
 
 def _is_active(fn) -> bool:
@@ -241,6 +242,14 @@ def promote(
         # contexts push this stack, so FunctionPrototype embedded inside them
         # is not double-promoted.
         "extern_method_stack": [],
+        # S57: sva_decl_stack tracks the enclosing
+        # ``PropertyDeclarationSyntax`` / ``SequenceDeclarationSyntax`` so
+        # that LocalVariableDeclaration children promote against the
+        # property / sequence as parent (not the module). Entries are
+        # ``(parent_gid, parent_path)`` tuples — None gid is used when the
+        # property / sequence itself wasn't promoted (e.g. nameless), which
+        # makes the LVD branch silently no-op for that subtree.
+        "sva_decl_stack": [],
     }
 
     def _cur_module():
@@ -418,6 +427,7 @@ def promote(
             pushed = "in_function"
         elif c == "PropertyDeclarationSyntax":
             mod_gid, mname = _cur_module()
+            push_sva_frame: tuple | None = None
             if mod_gid is not None:
                 pname = _property_name_of(node)
                 if pname:
@@ -426,8 +436,21 @@ def promote(
                           name=pname, path=ppath)
                     _add_edge(graph, mod_gid, gid, "has_property")
                     name_index[ppath] = gid
+                    # S57: expose this property as the enclosing scope for
+                    # any LocalVariableDeclaration children. Frame is
+                    # popped on subtree exit below.
+                    push_sva_frame = (gid, ppath)
+            if push_sva_frame is not None:
+                state["sva_decl_stack"].append(push_sva_frame)
+            else:
+                # Push a sentinel frame even when promotion failed so the
+                # pop-on-exit below is symmetric and LVD inside an
+                # un-promoted property doesn't accidentally inherit an
+                # outer sequence/property's scope.
+                state["sva_decl_stack"].append((None, ""))
         elif c == "SequenceDeclarationSyntax":
             mod_gid, mname = _cur_module()
+            push_sva_frame_s: tuple | None = None
             if mod_gid is not None:
                 sname = _sequence_name_of(node)
                 if sname:
@@ -436,6 +459,118 @@ def promote(
                           name=sname, path=spath)
                     _add_edge(graph, mod_gid, gid, "has_sequence")
                     name_index[spath] = gid
+                    push_sva_frame_s = (gid, spath)
+            if push_sva_frame_s is not None:
+                state["sva_decl_stack"].append(push_sva_frame_s)
+            else:
+                state["sva_decl_stack"].append((None, ""))
+        elif c == "LocalVariableDeclarationSyntax":
+            # S57 — promote SVA-scope local variable declarations that
+            # appear inside ``property`` / ``sequence`` bodies. pyslang
+            # surfaces these as a dedicated ``LocalVariableDeclarationSyntax``
+            # class (not shared with the procedural-scope DataDeclaration —
+            # ``int x;`` inside ``initial begin ... end`` is
+            # DataDeclarationSyntax instead). Layout (verified via SyntaxTree
+            # probe):
+            #
+            #   SyntaxList                    -- leading attributes
+            #   <type_node>                   -- IntType / BitType / LogicType / NamedType …
+            #   SeparatedList(DeclaratorSyntax, comma, ...)
+            #   Semicolon
+            #
+            # Parent is the enclosing property / sequence (the
+            # ``sva_decl_stack`` top, pushed by the PropertyDeclaration /
+            # SequenceDeclaration branches above). Fan-out: a single
+            # ``int a, b, c;`` form yields three local_var nodes — the
+            # canonical syntax node carries the first declarator and S38-
+            # style synthetic sibling nodes carry the rest, so each name is
+            # independently queryable via name_index.
+            #
+            # Token-only structural walk — no regex on source text.
+            parent_gid: str | None = None
+            parent_path = ""
+            if state["sva_decl_stack"]:
+                top_gid, top_path = state["sva_decl_stack"][-1]
+                parent_gid = top_gid
+                parent_path = top_path
+            if parent_gid is not None:
+                # Identify the type node and the declarator SeparatedList.
+                # The first non-token, non-empty-SyntaxList, non-SeparatedList
+                # child is the type. The SeparatedList child (recognised via
+                # its ``.kind``, since pyslang wraps it as a generic
+                # SyntaxNode) holds the comma-separated declarators.
+                type_node = None
+                decl_list = None
+                for ch in node:
+                    if ch is None or _is_token(ch):
+                        continue
+                    sub_kind = str(getattr(ch, "kind", "")).rsplit(".", 1)[-1]
+                    if sub_kind == "SyntaxList":
+                        continue
+                    if sub_kind == "SeparatedList":
+                        decl_list = ch
+                        continue
+                    if type_node is None:
+                        type_node = ch
+                type_text = _type_text_of(type_node)
+                # Collect (name, has_initializer) per Declarator child.
+                declarators: list[tuple[str, bool]] = []
+                if decl_list is not None:
+                    try:
+                        kids = list(decl_list)
+                    except TypeError:
+                        kids = []
+                    for d in kids:
+                        if d is None or _is_token(d):
+                            continue
+                        if _cls(d) != "DeclaratorSyntax":
+                            continue
+                        ids = _identifier_tokens(d)
+                        if not ids:
+                            continue
+                        dname = ids[0].valueText
+                        has_init = False
+                        for dch in d:
+                            if (dch is not None and not _is_token(dch)
+                                    and _cls(dch) == "EqualsValueClauseSyntax"):
+                                has_init = True
+                                break
+                        declarators.append((dname, has_init))
+                if declarators:
+                    first_name, first_init = declarators[0]
+                    first_path = f"{parent_path}.{first_name}"
+                    _mark(nodes_list[node_offset + idx], role="local_var",
+                          name=first_name, path=first_path,
+                          attributes={
+                              "data_type": type_text,
+                              "has_initializer": first_init,
+                          })
+                    _add_edge(graph, parent_gid, gid, "has_local_var")
+                    name_index[first_path] = gid
+                    # 2nd+ declarators get synthetic sibling nodes — same
+                    # fan-out pattern S38 uses for ``genvar i, j, k;``.
+                    for extra_name, extra_init in declarators[1:]:
+                        extra_path = f"{parent_path}.{extra_name}"
+                        extra_id = f"local_var:{extra_path}"
+                        nodes_list.append({
+                            "id": extra_id,
+                            "type": "LocalVariableDeclarationSyntax",
+                            "kind": "LocalVariableDeclaration",
+                            "is_token": False,
+                            "payload": {"synthetic": True},
+                            "queryable": True,
+                            "semantic": {
+                                "role": "local_var",
+                                "name": extra_name,
+                                "path": extra_path,
+                                "attributes": {
+                                    "data_type": type_text,
+                                    "has_initializer": extra_init,
+                                },
+                            },
+                        })
+                        _add_edge(graph, parent_gid, extra_id, "has_local_var")
+                        name_index[extra_path] = extra_id
         elif c == "ConcurrentAssertionStatementSyntax":
             # S16 — promote assert / assume / cover / cover_sequence /
             # restrict / expect property statements as queryable nodes under
@@ -2191,6 +2326,13 @@ def promote(
         # pop runs because the recursion above already returned).
         if c == "ExternInterfaceMethodSyntax" and state["extern_method_stack"]:
             state["extern_method_stack"].pop()
+        # S57: pop sva_decl_stack frame pushed by the Property /
+        # Sequence declaration branches so that LocalVariableDeclaration
+        # children of these constructs resolve their parent against the
+        # correct enclosing scope and sibling subtrees do not leak.
+        if (c in ("PropertyDeclarationSyntax", "SequenceDeclarationSyntax")
+                and state["sva_decl_stack"]):
+            state["sva_decl_stack"].pop()
         if popped_module:
             state["module_stack"].pop()
 

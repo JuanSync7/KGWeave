@@ -18,11 +18,18 @@ module fifo_asserts(
 
     // Placeholder assertions — body is intentionally empty for the
     // round-trip corpus. The semantic edge is independent of contents.
+    // S57 — LocalVariableDeclaration inside property/sequence bodies.
+    // pyslang surfaces these as LocalVariableDeclarationSyntax (distinct
+    // from procedural-scope DataDeclarationSyntax). Each declarator inside
+    // a single ``int a, b;`` form fans out to its own role=local_var node.
     property p_push_implies_not_full;
+        int hits = 0;
+        bit [7:0] mask, scratch;
         @(posedge clk) push |-> !full;
     endproperty
 
     sequence s_push_then_full;
+        int seen = 0;
         @(posedge clk) push ##[1:2] full;
     endsequence
 

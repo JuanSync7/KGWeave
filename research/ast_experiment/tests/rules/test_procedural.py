@@ -362,3 +362,115 @@ def test_s42_byte_equal_roundtrip(bind_graph):
             assert sem.get("role") == "let_decl"
             assert "path" in sem
             assert "name" in sem
+
+
+# ---------------------------------------------------------------------------
+# S57 — LocalVariableDeclaration (property/sequence-scope local vars)
+# ---------------------------------------------------------------------------
+
+
+def _local_vars_under(graph, parent_path):
+    return [n for n in _by_role(graph, "local_var")
+            if n["semantic"]["path"].startswith(parent_path + ".")]
+
+
+def test_s57_local_var_nodes_promoted(bind_graph):
+    """Each Declarator inside a LocalVariableDeclaration surfaces as a
+    role=local_var node — three under the property (``hits``, ``mask``,
+    ``scratch``) and one under the sequence (``seen``)."""
+    prop_locals = _local_vars_under(bind_graph,
+                                    "fifo_asserts.p_push_implies_not_full")
+    seq_locals = _local_vars_under(bind_graph,
+                                   "fifo_asserts.s_push_then_full")
+    prop_names = sorted(n["semantic"]["name"] for n in prop_locals)
+    seq_names = sorted(n["semantic"]["name"] for n in seq_locals)
+    assert prop_names == ["hits", "mask", "scratch"], (
+        f"property locals: {prop_names}")
+    assert seq_names == ["seen"], f"sequence locals: {seq_names}"
+
+
+def test_s57_has_local_var_edges_from_parent(bind_graph):
+    """``has_local_var`` edges run from the enclosing property / sequence
+    node — never directly from the module."""
+    props = _by_role(bind_graph, "property")
+    seqs = _by_role(bind_graph, "sequence")
+    prop = next(p for p in props
+                if p["semantic"]["name"] == "p_push_implies_not_full")
+    seq = next(s for s in seqs
+               if s["semantic"]["name"] == "s_push_then_full")
+    prop_edges = [e for e in bind_graph["edges"]
+                  if e["type"] == "has_local_var" and e["src"] == prop["id"]]
+    seq_edges = [e for e in bind_graph["edges"]
+                 if e["type"] == "has_local_var" and e["src"] == seq["id"]]
+    assert len(prop_edges) == 3, (
+        f"expected 3 has_local_var edges from property, got {len(prop_edges)}")
+    assert len(seq_edges) == 1, (
+        f"expected 1 has_local_var edge from sequence, got {len(seq_edges)}")
+
+
+def test_s57_initializer_attribute(bind_graph):
+    """``has_initializer`` is True for ``int hits = 0;`` / ``int seen = 0;``
+    and False for the bare ``bit [7:0] mask, scratch;`` declarators."""
+    locals_by_name = {
+        n["semantic"]["name"]: n
+        for n in _by_role(bind_graph, "local_var")
+        if n["semantic"]["path"].startswith("fifo_asserts.")
+    }
+    assert locals_by_name["hits"]["semantic"]["attributes"]["has_initializer"] is True
+    assert locals_by_name["seen"]["semantic"]["attributes"]["has_initializer"] is True
+    assert locals_by_name["mask"]["semantic"]["attributes"]["has_initializer"] is False
+    assert locals_by_name["scratch"]["semantic"]["attributes"]["has_initializer"] is False
+
+
+def test_s57_data_type_attribute(bind_graph):
+    """``data_type`` carries the structural type text of the declaration —
+    ``int`` for the int locals, and a bit-vector type for ``mask``/``scratch``."""
+    locals_by_name = {
+        n["semantic"]["name"]: n
+        for n in _by_role(bind_graph, "local_var")
+        if n["semantic"]["path"].startswith("fifo_asserts.")
+    }
+    assert locals_by_name["hits"]["semantic"]["attributes"]["data_type"] == "int"
+    assert locals_by_name["seen"]["semantic"]["attributes"]["data_type"] == "int"
+    # mask / scratch share the bit-vector type; the exact tokenised form
+    # depends on _type_text_of's whitespace-joining convention.
+    mask_dt = locals_by_name["mask"]["semantic"]["attributes"]["data_type"]
+    assert mask_dt.startswith("bit"), f"mask data_type: {mask_dt}"
+    assert "[" in mask_dt and "7" in mask_dt and "0" in mask_dt
+    assert (locals_by_name["scratch"]["semantic"]["attributes"]["data_type"]
+            == mask_dt)
+
+
+def test_s57_name_index_registers_paths(bind_graph):
+    """All four local var paths are queryable via semantic_name_index."""
+    idx = bind_graph.get("semantic_name_index", {})
+    for path in (
+        "fifo_asserts.p_push_implies_not_full.hits",
+        "fifo_asserts.p_push_implies_not_full.mask",
+        "fifo_asserts.p_push_implies_not_full.scratch",
+        "fifo_asserts.s_push_then_full.seen",
+    ):
+        assert path in idx, f"name_index missing {path}"
+
+
+def test_s57_fanout_emits_distinct_gids(bind_graph):
+    """The ``bit [7:0] mask, scratch;`` multi-declarator form fans out to
+    two distinct gids — neither alias to the same node."""
+    idx = bind_graph.get("semantic_name_index", {})
+    mask_id = idx["fifo_asserts.p_push_implies_not_full.mask"]
+    scratch_id = idx["fifo_asserts.p_push_implies_not_full.scratch"]
+    assert mask_id != scratch_id
+
+
+def test_s57_byte_equal_roundtrip(bind_graph):
+    """Semantic layer must not perturb structural payloads — the local_var
+    promotion only writes node['semantic'] and appends edges."""
+    locals_under = [n for n in _by_role(bind_graph, "local_var")
+                    if n["semantic"]["path"].startswith("fifo_asserts.")]
+    assert len(locals_under) == 4
+    for n in locals_under:
+        sem = n.get("semantic", {})
+        assert sem.get("role") == "local_var"
+        assert "path" in sem and "name" in sem
+        attrs = sem.get("attributes", {})
+        assert "data_type" in attrs and "has_initializer" in attrs

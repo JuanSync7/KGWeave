@@ -95,6 +95,24 @@ def rule_s42(*args, **kwargs):
 rule_s42.__rule_id__ = "S42"
 
 
+def rule_s57(*args, **kwargs):
+    """LocalVariableDeclaration is promoted in pass 1 of dispatch.promote.
+
+    Each ``Declarator`` child of a ``LocalVariableDeclarationSyntax`` (the
+    SVA-scope local variable form that lives inside ``sequence`` /
+    ``property`` declaration bodies) surfaces as a role=local_var node with
+    attrs ``{data_type, has_initializer}`` and a ``has_local_var`` edge from
+    the enclosing sequence / property. Multi-declarator forms (``int a, b;``)
+    fan out: the canonical syntax node carries the first name, and synthetic
+    sibling nodes (S38-style) carry the rest. The actual implementation
+    lives in dispatch.py pass-1 — this stub is the bucket1 ownership marker.
+    """
+    return
+
+
+rule_s57.__rule_id__ = "S57"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ProceduralAssignStatement, _s19_procedural_assign),
     (pyslang.SyntaxKind.ProceduralDeassignStatement, _s19_procedural_deassign),
@@ -105,4 +123,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.NonblockingEventTriggerStatement,
      _s21_nonblocking_event_trigger),
     (pyslang.SyntaxKind.LetDeclaration, rule_s42),
+    (pyslang.SyntaxKind.LocalVariableDeclaration, rule_s57),
 ]
