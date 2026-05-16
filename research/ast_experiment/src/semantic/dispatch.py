@@ -157,7 +157,7 @@ def _deferred_mode_of(node):
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72", "S73", "S74", "S75", "S76", "S77", "S78", "S79", "S80", "S81", "S82", "S83"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72", "S73", "S74", "S75", "S76", "S77", "S78", "S79", "S80", "S81", "S82", "S83", "S84"}
 
 
 def _is_active(fn) -> bool:
@@ -2956,6 +2956,54 @@ def promote(
                     # The visitor below pushes ``in_data`` to surface child
                     # Declarators as role="net" (mirroring DataDeclaration).
                     pushed = "in_data"
+        elif c == "UserDefinedNetDeclarationSyntax":
+            # S84 — promote UserDefinedNetDeclaration as a group node
+            # (role="user_defined_net_decl") carrying the user-defined
+            # nettype identifier as the ``net_type`` attribute, with a
+            # ``has_user_defined_net_decl`` edge from the enclosing module.
+            # Per-net Declarator children fall through to the existing
+            # in_data branch below (we push in_data for the duration of
+            # this subtree) so each net surfaces as a role="net" queryable
+            # node — identical convention to S54's NetDeclarationSyntax
+            # path. The group also emits ``groups_net`` edges to each
+            # child Declarator gid via net_decl_stack (reused from S54).
+            #
+            # Layout (verified via SyntaxTree probe of ``wreal #1 wu;``):
+            #   SyntaxList                 -- leading attributes
+            #   Identifier <netType>       -- user-defined nettype name
+            #   DelaySyntax                -- optional ``#<delay>`` control
+            #   SeparatedList(Declarator,...)
+            #   Semicolon
+            #
+            # Token-only traversal — no regex (lesson 6).
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                user_net_type: str | None = None
+                # ``.netType`` is the user-defined nettype identifier token.
+                nt_tok = getattr(node, "netType", None)
+                if nt_tok is not None and _is_token(nt_tok):
+                    user_net_type = nt_tok.valueText
+                if user_net_type is not None:
+                    # Path: <module>.__user_net_decl_<offset>__ — offset on
+                    # the nettype identifier token makes the path stable +
+                    # unique across multiple UserDefinedNetDeclarations in
+                    # the same module.
+                    nt_off = 0
+                    loc = getattr(nt_tok, "location", None)
+                    if loc is not None:
+                        nt_off = getattr(loc, "offset", 0) or 0
+                    grp_name = f"__user_net_decl_{nt_off}__"
+                    grp_path = f"{mname}.{grp_name}"
+                    _mark(nodes_list[node_offset + idx],
+                          role="user_defined_net_decl",
+                          name=grp_name, path=grp_path,
+                          attributes={"net_type": user_net_type})
+                    _add_edge(graph, mod_gid, gid, "has_user_defined_net_decl")
+                    name_index[grp_path] = gid
+                    state["net_decl_stack"].append(gid)
+                    # The visitor below pushes ``in_data`` to surface child
+                    # Declarators as role="net" (mirroring NetDeclaration).
+                    pushed = "in_data"
         elif c == "ExternInterfaceMethodSyntax":
             # S56 — mark that the next FunctionPrototypeSyntax descendant is
             # an interface-scope extern method declaration so the
@@ -3441,6 +3489,11 @@ def promote(
         # NetDeclaration branch actually appended a group node — detected by
         # ``pushed == "in_data"`` *and* the kind being NetDeclarationSyntax).
         if c == "NetDeclarationSyntax" and pushed == "in_data" and state["net_decl_stack"]:
+            state["net_decl_stack"].pop()
+        # S84: pop net_decl_stack alongside its in_data push when the
+        # UserDefinedNetDeclaration branch appended a group node — same
+        # convention as S54 (the stack is reused).
+        if c == "UserDefinedNetDeclarationSyntax" and pushed == "in_data" and state["net_decl_stack"]:
             state["net_decl_stack"].pop()
         # S55: pop port_decl_stack frame pushed by the PortDeclarationSyntax
         # branch above so the frame is scoped to this declaration's subtree.

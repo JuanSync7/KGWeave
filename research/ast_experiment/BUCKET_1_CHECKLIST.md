@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 136 | 50 | 130 | 0 | 6 |
+| PROMOTE | 136 | 50 | 131 | 0 | 5 |
 | CONTAINER | 87 | 22 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -156,7 +156,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `TypeParameterDeclaration` | ✅ | ✅ | S48 |
 | `TypedefDeclaration` | ✅ | ✅ | S9b |
 | `UnionType` | ⬜ | ✅ | S31 |
-| `UserDefinedNetDeclaration` | ⬜ | ⬜ | future |
+| `UserDefinedNetDeclaration` | ⬜ | ✅ | S84 |
 | `VariablePortHeader` | ✅ | ✅ | S1 |
 | `VirtualInterfaceType` | ⬜ | ✅ | S60 |
 

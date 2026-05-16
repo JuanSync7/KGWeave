@@ -562,6 +562,31 @@ _s46_stub.__rule_id__ = "S46"
 _s54_stub.__rule_id__ = "S54"
 
 
+def _s84_stub(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", **_):
+    """S84 ownership marker — UserDefinedNetDeclaration group-node promotion.
+
+    ``<user_nettype> #(<delay>) <decl>, ...;`` (SV §6.7.3) — a net declaration
+    using a previously-declared user-defined nettype — becomes a group node
+    with role="user_defined_net_decl" carrying the ``{net_type}`` attribute
+    (the user nettype identifier).  Each child Declarator is promoted as
+    role="net" (same convention S54 applies to NetDeclarationSyntax-wrapped
+    nets) and connected back to the group via ``groups_net`` edges; the
+    enclosing module additionally emits ``has_user_defined_net_decl`` to the
+    group and ``has_net`` to each child net.
+
+    All work happens in pass-1 dispatch (see dispatch.py) because the
+    enclosing module gid must already be bound and the per-net Declarator
+    children need access to ``net_decl_stack`` (reused from S54) during the
+    same recursive walk.  At pass-2 rule-dispatch time this stub is a no-op;
+    it exists so the bucket-1 checklist marks
+    SyntaxKind.UserDefinedNetDeclaration as PROMOTE under S84.
+    """
+    return
+
+
+_s84_stub.__rule_id__ = "S84"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ContinuousAssign, rule_s2),
     (pyslang.SyntaxKind.AlwaysFFBlock, rule_s3_or_s8),
@@ -576,4 +601,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.InvocationExpression, rule_s5),
     (pyslang.SyntaxKind.NetAlias, _s46_stub),
     (pyslang.SyntaxKind.NetDeclaration, _s54_stub),
+    (pyslang.SyntaxKind.UserDefinedNetDeclaration, _s84_stub),
 ]

@@ -172,6 +172,23 @@ module net_demo;
     wire signed [3:0] nss;
 endmodule
 
+// S84 corpus: UserDefinedNetDeclaration — a net declaration using a
+// user-defined nettype together with a #(delay) value. The form is
+// distinct from a plain NetDeclaration (S54) because pyslang parses
+// ``<userType> #(<delay>) <decl>, ...`` as UserDefinedNetDeclarationSyntax.
+// Expected nodes:
+//   - role="user_defined_net_decl" group node (per UserDefinedNetDeclaration
+//     statement) carrying the user nettype name; promoted under the
+//     enclosing module via ``has_user_defined_net_decl`` edges.
+//   - role="net" Declarator children promoted under each group with
+//     ``groups_net`` edges from the group + ``has_net`` edges from the
+//     enclosing module (same convention as S54).
+module user_net_demo;
+    nettype real wreal;
+    wreal #1 wu1;
+    wreal #2 wu2, wu3;
+endmodule
+
 // S55 corpus: non-ANSI module with PortDeclarations in the body.
 // Module header carries an ImplicitNonAnsiPort list (a, b, c, d, e, f); the
 // PortDeclarations in the body bind each name to a direction + type. S55
