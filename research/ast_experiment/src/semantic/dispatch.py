@@ -52,6 +52,8 @@ from .common.tokens import (
     _extern_decl_kind_of,
     _extern_decl_name_of,
     _extern_decl_ports,
+    _extern_udp_decl_name_of,
+    _extern_udp_decl_ports,
     _forward_typedef_name_of,
     _function_name_of,
     _function_proto_name_and_return,
@@ -155,7 +157,7 @@ def _deferred_mode_of(node):
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72", "S73", "S74", "S75", "S76", "S77", "S78", "S79", "S80"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72", "S73", "S74", "S75", "S76", "S77", "S78", "S79", "S80", "S81"}
 
 
 def _is_active(fn) -> bool:
@@ -1684,6 +1686,44 @@ def promote(
                 # gid at this point. ``extern_pending`` is drained after
                 # visit_pass1 completes (see below).
                 extern_pending.append((gid, ext_name, ext_kind))
+        elif c == "ExternUdpDeclSyntax":
+            # S81 — promote ``extern primitive <name> ( <udp_ports> ) ;``
+            # headers. pyslang surfaces this as the dedicated SyntaxKind
+            # ``ExternUdpDecl`` (one class, one kind — no sharing). The
+            # extern primitive prototype is the structural+semantic peer
+            # of S29's extern module/interface/program: it declares the
+            # contract (name + port list) without supplying the UDP body
+            # (which lives in a ``primitive ... endprimitive`` block
+            # elsewhere, and which the elaborator treats as out-of-scope
+            # for most analyses — but the prototype itself is a first-class
+            # declaration we can query against).
+            #
+            # Parent resolution mirrors S29 / S24 / S28: if an enclosing
+            # module-stack entry exists, attach via ``has_extern_udp_decl``;
+            # otherwise the decl is compilation-unit-scoped and we
+            # root-anchor it with the bare name as the path and no
+            # containment edge.
+            #
+            # We do NOT push the extern UDP decl onto module_stack — the
+            # body is a header only, so there are no nested members to
+            # attribute to it. Port names are extracted structurally via
+            # ``_extern_udp_decl_ports`` so consumers don't need to descend
+            # into either of the two UDP-port-list variants
+            # (``AnsiUdpPortList`` / ``NonAnsiUdpPortList``).
+            ext_name = _extern_udp_decl_name_of(node)
+            if ext_name:
+                ports = _extern_udp_decl_ports(node)
+                mod_gid, mname = _cur_module()
+                if mod_gid is not None:
+                    epath = f"{mname}.{ext_name}"
+                else:
+                    epath = ext_name
+                _mark(nodes_list[node_offset + idx], role="extern_udp",
+                      name=ext_name, path=epath,
+                      attributes={"ports": list(ports)})
+                if mod_gid is not None:
+                    _add_edge(graph, mod_gid, gid, "has_extern_udp_decl")
+                name_index[epath] = gid
         elif c == "DPIImportSyntax":
             # S44 — promote ``import "DPI-C" function|task <name> (...);``
             # declarations as queryable nodes under the enclosing module or

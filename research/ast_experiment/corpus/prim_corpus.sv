@@ -17,3 +17,12 @@ module prim_demo (
   buf #5 g_buf (out_buf, a);
   not g_not1 (n_a, a), g_not2 (n_b, b);
 endmodule
+
+// S81 corpus: extern primitive declarations (UDP prototypes).
+//
+// Two forms are exercised: the non-ansi bare-identifier port list, and
+// the ansi typed port-decl form. Both prototype-only — the UDP bodies
+// would live in separate `primitive ... endprimitive` blocks elsewhere
+// in the compilation (out-of-scope here).
+extern primitive my_ext_prim_nonansi (out_p, in_p1, in_p2);
+extern primitive my_ext_prim_ansi (output reg q, input d, input clk);

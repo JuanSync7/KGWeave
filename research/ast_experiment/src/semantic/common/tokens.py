@@ -1057,6 +1057,91 @@ def _extern_decl_ports(ext_syn: Any) -> list[str]:
     return out
 
 
+def _extern_udp_decl_name_of(ext_syn: Any) -> str:
+    """Return the declared name from an ExternUdpDeclSyntax.
+
+    Grammar: ``extern primitive <Identifier> ( <udp_port_list> ) ;``. pyslang
+    exposes the name directly on the node as ``.name`` (a Token whose
+    ``valueText`` is the bare identifier). We read it through the attribute
+    access rather than walking tokens to keep this robust against attribute
+    shifts in future pyslang releases.
+    """
+    name_tok = getattr(ext_syn, "name", None)
+    if name_tok is None:
+        return ""
+    val = getattr(name_tok, "valueText", "")
+    return val or ""
+
+
+def _extern_udp_decl_ports(ext_syn: Any) -> list[str]:
+    """Return the ordered list of port names from an ExternUdpDeclSyntax.
+
+    pyslang carries two UDP port-list variants:
+
+    * ``NonAnsiUdpPortListSyntax`` — ``( a, b, c )`` — a SeparatedList of
+      ``IdentifierNameSyntax`` entries, each carrying a single Identifier
+      token.
+    * ``AnsiUdpPortListSyntax``    — ``( output reg o, input a, input b )``
+      — a SeparatedList of ``UdpOutputPortDeclSyntax`` /
+      ``UdpInputPortDeclSyntax`` entries. The output decl carries the port
+      name as its last direct Identifier Token; the input decl wraps the
+      identifier(s) in a nested SeparatedList of Identifier Tokens.
+
+    Returns an empty list when no port list is present (LRM allows
+    zero-port UDPs only in degenerate forms; we tolerate it for robustness).
+    """
+    pl = getattr(ext_syn, "portList", None)
+    if pl is None:
+        return []
+    out: list[str] = []
+    # The portList wraps tokens (parens, semicolon) and a SeparatedList of
+    # port entries. The SeparatedList itself is the pyslang base
+    # ``SyntaxNode`` carrying ``SyntaxKind.SeparatedList`` (no dedicated
+    # Python subclass) — detect it by walking its non-token children.
+    for sub in pl:
+        if _is_token(sub):
+            continue
+        # Walk children of the SeparatedList (which alternate port-entry
+        # nodes with comma tokens). Any non-token child is a port entry.
+        for entry in sub:
+            if _is_token(entry):
+                continue
+            ecls = _cls(entry)
+            if ecls == "IdentifierNameSyntax":
+                # Non-ansi form: bare identifier.
+                ids = _identifier_tokens(entry)
+                if ids:
+                    out.append(ids[0].valueText)
+                continue
+            # Ansi form: UdpOutputPortDecl / UdpInputPortDecl. The port name
+            # is the LAST Identifier Token directly under the entry (output
+            # form, e.g. ``output reg q``) or the Identifier Token(s) inside
+            # a nested SeparatedList of IdentifierNameSyntax nodes (input
+            # form, ``input a`` or ``input a, b, c`` — LRM allows multiple
+            # inputs under one keyword; we expand to one port name per id).
+            collected: list[str] = []
+            for ch in entry:
+                if _is_token(ch):
+                    if _token_kind_name(ch) == "Identifier":
+                        collected.append(ch.valueText)
+                    continue
+                # Nested node: walk one level for direct Identifier tokens
+                # OR for IdentifierNameSyntax children whose own Identifier
+                # token is the port name (LRM input-list form).
+                for g in ch:
+                    if _is_token(g):
+                        if _token_kind_name(g) == "Identifier":
+                            collected.append(g.valueText)
+                        continue
+                    # g is an IdentifierNameSyntax (or similar); read its
+                    # Identifier token via the shared helper.
+                    ids = _identifier_tokens(g)
+                    if ids:
+                        collected.append(ids[0].valueText)
+            out.extend(collected)
+    return out
+
+
 def _typedef_name_of(td_syn: Any) -> str:
     """The user-given name token of a TypedefDeclarationSyntax — the LAST
     direct Identifier Token child."""

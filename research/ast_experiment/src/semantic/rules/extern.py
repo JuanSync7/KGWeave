@@ -202,6 +202,50 @@ def rule_s80(*args, **kwargs):
 rule_s80.__rule_id__ = "S80"
 
 
+def rule_s81(*args, **kwargs):
+    """ExternUdpDecl is promoted in pass 1 of dispatch.promote — see the
+    S81 branch.  This stub registers ``SyntaxKind.ExternUdpDecl`` under an
+    active ``__rule_id__`` for the Bucket-1 checklist and the
+    ``_ACTIVE_RULE_IDS`` gate.
+
+    ``extern primitive`` declarations are the UDP analog of S29's
+    ``extern module|interface|program`` headers: a name + port-list
+    prototype whose body lives elsewhere.  Although the LRM treats UDP
+    *bodies* as largely out-of-scope for elaboration (the UDP truth table
+    is a closed leaf primitive), the prototype declaration itself is a
+    first-class structural+semantic entity — it names the contract that
+    downstream instantiation must satisfy and must be queryable from the
+    knowledge graph.
+
+    Promoted shape:
+      * role = ``extern_udp``
+      * attributes["ports"] — ordered list of port names. Both pyslang
+        UDP port-list variants are handled: ``NonAnsiUdpPortList``
+        (bare identifier list, ``(a, b, c)``) and ``AnsiUdpPortList``
+        (typed declarations, ``(output reg o, input a, input b)``).
+        Full port directions and types stay BLOB on the underlying
+        ``UdpInputPortDecl`` / ``UdpOutputPortDecl`` nodes.
+      * path = ``<parent_or_root>.<name>`` — extern UDP decls typically
+        live at compilation-unit scope; cu-scope decls path to the bare
+        declared name and emit no containment edge (mirrors S24/S28/S29).
+      * Edge: ``(parent) -[has_extern_udp_decl]-> (extern_udp_node)``
+        when the decl is nested inside a module/interface/program.
+
+    We do NOT push the extern UDP decl onto ``module_stack`` — it has
+    no nested members (header only), so there is nothing to attribute
+    to it via the standard ``_cur_module()`` lookup.
+
+    Unlike S29 we do NOT emit a ``declares`` edge to a sibling full UDP
+    body: full ``primitive ... endprimitive`` bodies are out-of-scope
+    for promotion (no S-rule owns them), so the target would never
+    resolve. The prototype-as-node alone is the deliverable for S81.
+    """
+    return
+
+
+rule_s81.__rule_id__ = "S81"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ExternModuleDecl, _s29_extern_module_decl),
     (pyslang.SyntaxKind.ProgramDeclaration, _s30_program_decl),
@@ -209,4 +253,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.DPIExport, rule_s45),
     (pyslang.SyntaxKind.FunctionPrototype, rule_s56),
     (pyslang.SyntaxKind.ExternInterfaceMethod, rule_s80),
+    (pyslang.SyntaxKind.ExternUdpDecl, rule_s81),
 ]
