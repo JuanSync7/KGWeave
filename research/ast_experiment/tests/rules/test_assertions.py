@@ -305,7 +305,7 @@ def test_s17_immediate_assertion_parents_to_enclosing_module(bind_graph):
     modules = _by_role(bind_graph, "module")
     parent = next(m for m in modules if m["semantic"]["name"] == "fifo_asserts")
     imms = _immediate_assertions(bind_graph)
-    assert len(imms) == 5, f"expected 5 immediate assertions, got {len(imms)}"
+    assert len(imms) == 6, f"expected 6 immediate assertions, got {len(imms)}"
     for a in imms:
         edges = [e for e in bind_graph["edges"]
                  if e["type"] == "has_assertion"

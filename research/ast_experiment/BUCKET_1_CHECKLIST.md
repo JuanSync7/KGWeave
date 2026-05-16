@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 136 | 50 | 117 | 0 | 19 |
+| PROMOTE | 136 | 50 | 118 | 0 | 18 |
 | CONTAINER | 87 | 22 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -93,7 +93,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `IdentifierSelectName` | ✅ | ✅ | S4 |
 | `IfGenerate` | ⬜ | ✅ | S12c |
 | `ImmediateAssertStatement` | ⬜ | ✅ | S17 |
-| `ImmediateAssertionMember` | ⬜ | ⬜ | future |
+| `ImmediateAssertionMember` | ⬜ | ✅ | S71 |
 | `ImmediateAssumeStatement` | ⬜ | ✅ | S17 |
 | `ImmediateCoverStatement` | ⬜ | ✅ | S17 |
 | `ImplementsClause` | ⬜ | ✅ | S25 |

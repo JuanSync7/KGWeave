@@ -53,6 +53,12 @@ module fifo_asserts(
     // clocking block. Resolved via name_index; fallback to _unresolved.<name>.
     default clocking cb_fifo;
 
+    // S71 — module-scope immediate assertion. Parses as an
+    // ``ImmediateAssertionMember`` wrapping the inner
+    // ``ImmediateAssertStatement``; S71 owns the wrapper (stub only) and
+    // S17 promotes the inner. Exactly one assertion node must result.
+    a_imm_modscope: assert (!(push && full));
+
     // S16 — concurrent assertion use sites. Labeled top-level forms exercise
     // the ConcurrentAssertionMember wrapper path; the unlabeled cover sits
     // alongside to confirm synthetic-label fallback.
