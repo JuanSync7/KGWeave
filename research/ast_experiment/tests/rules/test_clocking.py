@@ -141,6 +141,97 @@ def test_s40_default_clocking_edge_payload(bind_graph):
     assert edges[0].get("payload", {}).get("name") == "cb_fifo"
 
 
+# ---------------------------------------------------------------------------
+# S59 — ClockingItem / DefaultSkewItem tests
+# ---------------------------------------------------------------------------
+
+
+def test_s59_clocking_item_fanout(bind_graph):
+    """Each identifier in a ClockingItem direction-list fans out to its own
+    role=clocking_item node. ``input full, push;`` produces two nodes; the
+    ``output #1 rst_n;`` item produces one — three direction-items total
+    in cb_fifo."""
+    items = [n for n in bind_graph["nodes"]
+             if n.get("semantic", {}).get("role") == "clocking_item"]
+    paths = sorted(i["semantic"]["path"] for i in items)
+    assert "fifo_asserts.cb_fifo.full" in paths
+    assert "fifo_asserts.cb_fifo.push" in paths
+    assert "fifo_asserts.cb_fifo.rst_n" in paths
+
+
+def test_s59_clocking_item_direction_attr(bind_graph):
+    """ClockingItem nodes carry attributes.direction = input/output/inout
+    derived structurally from the leading ClockingDirection token kind."""
+    items = {n["semantic"]["path"]: n for n in bind_graph["nodes"]
+             if n.get("semantic", {}).get("role") == "clocking_item"}
+    assert items["fifo_asserts.cb_fifo.full"]["semantic"]["attributes"]["direction"] == "input"
+    assert items["fifo_asserts.cb_fifo.push"]["semantic"]["attributes"]["direction"] == "input"
+    assert items["fifo_asserts.cb_fifo.rst_n"]["semantic"]["attributes"]["direction"] == "output"
+
+
+def test_s59_clocking_item_skew_attr(bind_graph):
+    """The ``output #1 rst_n;`` item carries attributes.skew == "# 1"
+    (whitespace-joined token text). The bare ``input full, push;`` items
+    carry attributes.skew == None."""
+    items = {n["semantic"]["path"]: n for n in bind_graph["nodes"]
+             if n.get("semantic", {}).get("role") == "clocking_item"}
+    assert items["fifo_asserts.cb_fifo.full"]["semantic"]["attributes"]["skew"] is None
+    assert items["fifo_asserts.cb_fifo.rst_n"]["semantic"]["attributes"]["skew"] == "# 1"
+
+
+def test_s59_has_clocking_item_edges(bind_graph):
+    """Each ClockingItem (per identifier) gets a has_clocking_item edge from
+    its enclosing ClockingDeclaration node."""
+    idx = bind_graph.get("semantic_name_index", {})
+    clk_gid = idx["fifo_asserts.cb_fifo"]
+    items = [n for n in bind_graph["nodes"]
+             if n.get("semantic", {}).get("role") == "clocking_item"
+             and n["semantic"]["path"].startswith("fifo_asserts.cb_fifo.")]
+    item_ids = {i["id"] for i in items}
+    edges = [e for e in bind_graph["edges"]
+             if e["type"] == "has_clocking_item"
+             and e["src"] == clk_gid
+             and e["dst"] in item_ids]
+    assert len(edges) == len(items) == 3, (
+        f"expected 3 has_clocking_item edges from cb_fifo, got {len(edges)} "
+        f"(items={len(items)})"
+    )
+
+
+def test_s59_default_skew_item(bind_graph):
+    """The ``default input #1step output #2;`` row in cb_default promotes
+    to a single role=clocking_item node with direction="default" and
+    both input_skew + output_skew attributes set."""
+    items = [n for n in bind_graph["nodes"]
+             if n.get("semantic", {}).get("role") == "clocking_item"
+             and n["semantic"]["path"] == "fifo_asserts.cb_default.__default__"]
+    assert len(items) == 1, (
+        f"expected exactly one default-skew clocking_item node, got {len(items)}"
+    )
+    attrs = items[0]["semantic"]["attributes"]
+    assert attrs["direction"] == "default"
+    assert attrs["input_skew"] == "# 1step"
+    assert attrs["output_skew"] == "# 2"
+    # And it must have a has_clocking_item edge from cb_default.
+    idx = bind_graph.get("semantic_name_index", {})
+    clk_gid = idx["fifo_asserts.cb_default"]
+    edges = [e for e in bind_graph["edges"]
+             if e["type"] == "has_clocking_item"
+             and e["src"] == clk_gid
+             and e["dst"] == items[0]["id"]]
+    assert len(edges) == 1
+
+
+def test_s59_name_index_registers_items(bind_graph):
+    """All clocking_item paths are registered in semantic_name_index for
+    downstream qualified-name resolution."""
+    idx = bind_graph.get("semantic_name_index", {})
+    assert "fifo_asserts.cb_fifo.full" in idx
+    assert "fifo_asserts.cb_fifo.push" in idx
+    assert "fifo_asserts.cb_fifo.rst_n" in idx
+    assert "fifo_asserts.cb_default.__default__" in idx
+
+
 def test_s40_roundtrip(bind_graph):
     """Byte-equal round-trip: emit(lift(corpus)) must reconstruct the source
     exactly — the default_clocking edge must not mutate any node structure."""

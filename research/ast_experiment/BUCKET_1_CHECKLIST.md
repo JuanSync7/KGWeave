@@ -13,14 +13,14 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 135 | 49 | 104 | 0 | 31 |
-| CONTAINER | 88 | 23 | 0 | 0 | 0 |
+| PROMOTE | 136 | 50 | 106 | 0 | 30 |
+| CONTAINER | 87 | 22 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
 | OUT-OF-SCOPE | 58 | 1 | 0 | 0 | 0 |
 | **Total** | **536** | **98** | | | |
 
-## PROMOTE (135 items)
+## PROMOTE (136 items)
 | SyntaxKind | Struct | Semantic | Owner |
 |--|--|--|--|
 | `AlwaysBlock` | ⬜ | ✅ | S34 |
@@ -46,7 +46,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ClassPropertyDeclaration` | ✅ | ✅ | S26 |
 | `ClassSpecifier` | ⬜ | ⬜ | future |
 | `ClockingDeclaration` | ✅ | ✅ | S18 |
-| `ClockingItem` | ✅ | ⬜ | future |
+| `ClockingItem` | ✅ | ✅ | S59 |
 | `ConcurrentAssertionMember` | ✅ | ⬜ | future |
 | `ConstraintBlock` | ⬜ | ✅ | S52 |
 | `ConstraintDeclaration` | ⬜ | ✅ | S27 |
@@ -67,6 +67,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `DefaultClockingReference` | ⬜ | ✅ | S40 |
 | `DefaultDisableDeclaration` | ⬜ | ✅ | S39 |
 | `DefaultFunctionPort` | ⬜ | ⬜ | future |
+| `DefaultSkewItem` | ✅ | ✅ | S59 |
 | `DeferredAssertion` | ✅ | ⬜ | future |
 | `EnumType` | ✅ | ✅ | S9c |
 | `ExpectPropertyStatement` | ⬜ | ✅ | S16 |
@@ -159,7 +160,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `VariablePortHeader` | ✅ | ✅ | S1 |
 | `VirtualInterfaceType` | ⬜ | ⬜ | future |
 
-## CONTAINER (88 items)
+## CONTAINER (87 items)
 | SyntaxKind | Struct | Semantic | Owner |
 |--|--|--|--|
 | `ActionBlock` | ✅ | — | structural lift only |
@@ -184,7 +185,6 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `DefaultCaseItem` | ✅ | — | structural lift only |
 | `DefaultPropertyCaseItem` | ⬜ | — | structural lift only |
 | `DefaultRsCaseItem` | ⬜ | — | structural lift only |
-| `DefaultSkewItem` | ✅ | — | structural lift only |
 | `DelayControl` | ⬜ | — | structural lift only |
 | `DelayedSequenceElement` | ✅ | — | structural lift only |
 | `DescendingRangeSelect` | ⬜ | — | structural lift only |

@@ -39,6 +39,7 @@ module fifo_asserts(
     // ClockingDeclaration itself is promoted.
     clocking cb_fifo @(posedge clk);
         input  full, push;
+        output #1 rst_n;
     endclocking
 
     default clocking cb_default @(posedge clk);

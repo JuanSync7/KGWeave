@@ -128,7 +128,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59"}
 
 
 def _is_active(fn) -> bool:
@@ -259,6 +259,13 @@ def promote(
         # A sentinel ``(None, "", "")`` is pushed when the typedef itself was
         # not promoted, keeping the pop-on-exit symmetric.
         "struct_union_stack": [],
+        # S59: clocking_stack tracks the enclosing ClockingDeclaration so
+        # that ClockingItem / DefaultSkewItem children can resolve their
+        # parent clocking block, fan out per-identifier nodes, and attach
+        # has_clocking_item edges. Entries are ``(clk_gid, clk_path)``
+        # tuples; a sentinel ``(None, "")`` is pushed when the clocking
+        # declaration itself was not promoted, keeping pop-on-exit symmetric.
+        "clocking_stack": [],
     }
 
     def _cur_module():
@@ -275,6 +282,7 @@ def promote(
         pushed_class = False
         pushed_coverpoint = False
         pushed_struct_union = False
+        pushed_clocking = False
 
         if c == "ModuleDeclarationSyntax":
             kind_name = str(getattr(node, "kind", "")).rsplit(".", 1)[-1]
@@ -650,6 +658,170 @@ def promote(
                       name=cname, path=cpath, attributes=attrs)
                 _add_edge(graph, mod_gid, gid, "has_clocking")
                 name_index[cpath] = gid
+                # S59: push the clocking block onto clocking_stack so that
+                # ClockingItem / DefaultSkewItem children visited inside this
+                # subtree resolve their parent clocking. Matched by the
+                # pop-on-exit at the end of visit_pass1.
+                state["clocking_stack"].append((gid, cpath))
+                pushed_clocking = True
+            else:
+                # Unpromoted clocking (no enclosing module) — push a sentinel
+                # so ClockingItem children silently skip without leaking the
+                # stack frame.
+                state["clocking_stack"].append((None, ""))
+                pushed_clocking = True
+        elif c == "ClockingItemSyntax":
+            # S59 — fan out each direction-item identifier inside a clocking
+            # block as its own role=clocking_item node. Parent clocking gid +
+            # path ride on ``clocking_stack`` (pushed by the
+            # ClockingDeclaration branch above). Structurally:
+            #
+            #   ClockingItemSyntax
+            #     ClockingDirectionSyntax
+            #       (InputKeyword | OutputKeyword | InOutKeyword)
+            #       [ClockingSkewSyntax]          # optional
+            #     SeparatedListSyntax
+            #       AttributeSpecSyntax | DeclaratorSyntax (one per name)
+            #
+            # pyslang surfaces the per-signal items inside the SeparatedList
+            # as AttributeSpec nodes (oddly named, but each carries one
+            # leading Identifier token — the signal name). No regex.
+            if state["clocking_stack"]:
+                clk_gid, clk_path = state["clocking_stack"][-1]
+            else:
+                clk_gid, clk_path = None, ""
+            if clk_gid is not None:
+                direction = ""
+                skew_text: str | None = None
+                names: list[str] = []
+                for ch in node:
+                    if ch is None or _is_token(ch):
+                        continue
+                    sub_kind = str(getattr(ch, "kind", "")).rsplit(".", 1)[-1]
+                    if sub_kind == "ClockingDirection":
+                        for sub in ch:
+                            if sub is None:
+                                continue
+                            if _is_token(sub):
+                                tk = _token_kind_name(sub)
+                                if tk in ("InputKeyword", "OutputKeyword",
+                                          "InOutKeyword"):
+                                    direction = tk.replace(
+                                        "Keyword", ""
+                                    ).lower()
+                                    if direction == "inout":
+                                        direction = "inout"
+                                continue
+                            sub_k = str(
+                                getattr(sub, "kind", "")
+                            ).rsplit(".", 1)[-1]
+                            if sub_k == "ClockingSkew":
+                                skew_text = _type_text_of(sub)
+                    elif sub_kind == "SeparatedList":
+                        for d in ch:
+                            if d is None or _is_token(d):
+                                continue
+                            ids = _identifier_tokens(d)
+                            if ids:
+                                names.append(ids[0].valueText)
+                if names and direction:
+                    first_name = names[0]
+                    first_path = f"{clk_path}.{first_name}"
+                    item_attrs = {
+                        "direction": direction,
+                        "skew": skew_text,
+                    }
+                    _mark(nodes_list[node_offset + idx], role="clocking_item",
+                          name=first_name, path=first_path,
+                          attributes=item_attrs)
+                    _add_edge(graph, clk_gid, gid, "has_clocking_item")
+                    name_index[first_path] = gid
+                    # Multi-identifier fan-out (S38/S58-style synthetic
+                    # siblings): each additional name gets its own
+                    # queryable node with a stable synthetic id.
+                    for extra_name in names[1:]:
+                        extra_path = f"{clk_path}.{extra_name}"
+                        extra_id = f"clocking_item:{extra_path}"
+                        nodes_list.append({
+                            "id": extra_id,
+                            "type": "ClockingItemSyntax",
+                            "kind": "ClockingItem",
+                            "is_token": False,
+                            "payload": {"synthetic": True},
+                            "queryable": True,
+                            "semantic": {
+                                "role": "clocking_item",
+                                "name": extra_name,
+                                "path": extra_path,
+                                "attributes": {
+                                    "direction": direction,
+                                    "skew": skew_text,
+                                },
+                            },
+                        })
+                        _add_edge(graph, clk_gid, extra_id,
+                                  "has_clocking_item")
+                        name_index[extra_path] = extra_id
+        elif c == "DefaultSkewItemSyntax":
+            # S59 — promote ``default input <skew> output <skew>;`` (and the
+            # one-direction variants) as a single role=clocking_item node
+            # under the enclosing clocking block. Path key
+            # ``<clocking>.__default__`` (LRM allows one per clocking block).
+            #
+            # Structure:
+            #   DefaultSkewItemSyntax
+            #     DefaultKeyword
+            #     ClockingDirectionSyntax
+            #       [InputKeyword ClockingSkew]
+            #       [OutputKeyword ClockingSkew]
+            #     Semicolon
+            #
+            # Scan the ClockingDirection's direct children in document order;
+            # the most-recent keyword token associates the following
+            # ClockingSkew node as its skew. No regex.
+            if state["clocking_stack"]:
+                clk_gid, clk_path = state["clocking_stack"][-1]
+            else:
+                clk_gid, clk_path = None, ""
+            if clk_gid is not None:
+                input_skew: str | None = None
+                output_skew: str | None = None
+                for ch in node:
+                    if ch is None or _is_token(ch):
+                        continue
+                    sub_kind = str(getattr(ch, "kind", "")).rsplit(".", 1)[-1]
+                    if sub_kind != "ClockingDirection":
+                        continue
+                    current_dir: str | None = None
+                    for sub in ch:
+                        if sub is None:
+                            continue
+                        if _is_token(sub):
+                            tk = _token_kind_name(sub)
+                            if tk == "InputKeyword":
+                                current_dir = "input"
+                            elif tk == "OutputKeyword":
+                                current_dir = "output"
+                            continue
+                        sub_k = str(
+                            getattr(sub, "kind", "")
+                        ).rsplit(".", 1)[-1]
+                        if sub_k == "ClockingSkew" and current_dir:
+                            text = _type_text_of(sub)
+                            if current_dir == "input":
+                                input_skew = text
+                            else:
+                                output_skew = text
+                dpath = f"{clk_path}.__default__"
+                _mark(nodes_list[node_offset + idx], role="clocking_item",
+                      name="__default__", path=dpath,
+                      attributes={
+                          "direction": "default",
+                          "input_skew": input_skew,
+                          "output_skew": output_skew,
+                      })
+                _add_edge(graph, clk_gid, gid, "has_clocking_item")
+                name_index[dpath] = gid
         elif c == "DefaultDisableDeclarationSyntax":
             # S39 — promote ``default disable iff <expr>;`` as a queryable
             # node under the enclosing module / interface / checker / program.
@@ -2452,6 +2624,14 @@ def promote(
                 and pushed_struct_union
                 and state["struct_union_stack"]):
             state["struct_union_stack"].pop()
+        # S59: pop clocking_stack frame pushed by the ClockingDeclaration
+        # branch above. The local ``pushed_clocking`` flag is True only on
+        # that path (including the sentinel push when the clocking itself
+        # was not promoted), keeping the pop symmetric with the push.
+        if (c == "ClockingDeclarationSyntax"
+                and pushed_clocking
+                and state["clocking_stack"]):
+            state["clocking_stack"].pop()
         if popped_module:
             state["module_stack"].pop()
 
