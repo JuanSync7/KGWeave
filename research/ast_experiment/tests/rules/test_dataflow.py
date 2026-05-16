@@ -871,3 +871,139 @@ def test_s47_roundtrip_after_promote(s47_bundle):
     from test_roundtrip import _token_text_stream  # noqa: PLC0415
 
     assert _token_text_stream(reparsed.root) == _token_text_stream(tree.root)
+
+
+# ---------------------------------------------------------------------------
+# S54 — NetDeclaration (``wire``, ``tri``, ``supply0``, ``wire signed [3:0]``)
+#
+# Promotes pyslang.SyntaxKind.NetDeclaration as a queryable ``net_decl`` group
+# node and ensures per-net Declarators inside it surface as role="net" nodes
+# (mirroring DataDeclarationSyntax's logic-net path).  See net_demo in
+# corpus/fifo.sv.
+# ---------------------------------------------------------------------------
+
+NETDECL_SRC = HERE / "corpus" / "fifo.sv"
+
+
+@pytest.fixture(scope="module")
+def s54_bundle():
+    """Lift + promote corpus/fifo.sv (which contains net_demo) so S54 tests
+    can query the net_demo module."""
+    text = NETDECL_SRC.read_text()
+    tree = pyslang.SyntaxTree.fromText(text)
+    comp = pyslang.Compilation()
+    comp.addSyntaxTree(tree)
+    from research.ast_experiment.src.lift import lift
+    from research.ast_experiment.src.semantic import promote
+
+    graph = lift(tree)
+    promote(graph, tree, comp)
+    return graph
+
+
+def _net_demo_nodes(graph, role):
+    return [n for n in graph["nodes"]
+            if n.get("semantic", {}).get("role") == role
+            and n["semantic"].get("path", "").startswith("net_demo.")]
+
+
+def test_s54_net_decl_group_nodes_promoted(s54_bundle):
+    """S54: each NetDeclaration in net_demo becomes a role=net_decl node.
+
+    net_demo has 4 NetDeclarations (wire nw; tri nt; supply0 ng;
+    wire signed [3:0] nss;).
+    """
+    nd_nodes = [n for n in s54_bundle["nodes"]
+                if n.get("semantic", {}).get("role") == "net_decl"]
+    nd_in_demo = [n for n in nd_nodes
+                  if n["semantic"].get("path", "").startswith("net_demo.")]
+    assert len(nd_in_demo) == 4, (
+        f"expected 4 net_decl nodes in net_demo, got {len(nd_in_demo)}: "
+        f"{[n['semantic'] for n in nd_in_demo]}"
+    )
+
+
+def test_s54_net_type_attribute_correct(s54_bundle):
+    """S54: net_decl node carries net_type attribute matching the keyword."""
+    nd_nodes = [n for n in s54_bundle["nodes"]
+                if n.get("semantic", {}).get("role") == "net_decl"
+                and n["semantic"].get("path", "").startswith("net_demo.")]
+    types_seen = {n["semantic"]["attributes"]["net_type"] for n in nd_nodes}
+    assert types_seen == {"wire", "tri", "supply0"}, (
+        f"unexpected net_type set: {types_seen}"
+    )
+
+
+def test_s54_signed_attribute(s54_bundle):
+    """S54: wire signed [3:0] nss has signed=True; others signed=False."""
+    nd_nodes = [n for n in s54_bundle["nodes"]
+                if n.get("semantic", {}).get("role") == "net_decl"
+                and n["semantic"].get("path", "").startswith("net_demo.")]
+    signed_nodes = [n for n in nd_nodes
+                    if n["semantic"]["attributes"].get("signed")]
+    assert len(signed_nodes) == 1, (
+        f"expected exactly 1 signed net_decl, got {len(signed_nodes)}"
+    )
+
+
+def test_s54_child_declarators_still_promoted_as_nets(s54_bundle):
+    """S54 must not regress S1's net promotion: the four declarator names
+    (nw, nt, ng, nss) all become role=net queryable nodes under net_demo."""
+    nets = _net_demo_nodes(s54_bundle, "net")
+    names = {n["semantic"]["name"] for n in nets}
+    assert names == {"nw", "nt", "ng", "nss"}, (
+        f"net declarator promotion lost names; got {names}"
+    )
+
+
+def test_s54_has_net_decl_edges(s54_bundle):
+    """S54: each net_decl node receives a has_net_decl edge from its
+    enclosing module."""
+    nd_ids = {n["id"] for n in s54_bundle["nodes"]
+              if n.get("semantic", {}).get("role") == "net_decl"
+              and n["semantic"].get("path", "").startswith("net_demo.")}
+    edges = [e for e in s54_bundle["edges"]
+             if e["type"] == "has_net_decl" and e["dst"] in nd_ids]
+    assert len(edges) == 4, (
+        f"expected 4 has_net_decl edges, got {len(edges)}"
+    )
+
+
+def test_s54_groups_net_edges(s54_bundle):
+    """S54: each net_decl group emits groups_net edges to its child
+    role=net Declarator nodes.
+
+    Each NetDeclaration in net_demo has exactly one Declarator, so there
+    should be 4 groups_net edges total under net_demo.
+    """
+    net_ids = {n["id"] for n in _net_demo_nodes(s54_bundle, "net")}
+    edges = [e for e in s54_bundle["edges"]
+             if e["type"] == "groups_net" and e["dst"] in net_ids]
+    assert len(edges) == 4, (
+        f"expected 4 groups_net edges from net_decl→net, got {len(edges)}"
+    )
+
+
+def test_s54_no_double_count_has_net(s54_bundle):
+    """S54 must not double-count: each net Declarator should have exactly
+    one has_net edge from the module (S1's standard convention)."""
+    net_ids = {n["id"] for n in _net_demo_nodes(s54_bundle, "net")}
+    has_net = [e for e in s54_bundle["edges"]
+               if e["type"] == "has_net" and e["dst"] in net_ids]
+    assert len(has_net) == 4, (
+        f"expected 4 has_net edges in net_demo, got {len(has_net)}"
+    )
+
+
+def test_s54_roundtrip_after_promote(s54_bundle):
+    """S54 must not mutate token payloads — emit() reproduces fifo.sv
+    byte-for-byte after net_demo is promoted."""
+    text = NETDECL_SRC.read_text()
+    tree = pyslang.SyntaxTree.fromText(text)
+    from research.ast_experiment.src.unlift import emit
+
+    emitted = emit(s54_bundle)
+    reparsed = pyslang.SyntaxTree.fromText(emitted)
+    from test_roundtrip import _token_text_stream  # noqa: PLC0415
+
+    assert _token_text_stream(reparsed.root) == _token_text_stream(tree.root)

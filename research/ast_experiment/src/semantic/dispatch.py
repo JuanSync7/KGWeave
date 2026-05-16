@@ -126,7 +126,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54"}
 
 
 def _is_active(fn) -> bool:
@@ -220,6 +220,10 @@ def promote(
         "in_port": 0,
         "in_typedef": 0,
         "in_function": 0,
+        # S54: net_decl_stack tracks the enclosing NetDeclarationSyntax group
+        # so that child Declarator promotions can emit ``groups_net`` edges
+        # back to the group node. Entries are gid strings.
+        "net_decl_stack": [],
     }
 
     def _cur_module():
@@ -1784,6 +1788,90 @@ def promote(
             pushed = "in_param"
         elif c == "DataDeclarationSyntax":
             pushed = "in_data"
+        elif c == "NetDeclarationSyntax":
+            # S54 — promote NetDeclaration as a group node (role="net_decl")
+            # carrying net_type + signed attributes, with a ``has_net_decl``
+            # edge from the enclosing module. Per-net Declarator children fall
+            # through to the existing in_data branch below (we push in_data
+            # for the duration of this subtree) so each net surfaces as a
+            # role="net" queryable node — identical convention to S1's logic-
+            # net path under DataDeclarationSyntax. The group also emits
+            # ``groups_net`` edges to each child Declarator gid via
+            # net_decl_stack (consulted from the Declarator branch).
+            #
+            # Layout (verified via SyntaxTree probe):
+            #   SyntaxList                    -- leading attributes
+            #   <NetType>Keyword              -- wire / tri / supply0 / ...
+            #   ImplicitTypeSyntax            -- optional signing + dims
+            #     [SignedKeyword | UnsignedKeyword]
+            #     SyntaxList(VariableDimensionSyntax*)
+            #   SeparatedList(DeclaratorSyntax, comma, ...)
+            #   Semicolon
+            #
+            # Token-only traversal — no regex (lesson 6).
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                _NET_TYPE_TOKENS = {
+                    "WireKeyword": "wire",
+                    "TriKeyword": "tri",
+                    "Tri0Keyword": "tri0",
+                    "Tri1Keyword": "tri1",
+                    "TriAndKeyword": "triand",
+                    "TriOrKeyword": "trior",
+                    "TriRegKeyword": "trireg",
+                    "WAndKeyword": "wand",
+                    "WOrKeyword": "wor",
+                    "Supply0Keyword": "supply0",
+                    "Supply1Keyword": "supply1",
+                    "UWireKeyword": "uwire",
+                }
+                net_type: str | None = None
+                signed_attr = False
+                # Walk direct children: classify net-type keyword, then peek
+                # into ImplicitType for SignedKeyword.
+                for ch in node:
+                    if ch is None:
+                        continue
+                    if _is_token(ch):
+                        tk = _token_kind_name(ch)
+                        if net_type is None and tk in _NET_TYPE_TOKENS:
+                            net_type = _NET_TYPE_TOKENS[tk]
+                    else:
+                        ckind = str(getattr(ch, "kind", "")).rsplit(".", 1)[-1]
+                        if ckind == "ImplicitType":
+                            try:
+                                for sub in ch:
+                                    if sub is None or not _is_token(sub):
+                                        continue
+                                    if _token_kind_name(sub) == "SignedKeyword":
+                                        signed_attr = True
+                                        break
+                            except TypeError:
+                                pass
+                if net_type is not None:
+                    # Path: <module>.__net_decl_<offset>__ — offset on the
+                    # net-type keyword token makes the path stable + unique
+                    # across multiple NetDeclarations in the same module.
+                    kw_off = 0
+                    for ch in node:
+                        if (ch is not None and _is_token(ch)
+                                and _token_kind_name(ch) in _NET_TYPE_TOKENS):
+                            loc = getattr(ch, "location", None)
+                            if loc is not None:
+                                kw_off = getattr(loc, "offset", 0) or 0
+                            break
+                    grp_name = f"__net_decl_{kw_off}__"
+                    grp_path = f"{mname}.{grp_name}"
+                    _mark(nodes_list[node_offset + idx], role="net_decl",
+                          name=grp_name, path=grp_path,
+                          attributes={"net_type": net_type,
+                                      "signed": signed_attr})
+                    _add_edge(graph, mod_gid, gid, "has_net_decl")
+                    name_index[grp_path] = gid
+                    state["net_decl_stack"].append(gid)
+                    # The visitor below pushes ``in_data`` to surface child
+                    # Declarators as role="net" (mirroring DataDeclaration).
+                    pushed = "in_data"
         elif c == "DeclaratorSyntax":
             mod_gid, mname = _cur_module()
             ids = _identifier_tokens(node)
@@ -1850,6 +1938,12 @@ def promote(
                         _mark(nodes_list[node_offset + idx], role="net", name=dname, path=dpath)
                         _add_edge(graph, mod_gid, gid, "has_net")
                         name_index[dpath] = gid
+                        # S54: when this Declarator is a child of a
+                        # NetDeclaration, emit a ``groups_net`` edge from the
+                        # net_decl group node to this net.
+                        if state["net_decl_stack"]:
+                            _add_edge(graph, state["net_decl_stack"][-1],
+                                      gid, "groups_net")
 
         if pushed is not None:
             state[pushed] += 1
@@ -1888,6 +1982,11 @@ def promote(
         # so the module_stack pop below removes the synthetic checker scope.
         if c == "CheckerDeclarationSyntax" and state["checker_stack"]:
             state["checker_stack"].pop()
+        # S54: pop net_decl_stack alongside its in_data push (only when the
+        # NetDeclaration branch actually appended a group node — detected by
+        # ``pushed == "in_data"`` *and* the kind being NetDeclarationSyntax).
+        if c == "NetDeclarationSyntax" and pushed == "in_data" and state["net_decl_stack"]:
+            state["net_decl_stack"].pop()
         if popped_module:
             state["module_stack"].pop()
 

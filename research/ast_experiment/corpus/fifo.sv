@@ -158,3 +158,16 @@ module alias_demo;
     logic a, b, c;
     alias a = b = c;
 endmodule
+
+// S54 corpus: NetDeclaration variants exercising net_type and signing.
+// Expected nodes:
+//   - net_decl group nodes (one per NetDeclaration statement) carrying
+//     {net_type, signed} attrs.
+//   - role="net" Declarator children promoted under each group, plus
+//     has_net edges to the enclosing module (same convention as S1).
+module net_demo;
+    wire nw;
+    tri  nt;
+    supply0 ng;
+    wire signed [3:0] nss;
+endmodule

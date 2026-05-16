@@ -530,6 +530,27 @@ def _s46_stub(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", 
     return
 
 
+def _s54_stub(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", **_):
+    """S54 ownership marker — NetDeclaration group-node promotion.
+
+    ``wire``/``tri``/``supply0``/``wire signed [7:0]`` net declarations
+    (SV §6.7) become group nodes with role="net_decl" carrying
+    ``{net_type, signed}`` attributes.  Each child Declarator is promoted as
+    role="net" (same convention S1 applies to DataDeclarationSyntax-wrapped
+    nets) and connected back to the group via ``groups_net`` edges; the
+    enclosing module additionally emits ``has_net_decl`` to the group and
+    ``has_net`` to each child net.
+
+    All work happens in pass-1 dispatch (see dispatch.py) because the
+    enclosing module gid must already be bound and the per-net Declarator
+    children need access to ``net_decl_stack`` during the same recursive
+    walk.  At pass-2 rule-dispatch time this stub is a no-op; it exists so
+    the bucket-1 checklist marks SyntaxKind.NetDeclaration as PROMOTE under
+    S54.
+    """
+    return
+
+
 _s4_identifier_name.__rule_id__ = "S4"
 _s8_alwayscomb.__rule_id__ = "S8"
 rule_s34.__rule_id__ = "S34"
@@ -538,6 +559,7 @@ rule_s36.__rule_id__ = "S36"
 rule_s37.__rule_id__ = "S37"
 rule_s46.__rule_id__ = "S46"
 _s46_stub.__rule_id__ = "S46"
+_s54_stub.__rule_id__ = "S54"
 
 
 RULES: list[tuple] = [
@@ -553,4 +575,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.SystemName, rule_s5),
     (pyslang.SyntaxKind.InvocationExpression, rule_s5),
     (pyslang.SyntaxKind.NetAlias, _s46_stub),
+    (pyslang.SyntaxKind.NetDeclaration, _s54_stub),
 ]
