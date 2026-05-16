@@ -253,12 +253,18 @@ def test_stub_modules_have_planned_kinds_docstring():
         )
 
 
-def test_rule_module_count_is_sixteen():
-    """rules/ contains exactly 16 .py files outside __init__.py."""
+def test_rule_module_count_is_seventeen():
+    """rules/ contains exactly 17 .py files outside __init__.py.
+
+    Grew from 16 → 17 when S73 (MemberAccessExpression) seeded the
+    dedicated ``expressions.py`` module — first home for the expression
+    SyntaxKind family (lesson 4: edge-only). Future expression S-rules
+    land here too rather than re-bloating ``procedural.py``.
+    """
     rules_dir = _SEMANTIC_DIR / "rules"
     files = [p for p in rules_dir.iterdir()
              if p.is_file() and p.suffix == ".py" and p.name != "__init__.py"]
-    assert len(files) == 16, f"expected 16, got {len(files)}: {sorted(p.name for p in files)}"
+    assert len(files) == 17, f"expected 17, got {len(files)}: {sorted(p.name for p in files)}"
 
 
 def test_rules_modules_isolated_from_each_other():

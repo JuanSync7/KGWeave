@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 136 | 50 | 119 | 0 | 17 |
+| PROMOTE | 136 | 50 | 120 | 0 | 16 |
 | CONTAINER | 87 | 22 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -108,7 +108,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `LetDeclaration` | ⬜ | ✅ | S42 |
 | `LocalVariableDeclaration` | ⬜ | ✅ | S57 |
 | `LoopGenerate` | ✅ | ✅ | S12a |
-| `MemberAccessExpression` | ⬜ | ⬜ | future |
+| `MemberAccessExpression` | ⬜ | ✅ | S73 |
 | `ModportClockingPort` | ⬜ | ✅ | S11b |
 | `ModportDeclaration` | ✅ | ✅ | S11b |
 | `ModportExplicitPort` | ⬜ | ✅ | S11b |

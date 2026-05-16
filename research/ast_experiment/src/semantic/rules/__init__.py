@@ -12,6 +12,7 @@ from . import (
     dataflow, types, behavior,
     coverage, classes, constraints,
     procedural, clocking, properties, assertions, checkers, extern,
+    expressions,
 )
 
 ALL_RULE_MODULES = [
@@ -19,6 +20,7 @@ ALL_RULE_MODULES = [
     dataflow, types, behavior,
     coverage, classes, constraints,
     procedural, clocking, properties, assertions, checkers, extern,
+    expressions,
 ]
 
 

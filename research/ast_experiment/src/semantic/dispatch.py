@@ -155,7 +155,7 @@ def _deferred_mode_of(node):
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72", "S73"}
 
 
 def _is_active(fn) -> bool:
@@ -700,6 +700,52 @@ def promote(
                       attributes=attrs)
                 _add_edge(graph, mod_gid, gid, "has_assertion")
                 name_index[apath] = gid
+        elif c == "MemberAccessExpressionSyntax":
+            # S73 — ``obj.field`` member access. Edge-only per lesson 4: emit
+            # a ``member_access`` edge from the closest enclosing queryable
+            # container (class method via class_stack, else module/interface/
+            # package/program/checker via module_stack) to a synthesized
+            # ``<base>.<member>`` id. When the base resolves to a known entry
+            # in ``semantic_name_index`` the edge points at that node and
+            # carries ``payload["unresolved"]=False``; otherwise the dst is a
+            # sentinel ``_unresolved.<base>.<member>`` and
+            # ``payload["unresolved"]=True`` (mirrors the S25 / S32
+            # unresolved-target convention).
+            #
+            # Reachability caveat: pyslang's *syntax* tree parses
+            # ``obj.field`` as ``ScopedNameSyntax`` (Identifier Dot
+            # Identifier), not as ``MemberAccessExpressionSyntax``. The
+            # latter is a kind in the post-elaboration bound-expression tree,
+            # which this dispatch walker does not currently traverse. The
+            # branch is therefore dormant against the present corpus — kept
+            # here so the future bound-tree lift drops in cleanly.
+            src_gid: str | None = None
+            if state["class_stack"]:
+                src_gid = state["class_stack"][-1][0]
+            elif state["module_stack"]:
+                src_gid = state["module_stack"][-1][0]
+            if src_gid is not None:
+                left = getattr(node, "left", None)
+                name_tok = getattr(node, "name", None)
+                left_text = (str(left).strip() if left is not None else "") or ""
+                member = ""
+                if name_tok is not None:
+                    member = (getattr(name_tok, "valueText", None)
+                              or str(name_tok).strip()
+                              or "")
+                if member:
+                    base_path = left_text
+                    resolved_gid = name_index.get(base_path)
+                    if resolved_gid is not None:
+                        dst = resolved_gid
+                        unresolved = False
+                    else:
+                        dst = f"_unresolved.{base_path}.{member}"
+                        unresolved = True
+                    _add_edge(
+                        graph, src_gid, dst, "member_access",
+                        base=base_path, member=member, unresolved=unresolved,
+                    )
         elif c == "ClockingDeclarationSyntax":
             # S18 — promote ``clocking ... endclocking`` blocks (including
             # ``default clocking`` and ``global clocking`` forms) as queryable
