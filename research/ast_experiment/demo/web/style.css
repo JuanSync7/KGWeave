@@ -117,3 +117,94 @@ html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: 
 .path-active { /* ditto — see app.js cytoscape() style block */ }
 .query-dim { /* ditto */ }
 
+/* ---- SA5: toolbar + tour overlay + gallery ------------------------------ */
+
+#toolbar { display: flex; gap: 0.3rem; align-items: center; }
+#toolbar button {
+  background: var(--panel-2); color: var(--fg);
+  border: 1px solid #2a2f3a; border-radius: 3px;
+  padding: 0.25rem 0.55rem; font-size: 0.8rem; cursor: pointer;
+  font-family: inherit;
+}
+#toolbar button:hover { background: var(--accent); border-color: var(--accent); }
+#tour-start { background: var(--accent); border-color: var(--accent); color: white; font-weight: 600; }
+
+/* Tour overlay + card */
+.tour-overlay {
+  position: fixed; inset: 0; background: rgba(8, 10, 14, 0.55);
+  display: none; align-items: flex-end; justify-content: center;
+  z-index: 100; padding: 1rem;
+}
+.tour-overlay.visible { display: flex; }
+.tour-card {
+  position: relative;
+  width: min(640px, 92vw);
+  background: var(--panel); color: var(--fg);
+  border: 1px solid #2a2f3a; border-radius: 6px;
+  padding: 1rem 1.2rem 0.8rem;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+  margin-bottom: 6vh;
+}
+.tour-card .tour-close {
+  position: absolute; top: 6px; right: 8px;
+  background: transparent; color: var(--muted); border: none;
+  font-size: 1.1rem; cursor: pointer; padding: 2px 6px;
+}
+.tour-card .tour-close:hover { color: var(--fg); }
+.tour-title { font-size: 1.05rem; margin: 0 0 0.4rem; font-weight: 600; }
+.tour-body { font-size: 0.88rem; line-height: 1.45; margin: 0 0 0.6rem; color: #d3d8e0; }
+.tour-meta { color: var(--muted); font-size: 0.78rem; margin-bottom: 0.5rem; }
+.tour-footer { display: flex; gap: 0.5rem; justify-content: flex-end; }
+.tour-footer button {
+  background: var(--panel-2); color: var(--fg);
+  border: 1px solid #2a2f3a; border-radius: 3px;
+  padding: 0.3rem 0.8rem; cursor: pointer; font-size: 0.85rem;
+  font-family: inherit;
+}
+.tour-footer button:hover:not([disabled]) { background: var(--accent); border-color: var(--accent); }
+.tour-footer button[disabled] { opacity: 0.4; cursor: default; }
+.tour-footer .tour-next { background: var(--accent); border-color: var(--accent); color: white; }
+.tour-cookbook { list-style: none; padding-left: 0; max-height: 50vh; overflow: auto; margin: 0.4rem 0; }
+.tour-cookbook li { padding: 4px 0; border-bottom: 1px dashed #2a2f3a; font-size: 0.82rem; }
+.tour-cookbook code { color: var(--cat-blob); font-size: 0.78rem; }
+
+/* Gallery overlay + grid */
+.gallery-overlay {
+  position: fixed; inset: 0; background: rgba(8, 10, 14, 0.6);
+  display: none; align-items: center; justify-content: center;
+  z-index: 90; padding: 1rem;
+}
+.gallery-overlay.visible { display: flex; }
+.gallery-panel {
+  width: min(1000px, 95vw); max-height: 88vh; overflow: auto;
+  background: var(--panel); color: var(--fg);
+  border: 1px solid #2a2f3a; border-radius: 6px;
+  padding: 0.8rem 1.2rem 1.2rem;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+}
+.gallery-panel header { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 0.4rem; border-bottom: 1px solid #2a2f3a; margin-bottom: 0.6rem; }
+.gallery-panel h2 { margin: 0; font-size: 1.05rem; }
+.gallery-close {
+  background: var(--panel-2); color: var(--fg);
+  border: 1px solid #2a2f3a; border-radius: 3px;
+  padding: 0.25rem 0.6rem; cursor: pointer; font-size: 0.8rem;
+}
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.8rem;
+}
+.gallery-card {
+  background: var(--panel-2); border: 1px solid #2a2f3a; border-radius: 4px;
+  padding: 0.6rem 0.7rem;
+}
+.gallery-card h3 { margin: 0 0 0.3rem; font-size: 0.92rem; color: var(--cat-semantic); }
+.gallery-card p { margin: 0 0 0.4rem; font-size: 0.8rem; line-height: 1.35; color: #c7ccd5; }
+.gallery-examples { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.gallery-examples button.gallery-run {
+  background: var(--panel); color: var(--fg);
+  border: 1px solid #2a2f3a; border-radius: 3px;
+  padding: 0.25rem 0.5rem; font-size: 0.78rem; cursor: pointer;
+  text-align: left; font-family: inherit;
+}
+.gallery-examples button.gallery-run:hover { background: var(--accent); border-color: var(--accent); color: white; }

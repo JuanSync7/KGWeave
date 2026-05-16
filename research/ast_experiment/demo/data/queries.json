@@ -60,6 +60,46 @@
       "anchor": { "role": "class" },
       "via": ["extends"],
       "depth": 2
+    },
+    {
+      "id": "q8_all_ports",
+      "label": "All ports across the corpus",
+      "blurb": "Filter role=port — every port declaration on every module/interface in the corpus.",
+      "kind": "filter",
+      "filter": { "role": "port" }
+    },
+    {
+      "id": "q9_all_covergroups",
+      "label": "Covergroups, coverpoints, bins, crosses",
+      "blurb": "Filter the whole coverage family — covergroup containers plus the coverpoint/cross/bins they own.",
+      "kind": "filter",
+      "filter": { "role_in": ["covergroup", "coverpoint", "cross", "coverage_bins"] }
+    },
+    {
+      "id": "q10_checkers_externs",
+      "label": "Checkers, checker instances, extern decls",
+      "blurb": "Filter role_in {checker, checker_instance, extern_decl, extern_udp} — verification-library scaffolding.",
+      "kind": "filter",
+      "filter": { "role_in": ["checker", "checker_instance", "extern_decl", "extern_udp"] }
+    },
+    {
+      "id": "q11_packages_types_interfaces",
+      "label": "Packages, typedefs, interfaces, clocking, modports",
+      "blurb": "Filter the type/scope family — package containers, typedef rows, interface/clocking/modport reuse units.",
+      "kind": "filter",
+      "filter": {
+        "role_in": [
+          "package", "typedef", "typedef_forward",
+          "interface", "interface_port", "clocking", "clocking_item", "modport"
+        ]
+      }
+    },
+    {
+      "id": "q12_nets_vars",
+      "label": "Nets, net decls, nettypes",
+      "blurb": "Filter the net/var family — every wire/logic/user-defined-nettype row across the corpus.",
+      "kind": "filter",
+      "filter": { "role_in": ["net", "net_decl", "nettype", "user_defined_net_decl"] }
     }
   ]
 }

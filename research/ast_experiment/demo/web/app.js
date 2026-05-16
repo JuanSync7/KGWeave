@@ -29,6 +29,16 @@ import {
   runAndAnimate,
   clearQueryViz,
 } from "./query.js";
+import {
+  startTour,
+  restartTour,
+  loadTour,
+  openCookbook,
+} from "./tour.js";
+import {
+  openGallery,
+  loadGallery,
+} from "./gallery.js";
 
 // -------------------------------------------------------------------------
 // Category + edge-type style maps
@@ -141,9 +151,39 @@ async function boot() {
   mountCytoscape();
   wireFilters();
   wireQueryPanel();
+  wireToolbar();
 
   // Open the first file
   if (g.files.length) selectFile(g.files[0].id);
+
+  // Eager-load tour + gallery specs (cheap; both are small JSON).
+  loadTour("../data/tour.json").catch((e) => console.warn("tour.json load failed:", e));
+  loadGallery("../data/gallery.json").catch((e) => console.warn("gallery.json load failed:", e));
+}
+
+// -------------------------------------------------------------------------
+// Host bridge — the public surface tour.js / gallery.js drive.
+// Stable function names: tour/gallery JSON files reference behaviour through
+// this object so we can refactor app.js internals without breaking them.
+// -------------------------------------------------------------------------
+
+const host = {
+  selectFile(fileId) { selectFile(fileId); },
+  runCannedQuery(canned) { return runQuery({ canned }); },
+  runFreeform(text) { return runQuery({ freeform: text }); },
+  clearQuery() { clearQuery(); },
+  state,
+};
+
+function wireToolbar() {
+  const tourBtn = document.getElementById("tour-start");
+  if (tourBtn) tourBtn.addEventListener("click", () => startTour(host));
+  const restartBtn = document.getElementById("tour-restart");
+  if (restartBtn) restartBtn.addEventListener("click", () => restartTour());
+  const cookBtn = document.getElementById("cookbook-open");
+  if (cookBtn) cookBtn.addEventListener("click", () => openCookbook(state.queries));
+  const galBtn = document.getElementById("gallery-open");
+  if (galBtn) galBtn.addEventListener("click", () => openGallery(host));
 }
 
 // -------------------------------------------------------------------------

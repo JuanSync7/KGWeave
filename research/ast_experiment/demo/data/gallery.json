@@ -1,0 +1,100 @@
+{
+  "version": "1",
+  "title": "Use-case gallery — rule families at a glance",
+  "families": [
+    {
+      "family": "module_structure",
+      "title": "Module structure",
+      "description": "Module / interface / package / program declarations plus their ports, params, and nets (S1, S2, S14–S16).",
+      "examples": [
+        { "label": "All modules", "canned": "q1_all_modules", "file": "fifo" },
+        { "label": "All ports", "canned": "q8_all_ports", "file": "fifo" },
+        { "label": "Free-form: just the modules in `top`", "freeform": "role=module file=top" }
+      ]
+    },
+    {
+      "family": "continuous_assign_dataflow",
+      "title": "Continuous assign & dataflow",
+      "description": "`assign` statements and the drives/reads edges they emit back to net symbols (S5, S6, S84).",
+      "examples": [
+        { "label": "What drives port `fifo.full`?", "canned": "q3_drives_full", "file": "fifo" },
+        { "label": "Free-form: every continuous_assign node", "freeform": "role=continuous_assign" }
+      ]
+    },
+    {
+      "family": "procedural_blocks",
+      "title": "Procedural blocks",
+      "description": "`always_ff` / `always_comb` / `always` blocks plus their sensitivity lists (S7, S8, S9, S74–S76).",
+      "examples": [
+        { "label": "always_ff sensitivity chains", "canned": "q4_sensitivity_chain_always_ff", "file": "fifo" },
+        { "label": "Free-form: every procedural_block", "freeform": "role=procedural_block" }
+      ]
+    },
+    {
+      "family": "instances_connectivity",
+      "title": "Instances & connectivity",
+      "description": "Hierarchical instances + the `instantiates` / `of_module` / `connects` edges that wire them up (S3, S4, S69).",
+      "examples": [
+        { "label": "All instances of `fifo`", "canned": "q2_instances_of_fifo", "file": "top" },
+        { "label": "Path: top → fifo", "canned": "q5_top_to_fifo_path", "file": "top" }
+      ]
+    },
+    {
+      "family": "assertions_sva",
+      "title": "Assertions & SVA",
+      "description": "Concurrent + immediate assertions plus named properties and sequences (S17–S20, S70–S72, S77, S78).",
+      "examples": [
+        { "label": "All assertion-bearing nodes", "canned": "q6_all_assertions", "file": "fifo_asserts" },
+        { "label": "Free-form: properties only", "freeform": "role=property" },
+        { "label": "Free-form: sequences only", "freeform": "role=sequence" }
+      ]
+    },
+    {
+      "family": "covergroups",
+      "title": "Covergroups",
+      "description": "Covergroup containers + their coverpoints, crosses, and bins (S22, S23).",
+      "examples": [
+        { "label": "Covergroups + coverpoints + bins", "canned": "q9_all_covergroups", "file": "fifo_asserts" },
+        { "label": "Free-form: coverpoints only", "freeform": "role=coverpoint" }
+      ]
+    },
+    {
+      "family": "classes_oop",
+      "title": "Classes & OOP",
+      "description": "Class declarations, the methods/properties/constraints they own, and the extends/implements edges that link them (S24–S27, S82).",
+      "examples": [
+        { "label": "Class inheritance chain", "canned": "q7_class_extends_chain", "file": "cls_corpus" },
+        { "label": "Free-form: class methods", "freeform": "role=method" },
+        { "label": "Free-form: class properties", "freeform": "role=class_property" }
+      ]
+    },
+    {
+      "family": "packages_programs",
+      "title": "Packages, programs, types & interfaces",
+      "description": "Packages, typedefs (forward + concrete), interfaces, clocking blocks, modports — the reuse layer (S30, S31, S32, S60, S62, S63, S85, S86).",
+      "examples": [
+        { "label": "All package/type/interface nodes", "canned": "q11_packages_types_interfaces", "file": "fifo_pkg" },
+        { "label": "Free-form: typedef nodes", "freeform": "role=typedef" },
+        { "label": "Free-form: programs only", "freeform": "role=program" }
+      ]
+    },
+    {
+      "family": "checkers_externs",
+      "title": "Checkers & extern declarations",
+      "description": "Checker blocks + checker instances + extern module/UDP declarations (S28, S29, S79–S81).",
+      "examples": [
+        { "label": "All checkers + externs", "canned": "q10_checkers_externs", "file": "checker_corpus" },
+        { "label": "Free-form: checker instances", "freeform": "role=checker_instance" }
+      ]
+    },
+    {
+      "family": "types_clocking_interfaces",
+      "title": "Nets, vars & user-defined nettypes",
+      "description": "The net/var family — wires, logic, nettypes, user-defined nettypes (S4 + nettype rules).",
+      "examples": [
+        { "label": "All net/var nodes", "canned": "q12_nets_vars", "file": "fifo_pkg" },
+        { "label": "Free-form: nettypes only", "freeform": "role=nettype" }
+      ]
+    }
+  ]
+}

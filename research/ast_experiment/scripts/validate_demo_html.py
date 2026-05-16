@@ -36,7 +36,7 @@ def _ok(msg: str) -> None:
 
 def main() -> int:
     print(f"validating {WEB}")
-    for name in ("index.html", "style.css", "app.js", "query.js"):
+    for name in ("index.html", "style.css", "app.js", "query.js", "tour.js", "gallery.js"):
         f = WEB / name
         if not f.is_file():
             _fail(f"missing {f}")
@@ -53,6 +53,16 @@ def main() -> int:
     if not queries_json.is_file():
         _fail(f"missing {queries_json}")
     _ok(f"queries.json present ({queries_json.stat().st_size} bytes)")
+
+    tour_json = DATA / "tour.json"
+    if not tour_json.is_file():
+        _fail(f"missing {tour_json}")
+    _ok(f"tour.json present ({tour_json.stat().st_size} bytes)")
+
+    gallery_json = DATA / "gallery.json"
+    if not gallery_json.is_file():
+        _fail(f"missing {gallery_json}")
+    _ok(f"gallery.json present ({gallery_json.stat().st_size} bytes)")
 
     html = (WEB / "index.html").read_text(encoding="utf-8")
     js = (WEB / "app.js").read_text(encoding="utf-8")
@@ -111,7 +121,7 @@ def main() -> int:
     # 8. node --check on app.js + query.js, if node available
     node = shutil.which("node")
     if node:
-        for js_name in ("app.js", "query.js"):
+        for js_name in ("app.js", "query.js", "tour.js", "gallery.js"):
             res = subprocess.run([node, "--check", str(WEB / js_name)],
                                  capture_output=True, text=True)
             if res.returncode != 0:
@@ -130,6 +140,33 @@ def main() -> int:
         if f'id="{sel}"' not in html:
             _fail(f'index.html missing id="{sel}"')
         _ok(f'query panel "#{sel}" present')
+
+    # 11. SA5: tour.js / gallery.js wired into app.js
+    if "./tour.js" not in js:
+        _fail("app.js must import ./tour.js")
+    _ok("app.js imports tour.js")
+    if "./gallery.js" not in js:
+        _fail("app.js must import ./gallery.js")
+    _ok("app.js imports gallery.js")
+
+    # 12. SA5: toolbar buttons in index.html
+    for sel in ("tour-start", "tour-restart", "cookbook-open", "gallery-open"):
+        if f'id="{sel}"' not in html:
+            _fail(f'index.html missing toolbar id="{sel}"')
+        _ok(f'toolbar "#{sel}" present')
+
+    # 13. SA5: tour.js exports the documented entry points
+    tour_src = (WEB / "tour.js").read_text(encoding="utf-8")
+    for sym in ("startTour", "nextStep", "prevStep", "endTour", "restartTour"):
+        if sym not in tour_src:
+            _fail(f"tour.js missing symbol {sym}")
+    _ok("tour.js exports startTour/nextStep/prevStep/endTour/restartTour")
+
+    # 14. SA5: gallery.js exports renderGallery
+    gallery_src = (WEB / "gallery.js").read_text(encoding="utf-8")
+    if "renderGallery" not in gallery_src:
+        _fail("gallery.js missing symbol renderGallery")
+    _ok("gallery.js exports renderGallery")
 
     print("VALIDATOR OK")
     return 0

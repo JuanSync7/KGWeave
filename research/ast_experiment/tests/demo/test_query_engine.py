@@ -326,6 +326,45 @@ def test_q7_class_extends_chain(graph, queries_by_id):
 
 
 # ---------------------------------------------------------------------------
+# SA5 bespoke queries (q8..q12) — pin expected counts the same way q1..q7 are.
+# ---------------------------------------------------------------------------
+
+
+def test_q8_all_ports(graph, queries_by_id):
+    """q8: role=port returns 97 ports across the corpus."""
+    res = run_canned(graph, queries_by_id["q8_all_ports"])
+    assert len(res["nodes"]) == 97
+    assert len(res["edges"]) == 0
+
+
+def test_q9_all_covergroups(graph, queries_by_id):
+    """q9: covergroup + coverpoint + cross + coverage_bins = 10 nodes."""
+    res = run_canned(graph, queries_by_id["q9_all_covergroups"])
+    assert len(res["nodes"]) == 10
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    roles = {by_id[nid]["semantic"]["role"] for nid in res["nodes"]}
+    assert roles <= {"covergroup", "coverpoint", "cross", "coverage_bins"}
+
+
+def test_q10_checkers_externs(graph, queries_by_id):
+    """q10: checker + checker_instance + extern_decl + extern_udp = 8 nodes."""
+    res = run_canned(graph, queries_by_id["q10_checkers_externs"])
+    assert len(res["nodes"]) == 8
+
+
+def test_q11_packages_types_interfaces(graph, queries_by_id):
+    """q11: package/typedef/interface/clocking/modport family = 27 nodes."""
+    res = run_canned(graph, queries_by_id["q11_packages_types_interfaces"])
+    assert len(res["nodes"]) == 27
+
+
+def test_q12_nets_vars(graph, queries_by_id):
+    """q12: net + net_decl + nettype + user_defined_net_decl = 67 nodes."""
+    res = run_canned(graph, queries_by_id["q12_nets_vars"])
+    assert len(res["nodes"]) == 67
+
+
+# ---------------------------------------------------------------------------
 # Free-form DSL tests
 # ---------------------------------------------------------------------------
 

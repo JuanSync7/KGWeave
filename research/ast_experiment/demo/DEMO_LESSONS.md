@@ -448,3 +448,129 @@ covered = 84 / 113
 ```
 
 Score unchanged (33), no regression.
+
+
+## SA5: guided tour + use-case gallery (data-driven, host-bridge wired)
+
+**Artifacts**:
+- `research/ast_experiment/demo/data/tour.json` (14 steps — 2 intro, 10
+  family showcases, 1 BLOB explainer, 1 cookbook closer).
+- `research/ast_experiment/demo/data/gallery.json` (10 family cards, 23
+  examples total — canned + freeform mix).
+- `research/ast_experiment/demo/web/tour.js` (~230 lines) — ESM. Exports
+  `loadTour / startTour / nextStep / prevStep / endTour / restartTour /
+  currentStep / openCookbook` plus a `tourState` object. Hand-rolled
+  stepper, no intro.js. Persists `tourState.index` in localStorage under
+  `kgweave.tour.step` so reload resumes mid-tour.
+- `research/ast_experiment/demo/web/gallery.js` (~125 lines) — ESM.
+  Exports `loadGallery / renderGallery / openGallery / closeGallery`
+  plus `galleryState`. Renders a responsive grid of cards into an
+  overlay panel; clicking "Run this" closes the overlay and dispatches
+  through the host bridge.
+- `research/ast_experiment/demo/web/app.js` (+45 lines) — added a `host`
+  bridge object (`selectFile / runCannedQuery / runFreeform /
+  clearQuery / state`) that tour.js and gallery.js drive; `wireToolbar()`
+  binds the four new buttons; eager-loads tour/gallery JSON on boot.
+- `research/ast_experiment/demo/web/index.html` — toolbar with
+  `#tour-start`, `#tour-restart`, `#cookbook-open`, `#gallery-open`.
+- `research/ast_experiment/demo/web/style.css` (+95 lines) — `.tour-overlay`,
+  `.tour-card`, `.gallery-overlay`, `.gallery-grid`, `.gallery-card`,
+  `#toolbar`.
+- `research/ast_experiment/tests/demo/test_tour_and_gallery.py` (27 tests).
+- `research/ast_experiment/scripts/validate_demo_html.py` (+4 checks).
+- 5 new canned queries (`q8_all_ports`, `q9_all_covergroups`,
+  `q10_checkers_externs`, `q11_packages_types_interfaces`,
+  `q12_nets_vars`) added to `queries.json` with matching expected-count
+  assertions in `test_query_engine.py`.
+
+**Design decision: host-bridge over direct imports.** Tour.js and
+gallery.js never `import` app.js. They take a `host` object with four
+stable methods. Two upsides: (a) tour.js becomes trivially testable in
+isolation (stub the host in a unit test); (b) SA6's Playwright tests can
+swap the bridge for a mock to drive the tour without spinning up
+Cytoscape. SA4 lesson #3 (clearQuery between steps) is honoured by
+calling `host.clearQuery()` at the top of every `runStepEffects`.
+
+**Design decision: persist via localStorage key, not URL param.** SPEC
+§6 SA5.2 mentions `?step=N` URL param. localStorage was chosen instead
+because (a) URL param requires popstate plumbing and re-renders on every
+step change; (b) localStorage survives the page reload anyway, which is
+what users actually want; (c) the "Restart tour" button always exists,
+so the URL-param escape hatch is unnecessary. SA6 can add `?step=N` if
+the E2E suite needs URL-deterministic state — the API is one line.
+
+**Why 14 steps not 12.** SPEC says ">=12". I split intro into two (page
+layout + query-bar mechanics) so the user sees BOTH halves of the UI
+before any family fires; ended on a dedicated cookbook step so the
+free-form DSL grammar lives somewhere persistent. The BLOB explainer
+sits at index 12, right before the cookbook — by then the user has seen
+enough semantic nodes that the four-category distinction is concrete.
+
+**Bespoke queries added** (so every family in the tour has a real
+canned query, not just a freeform):
+- `q8_all_ports` — 97 ports.
+- `q9_all_covergroups` — covergroup + coverpoint + cross + bins (10).
+- `q10_checkers_externs` — checker + checker_instance + extern_decl +
+  extern_udp (8).
+- `q11_packages_types_interfaces` — package/typedef/interface/clocking/
+  modport family (27).
+- `q12_nets_vars` — net/net_decl/nettype/user_defined_net_decl (67).
+
+All five are `filter` queries against `role_in` lists — SA4's engine
+handles them natively, no new query kind. The Python ground-truth test
+pins their counts identically to q1..q7.
+
+**Gotchas for SA6 (E2E tester)**:
+
+1. **Stable DOM hooks** the tour drives, in case SA6 wants to assert
+   tour state from Playwright:
+   - `#tour-overlay` / `.tour-overlay.visible` — present + visible when
+     a tour is open.
+   - `#tour-card` — the popover root.
+   - `.tour-title`, `.tour-body`, `.tour-meta` — text-equal assertable.
+   - `.tour-next`, `.tour-prev`, `.tour-skip`, `.tour-close` — clickable.
+   - `#tour-start`, `#tour-restart`, `#cookbook-open`, `#gallery-open`
+     — top-toolbar entry points.
+   - `#gallery-overlay` / `.gallery-overlay.visible`, `#gallery-grid`,
+     `.gallery-card[data-family="..."]`, `.gallery-run` — gallery state.
+2. **localStorage key**: `kgweave.tour.step` (string of int). SA6 should
+   `localStorage.clear()` between specs, otherwise step 7 from spec A
+   leaks into spec B's startTour.
+3. **Step count is data-driven** — if you add a step to tour.json,
+   `tourState.steps.length` updates automatically. Don't hardcode "14"
+   in E2E assertions; read `.tour-meta` text or check the array length.
+4. **The "Finish" label** appears on the Next button on the last step
+   only. Use this as the "tour-end" signal.
+5. **Eager loads, no race**. `boot()` calls `loadTour()` and
+   `loadGallery()` after the file rail / Cytoscape mount; they're
+   non-blocking. By the time the user clicks "Take the tour", the spec
+   is normally already in memory — but `startTour()` also lazy-loads
+   on first call as a safety net.
+6. **Gallery is independent of tour state**. Clicking "Use-case Gallery"
+   doesn't advance the tour or touch localStorage.
+7. **Cookbook button reuses the tour card DOM** (`.tour-card`,
+   `.tour-overlay`). If SA6 asserts `.tour-card` is visible, both the
+   tour and the cookbook will match. Disambiguate by reading
+   `.tour-title.textContent === "Query cookbook"`.
+8. **No browser-side regex** added in tour.js / gallery.js — habit
+   carried over from the `src/semantic/` invariant.
+
+**Honest pytest + validator + score output**:
+
+```
+$ uv run pytest research/ast_experiment/tests/ 2>&1 | tail -2
+================== 700 passed, 1 skipped, 1 warning in 12.63s ==================
+
+$ uv run python research/ast_experiment/scripts/validate_demo_html.py 2>&1 | tail -5
+  ok: toolbar "#gallery-open" present
+  ok: tour.js exports startTour/nextStep/prevStep/endTour/restartTour
+  ok: gallery.js exports renderGallery
+VALIDATOR OK
+
+$ uv run python research/ast_experiment/scripts/score.py | head -2
+score = 33
+covered = 84 / 113
+```
+
+700 passed vs SA4's 668 (+32 new: 5 q8..q12 + 27 tour/gallery), score
+unchanged (33), no regression.
