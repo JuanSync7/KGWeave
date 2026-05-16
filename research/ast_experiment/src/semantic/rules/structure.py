@@ -310,6 +310,42 @@ def _s87_module_header(*args, **kwargs):
 _s87_module_header.__rule_id__ = "S87"
 
 
+def _s88_package_header(*args, **kwargs):
+    """S88 — PackageHeader ownership-only marker.
+
+    ``SyntaxKind.PackageHeader`` is the header portion of a
+    ``PackageDeclaration`` — the ``package [lifetime] <name> ;`` clause
+    that precedes the package body. pyslang reuses the single
+    ``ModuleHeaderSyntax`` Python class across the four header
+    SyntaxKind variants (``ModuleHeader`` / ``InterfaceHeader`` /
+    ``PackageHeader`` / ``ProgramHeader`` — lesson 1 shared class,
+    discriminator on ``node.kind``). S88 mirrors S85 (InterfaceHeader)
+    and S87 (ModuleHeader) one-for-one.
+
+    Semantic content already lifted onto the parent
+    ``PackageDeclaration`` semantic node (which is itself promoted by
+    S1's ``ModuleDeclarationSyntax`` branch under the
+    ``PackageDeclaration`` kind discriminator — ``dispatch.promote``
+    flips ``role="package"`` and stamps ``name`` / ``path`` from the
+    header's name token). Packages typically have no parameters or
+    ports in their header (the grammar still routes through the
+    shared ``ModuleHeaderSyntax`` so the parameter/port subtrees are
+    structurally present but empty); any parameters that do appear
+    land via the existing ``ParameterDeclaration`` (S1) branch.
+
+    Per ``CLAUDE.md`` lesson 5 (header ownership marker): we register an
+    **ownership-only stub** so the Bucket-1 checklist marks
+    ``PackageHeader`` as ``Sem ✅`` (owner S88) without adding a
+    dispatch branch (which would double-promote the package relative
+    to S1's ``PackageDeclaration`` branch). Mirrors the S85 / S87
+    ownership-only pattern.
+    """
+    return
+
+
+_s88_package_header.__rule_id__ = "S88"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ModuleDeclaration, _s1_module_decl),
     (pyslang.SyntaxKind.ImplicitAnsiPort, _s1_port),
@@ -328,4 +364,7 @@ RULES: list[tuple] = [
     # Header ownership marker per lesson 5; semantic content already lifted
     # onto module nodes by S1. No dispatch branch.
     (pyslang.SyntaxKind.ModuleHeader, _s87_module_header),
+    # Header ownership marker per lesson 5; semantic content lifted onto
+    # S29 package nodes. No dispatch branch.
+    (pyslang.SyntaxKind.PackageHeader, _s88_package_header),
 ]

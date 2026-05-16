@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 136 | 50 | 134 | 0 | 2 |
+| PROMOTE | 136 | 50 | 135 | 0 | 1 |
 | CONTAINER | 87 | 22 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -130,7 +130,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `PackageDeclaration` | ⬜ | ✅ | S9a |
 | `PackageExportAllDeclaration` | ⬜ | ✅ | S51 |
 | `PackageExportDeclaration` | ⬜ | ✅ | S32 |
-| `PackageHeader` | ⬜ | ⬜ | future |
+| `PackageHeader` | ⬜ | ✅ | S88 |
 | `PackageImportDeclaration` | ✅ | ✅ | S32 |
 | `PackageImportItem` | ✅ | ✅ | S50 |
 | `ParameterDeclaration` | ✅ | ✅ | S1 |
