@@ -4,6 +4,11 @@
 
 module checker_corpus_top (input logic clk, input logic a, input logic b);
   c_mutex u_mutex (.clk(clk), .x(a), .y(b));
+  // S79: procedural-scope checker instance parses as a
+  // CheckerInstanceStatement wrapping a CheckerInstantiation.
+  initial begin
+    c_mutex u_proc (.clk(clk), .x(a), .y(b));
+  end
 endmodule
 
 checker c_mutex (input clk, input x, input y);

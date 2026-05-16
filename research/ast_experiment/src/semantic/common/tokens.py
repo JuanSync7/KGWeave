@@ -918,17 +918,40 @@ def _checker_instantiation_type_name(ci_syn: Any) -> str:
 def _checker_instance_name(ci_syn: Any) -> str:
     """Return the instance-name identifier from a CheckerInstantiationSyntax.
 
-    The instance name lives inside an ``InstanceNameSyntax`` direct child
-    (or the first Identifier token under it). Returns ``""`` if absent.
+    Two grammar variants exist:
+
+    * Module-scope path (handled by S6 reclassification, not this helper):
+      ``InstanceNameSyntax`` direct child whose first Identifier token is
+      the instance name.
+    * Procedural-scope path (S28 + S79): the inner ``CheckerInstantiation``
+      under a ``CheckerInstanceStatement`` carries a ``SeparatedList`` of
+      ``HierarchicalInstanceSyntax`` entries; the first Identifier token
+      under the first entry is the instance name.
+
+    Returns ``""`` if absent (unparseable instance with no name token).
     """
     for ch in ci_syn:
         if _is_token(ch):
             continue
-        if _cls(ch) == "InstanceNameSyntax":
+        cls_name = _cls(ch)
+        if cls_name == "InstanceNameSyntax":
             toks = _identifier_tokens(ch)
             if toks:
                 return toks[0].valueText
             return ""
+        # Procedural-scope CheckerInstantiation: SeparatedList wrapping one
+        # or more HierarchicalInstance children. Descend one level to find
+        # the first HierarchicalInstance, then take its first Identifier.
+        kname = str(getattr(ch, "kind", "")).rsplit(".", 1)[-1]
+        if kname == "SeparatedList":
+            for entry in ch:
+                if _is_token(entry):
+                    continue
+                if _cls(entry) == "HierarchicalInstanceSyntax":
+                    toks = _identifier_tokens(entry)
+                    if toks:
+                        return toks[0].valueText
+                    return ""
     return ""
 
 

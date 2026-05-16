@@ -60,43 +60,56 @@ def test_s28_checker_declaration_promoted(chk_graph):
 
 
 def test_s28_checker_instance_promoted(chk_graph):
-    """u_mutex is promoted as role=checker_instance under
-    checker_corpus_top, with the checker name stamped in attributes."""
+    """Two checker_instance nodes promote under checker_corpus_top:
+    ``u_mutex`` at module scope (via rule_s6 reclassification of a
+    HierarchyInstantiation) and ``u_proc`` at procedural scope inside
+    the ``initial`` block (via S28's CheckerInstantiation branch, with
+    the S79 wrapper staying CONTAINER). Both stamp ``checker_name``."""
     instances = _by_role(chk_graph, "checker_instance")
-    assert len(instances) == 1
-    inst = instances[0]
-    assert inst["semantic"]["name"] == "u_mutex"
-    assert inst["semantic"]["path"] == "checker_corpus_top.u_mutex"
-    assert inst["semantic"]["attributes"]["checker_name"] == "c_mutex"
+    assert len(instances) == 2
+    by_name = {inst["semantic"]["name"]: inst for inst in instances}
+    assert set(by_name) == {"u_mutex", "u_proc"}
+    assert by_name["u_mutex"]["semantic"]["path"] == "checker_corpus_top.u_mutex"
+    assert by_name["u_proc"]["semantic"]["path"] == "checker_corpus_top.u_proc"
+    for inst in instances:
+        assert inst["semantic"]["attributes"]["checker_name"] == "c_mutex"
 
 
 def test_s28_has_checker_instance_edge(chk_graph):
-    """The module emits a has_checker_instance edge to the instance node."""
+    """The module emits a has_checker_instance edge to each instance node."""
     instances = _by_role(chk_graph, "checker_instance")
     assert instances
-    inst_id = instances[0]["id"]
     modules = {n["semantic"]["path"]: n for n in _by_role(chk_graph, "module")}
     top = modules["checker_corpus_top"]
-    edges = [e for e in chk_graph["edges"]
-             if e["type"] == "has_checker_instance"
-             and e["src"] == top["id"]
-             and e["dst"] == inst_id]
-    assert len(edges) == 1, f"expected 1 has_checker_instance edge, got {len(edges)}"
+    for inst in instances:
+        inst_id = inst["id"]
+        edges = [e for e in chk_graph["edges"]
+                 if e["type"] == "has_checker_instance"
+                 and e["src"] == top["id"]
+                 and e["dst"] == inst_id]
+        assert len(edges) == 1, (
+            f"expected 1 has_checker_instance edge to "
+            f"{inst['semantic']['name']}, got {len(edges)}"
+        )
 
 
 def test_s28_of_checker_edge_resolves(chk_graph):
-    """The checker_instance node has an of_checker edge pointing to the
-    checker declaration resolved via the shared name index."""
+    """Each checker_instance node has an of_checker edge to the resolved
+    checker declaration."""
     instances = _by_role(chk_graph, "checker_instance")
     checkers = _by_role(chk_graph, "checker")
     assert instances and checkers
-    inst_id = instances[0]["id"]
     chk_id = checkers[0]["id"]
-    edges = [e for e in chk_graph["edges"]
-             if e["type"] == "of_checker"
-             and e["src"] == inst_id
-             and e["dst"] == chk_id]
-    assert len(edges) == 1, f"expected 1 of_checker edge, got {len(edges)}"
+    for inst in instances:
+        inst_id = inst["id"]
+        edges = [e for e in chk_graph["edges"]
+                 if e["type"] == "of_checker"
+                 and e["src"] == inst_id
+                 and e["dst"] == chk_id]
+        assert len(edges) == 1, (
+            f"expected 1 of_checker edge from "
+            f"{inst['semantic']['name']}, got {len(edges)}"
+        )
 
 
 def test_s28_internal_property_parented_to_checker(chk_graph):

@@ -55,6 +55,32 @@ def _s28_checker_instantiation(*args, **kwargs):
 _s28_checker_instantiation.__rule_id__ = "S28"
 
 
+def _s79_checker_instance_statement(*args, **kwargs):
+    """CheckerInstanceStatement — wrapper ownership marker only.
+
+    ``CheckerInstanceStatementSyntax`` is the procedural-scope wrapper
+    pyslang emits around a ``CheckerInstantiationSyntax`` when a checker
+    is instantiated from inside an ``initial`` / ``always_*`` block
+    (``c_mutex u_proc (...)`` inside a procedural block parses as
+    ``CheckerInstanceStatement`` whose ``.instance`` is the inner
+    ``CheckerInstantiation``).
+
+    Per ``CLAUDE.md`` lesson 5 (wrapper-kind dedup), the wrapper carries
+    no independent identity — its only role is to give the inner
+    instantiation a Statement-shaped slot in the procedural grammar. We
+    therefore leave it as CONTAINER for structural traversal and only
+    register an ownership stub here so the Bucket-1 checklist
+    regenerator attributes ``CheckerInstanceStatement`` to S79 via
+    ``__rule_id__`` introspection. Runtime promotion fires via the inner
+    ``CheckerInstantiation`` kind (S28). No dispatch branch. Pattern
+    mirrors S70 / S71 / S75 / S78.
+    """
+    return
+
+
+_s79_checker_instance_statement.__rule_id__ = "S79"
+
+
 def _s62_checker_data_declaration(*args, **kwargs):
     """CheckerDataDeclaration is promoted in pass 1 of dispatch.promote — see
     the S62 branch keyed on ``CheckerDataDeclarationSyntax``. The syntax
@@ -84,4 +110,8 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.CheckerDeclaration, _s28_checker_declaration),
     (pyslang.SyntaxKind.CheckerInstantiation, _s28_checker_instantiation),
     (pyslang.SyntaxKind.CheckerDataDeclaration, _s62_checker_data_declaration),
+    # S79: Wrapper ownership marker per lesson 5; the inner
+    # CheckerInstantiation promotes via S28 in both procedural and
+    # module contexts. No dispatch branch.
+    (pyslang.SyntaxKind.CheckerInstanceStatement, _s79_checker_instance_statement),
 ]

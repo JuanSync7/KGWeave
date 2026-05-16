@@ -155,7 +155,7 @@ def _deferred_mode_of(node):
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72", "S73", "S74", "S75", "S76", "S77", "S78"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72", "S73", "S74", "S75", "S76", "S77", "S78", "S79"}
 
 
 def _is_active(fn) -> bool:
@@ -223,6 +223,13 @@ def promote(
     # doesn't yet contain the body). Collect (extern_gid, name, kind) and
     # resolve in a post-pass after pass 1 has populated the full index.
     extern_pending: list[tuple[str, str, str]] = []
+    # S28 / S79: deferred ``of_checker`` resolution for procedural-scope
+    # CheckerInstantiation nodes whose checker declaration is not yet in
+    # name_index when the instance fires in pass-1 (the declaration
+    # appears textually later in the source, e.g. at compilation-unit
+    # scope after the instantiating module). Drained immediately after
+    # visit_pass1 completes.
+    checker_inst_pending: list[tuple[str, str]] = []
     state = {
         "idx": 0,
         "module_stack": [],
@@ -1619,11 +1626,18 @@ def promote(
                     name_index[ipath] = gid
                     # Optional of_checker edge — resolve against the
                     # checker-prefixed name-index entry registered by the
-                    # CheckerDeclaration branch above.
+                    # CheckerDeclaration branch. Try in-line first; if the
+                    # checker declaration appears textually AFTER the
+                    # instantiation (legal: checkers may be declared at
+                    # compilation-unit scope below the instantiating
+                    # module), defer to the pass-1 post-pass which runs
+                    # after the full name_index is populated.
                     tgt = name_index.get("checker:" + ctype)
                     if tgt is not None and tgt != gid:
                         _add_edge(graph, gid, tgt, "of_checker",
                                   name=ctype)
+                    else:
+                        checker_inst_pending.append((gid, ctype))
         elif c == "ExternModuleDeclSyntax":
             # S29 — promote ``extern module|interface|program <name> [#(...)]
             # [(ports)] ;`` headers. pyslang reuses the single SyntaxKind
@@ -3428,6 +3442,13 @@ def promote(
             if tgt is not None and tgt != ext_gid:
                 _add_edge(graph, ext_gid, tgt, "declares", name=ext_name,
                           kind=ext_kind)
+        # S28 / S79 post-pass: drain deferred ``of_checker`` edges for
+        # procedural-scope CheckerInstantiation entries whose checker
+        # declaration was not yet in name_index at instantiation time.
+        for inst_gid, ctype in checker_inst_pending:
+            tgt = name_index.get("checker:" + ctype)
+            if tgt is not None and tgt != inst_gid:
+                _add_edge(graph, inst_gid, tgt, "of_checker", name=ctype)
     if phase == "pass1":
         return
 

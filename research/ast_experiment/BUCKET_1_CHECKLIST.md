@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 136 | 50 | 125 | 0 | 11 |
+| PROMOTE | 136 | 50 | 126 | 0 | 10 |
 | CONTAINER | 87 | 22 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -38,7 +38,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `CaseGenerate` | ⬜ | ✅ | S12c |
 | `CheckerDataDeclaration` | ⬜ | ✅ | S62 |
 | `CheckerDeclaration` | ⬜ | ✅ | S28 |
-| `CheckerInstanceStatement` | ⬜ | ⬜ | future |
+| `CheckerInstanceStatement` | ⬜ | ✅ | S79 |
 | `CheckerInstantiation` | ⬜ | ✅ | S28 |
 | `ClassDeclaration` | ✅ | ✅ | S24 |
 | `ClassMethodDeclaration` | ⬜ | ✅ | S26 |
