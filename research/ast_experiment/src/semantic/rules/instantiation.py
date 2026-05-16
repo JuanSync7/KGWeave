@@ -270,9 +270,22 @@ def rule_s6(graph, node, gid, gnode, scope, name_index, leaks,
 
 
 def rule_s13(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", **_):
-    """S13: BindDirectiveSyntax → bound_into edge."""
+    """S13: BindDirectiveSyntax → bound_into edge.
+
+    S61 inlined here (lesson 4 edge-only kind): an optional
+    BindTargetListSyntax child carries an explicit list of target instance
+    names — ``bind dut : u1, u2 mon m_inst();``. When present, emit one
+    ``bind_target`` edge per IdentifierName under the BindTargetList from
+    the binder module to each named instance, preserving source order via
+    the ``index`` payload field. Instance name resolution searches the
+    semantic name index for any path key ending in ``.<name>`` (the
+    instances live at ``<parent_scope>.<name>`` and pyslang gives us only
+    the bare name); on a miss the dst falls back to ``_unresolved.<name>``
+    with ``unresolved=True``.
+    """
     target_name: str | None = None
     hier_inst: Any | None = None
+    target_list_node: Any | None = None
     for ch in node:
         if _is_token(ch):
             continue
@@ -281,6 +294,8 @@ def rule_s13(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", *
             toks = _identifier_tokens(ch)
             if toks:
                 target_name = toks[0].valueText
+        elif kind_name == "BindTargetListSyntax" and target_list_node is None:
+            target_list_node = ch
         elif kind_name == "HierarchyInstantiationSyntax" and hier_inst is None:
             hier_inst = ch
     if target_name is None or hier_inst is None:
@@ -321,6 +336,40 @@ def rule_s13(graph, node, gid, gnode, scope, name_index, leaks, scope_path="", *
     if not _has_edge(graph, binder_gid, target_gid, "bound_into"):
         _add_edge(graph, binder_gid, target_gid, "bound_into",
                   instance_name=inst_name or "", scope=scope_str)
+
+    # S61 — BindTargetList: emit one ``bind_target`` edge per named instance
+    # in the explicit target list (if any). Lesson 4 edge-only kind — owns
+    # the SyntaxKind via the _s61_stub metadata entry below; runtime lives
+    # inline here where binder_gid is bound.
+    if target_list_node is not None:
+        target_names: list[str] = []
+        for sub in _descendants(target_list_node):
+            if _cls(sub) != "IdentifierNameSyntax":
+                continue
+            toks = _identifier_tokens(sub)
+            if toks:
+                target_names.append(toks[0].valueText)
+        for ord_idx, tname in enumerate(target_names):
+            # Resolve: scan name_index for any path key ending in ``.<tname>``
+            # whose value points to an actual semantic node (instances live
+            # at ``<parent_scope>.<tname>``; pyslang gives us only the bare
+            # name in the target list). Bare-name lookup is the secondary
+            # fallback; ``_unresolved.<tname>`` is the final fallback.
+            resolved_gid: str | None = None
+            suffix = "." + tname
+            for key, val in name_index.items():
+                if key.endswith(suffix):
+                    resolved_gid = val
+                    break
+            if resolved_gid is None:
+                resolved_gid = name_index.get(tname)
+            dst = resolved_gid if resolved_gid is not None else f"_unresolved.{tname}"
+            payload: dict = {"target": tname, "index": ord_idx,
+                             "target_module": target_name}
+            if resolved_gid is None:
+                payload["unresolved"] = True
+            if not _has_edge(graph, binder_gid, dst, "bind_target"):
+                _add_edge(graph, binder_gid, dst, "bind_target", **payload)
 
 
 # --- S33 — gate-level PrimitiveInstantiation --------------------------------
@@ -655,6 +704,23 @@ def rule_s49(*args, **kwargs):
 rule_s49.__rule_id__ = "S49"
 
 
+def _s61_stub(*args, **kwargs):
+    """S61 ownership marker — BindTargetList is an edge-only kind (lesson 4).
+
+    The connector ``: u1, u2`` inside ``bind dut : u1, u2 mon m_inst();``
+    has no independent semantic identity — its runtime promotion lives in
+    rule_s13 (the parent's pass-1 branch), emitting one ``bind_target``
+    edge per named instance from the binder module to the target instance
+    (or to ``_unresolved.<name>`` when the instance is not in the name
+    index). This stub exists solely so the bucket1 checklist sees an
+    owner for BindTargetList.
+    """
+    return
+
+
+_s61_stub.__rule_id__ = "S61"
+
+
 rule_s6.__rule_id__ = "S6"
 rule_s13.__rule_id__ = "S13"
 rule_s33.__rule_id__ = "S33"
@@ -687,4 +753,8 @@ RULES: list[tuple] = [
     # Promotion runs in pass-1 of dispatch.promote (own class
     # AnonymousProgramSyntax, no shared-class ambiguity).
     (pyslang.SyntaxKind.AnonymousProgram, rule_s49),
+    # S61 — BindTargetList: edge-only kind (lesson 4). Runtime lives in
+    # rule_s13 above (parent's branch where binder_gid is bound); this
+    # stub is the ownership marker for the bucket1 checklist.
+    (pyslang.SyntaxKind.BindTargetList, _s61_stub),
 ]

@@ -158,3 +158,10 @@ module let_decl_demo (
 endmodule
 
 bind fifo fifo_asserts u_asserts(.clk(clk), .full(full), .push(push));
+
+// S61 — explicit BindTargetList: this bind directive applies only to the
+// named instances ``u_fifo_a`` and ``u_fifo_b`` of module ``fifo``, not to
+// every instance of ``fifo``. The ``: u_fifo_a, u_fifo_b`` clause is the
+// BindTargetListSyntax — a connector child of BindDirective listing the
+// specific instance names. ``ghost_u`` exercises the unresolved fallback.
+bind fifo : u_fifo_a, u_fifo_b, ghost_u fifo_asserts u_targeted(.clk(clk), .full(full), .push(push));

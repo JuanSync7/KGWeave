@@ -391,3 +391,132 @@ def test_defparam_round_trip(top_graph):
     _tokens(tree.root, orig)
     _tokens(reparsed.root, rt)
     assert orig == rt
+
+
+# ---------------------------------------------------------------------------
+# S61 — BindTargetList promotion tests
+# ---------------------------------------------------------------------------
+
+FIFO_ASSERTS = HERE / "corpus" / "fifo_asserts.sv"
+
+
+@pytest.fixture(scope="module")
+def bind_target_graph():
+    """Build a combined FIFO + TOP + FIFO_ASSERTS graph so the BindTargetList
+    referencing ``u_fifo_a`` / ``u_fifo_b`` instances of ``top`` is resolvable
+    via the cross-file semantic name index."""
+    from research.ast_experiment.src.build import build_kg
+
+    graph, _trees, _comp = build_kg([FIFO, TOP, FIFO_ASSERTS])
+    return graph
+
+
+def _bind_target_edges(graph):
+    return [e for e in graph["edges"] if e.get("type") == "bind_target"]
+
+
+def test_s61_bind_target_edges_emitted(bind_target_graph):
+    """The ``bind fifo : u_fifo_a, u_fifo_b, ghost_u`` directive emits one
+    ``bind_target`` edge per named instance — three edges in total."""
+    edges = _bind_target_edges(bind_target_graph)
+    assert len(edges) == 3, (
+        f"expected exactly 3 bind_target edges (u_fifo_a, u_fifo_b, ghost_u); "
+        f"got {len(edges)}"
+    )
+
+
+def test_s61_bind_target_order_preserved(bind_target_graph):
+    """The ordinal in each edge payload reflects the source order of the
+    target-list identifiers — ``u_fifo_a`` is 0, ``u_fifo_b`` is 1,
+    ``ghost_u`` is 2."""
+    edges = _bind_target_edges(bind_target_graph)
+    ordered = sorted(edges, key=lambda e: e["payload"]["index"])
+    names = [e["payload"]["target"] for e in ordered]
+    assert names == ["u_fifo_a", "u_fifo_b", "ghost_u"], names
+
+
+def test_s61_resolved_instance_targets(bind_target_graph):
+    """``u_fifo_a`` and ``u_fifo_b`` are real instances of ``fifo`` inside
+    ``top`` and resolve via the name index to the HierarchicalInstance node
+    id — the edge dst is the resolved gid, payload has no ``unresolved``."""
+    idx = bind_target_graph.get("semantic_name_index", {})
+    u_a_gid = idx.get("top.u_fifo_a")
+    u_b_gid = idx.get("top.u_fifo_b")
+    assert u_a_gid is not None and u_b_gid is not None
+    edges = _bind_target_edges(bind_target_graph)
+    by_name = {e["payload"]["target"]: e for e in edges}
+    assert by_name["u_fifo_a"]["dst"] == u_a_gid
+    assert by_name["u_fifo_b"]["dst"] == u_b_gid
+    assert not by_name["u_fifo_a"]["payload"].get("unresolved")
+    assert not by_name["u_fifo_b"]["payload"].get("unresolved")
+
+
+def test_s61_unresolved_fallback(bind_target_graph):
+    """``ghost_u`` does not exist anywhere in the name index — the edge dst
+    falls back to ``_unresolved.ghost_u`` and payload carries
+    ``unresolved=True``."""
+    edges = _bind_target_edges(bind_target_graph)
+    by_name = {e["payload"]["target"]: e for e in edges}
+    ghost = by_name["ghost_u"]
+    assert ghost["dst"] == "_unresolved.ghost_u"
+    assert ghost["payload"].get("unresolved") is True
+
+
+def test_s61_edge_source_is_binder_module(bind_target_graph):
+    """The src of each ``bind_target`` edge is the binder module node
+    (``fifo_asserts``) — same source semantics as S13's ``bound_into``."""
+    idx = bind_target_graph.get("semantic_name_index", {})
+    binder_gid = idx.get("module:fifo_asserts") or idx.get("fifo_asserts")
+    assert binder_gid is not None
+    edges = _bind_target_edges(bind_target_graph)
+    for e in edges:
+        assert e["src"] == binder_gid, (
+            f"expected src={binder_gid}, got {e['src']} for target "
+            f"{e['payload'].get('target')!r}"
+        )
+
+
+def test_s61_rule_metadata_registered():
+    """BindTargetList is registered in the dispatch table with __rule_id__=S61
+    as an ownership marker (lesson 4 edge-only kind — stub function)."""
+    import pyslang  # noqa: PLC0415
+
+    from research.ast_experiment.src.semantic.dispatch import RULE_TABLE
+    fn = RULE_TABLE.get(pyslang.SyntaxKind.BindTargetList)
+    assert fn is not None
+    assert getattr(fn, "__rule_id__", None) == "S61"
+
+
+def test_s61_round_trip_bind_target_list():
+    """BindTargetListSyntax + the surrounding BindDirective round-trip
+    byte-equal through lift→emit→reparse — lesson 4 edges don't perturb the
+    structural lift."""
+    import pyslang  # noqa: PLC0415
+
+    from research.ast_experiment.src.lift import lift
+    from research.ast_experiment.src.unlift import emit
+
+    src = FIFO_ASSERTS.read_text()
+    tree = pyslang.SyntaxTree.fromText(src)
+    assert not list(tree.diagnostics)
+    graph = lift(tree)
+    out = emit(graph)
+    reparsed = pyslang.SyntaxTree.fromText(out)
+
+    def _tokens(node, acc):
+        if type(node).__name__ == "Token":
+            for tr in node.trivia:
+                acc.append(tr.getRawText())
+            acc.append(node.rawText)
+            return
+        try:
+            for c in node:
+                _tokens(c, acc)
+        except TypeError:
+            pass
+
+    orig: list[str] = []
+    rt: list[str] = []
+    _tokens(tree.root, orig)
+    _tokens(reparsed.root, rt)
+    assert orig == rt
