@@ -217,3 +217,18 @@ endmodule
 module legacy_explicit_demo(.a(p), .b());
     input p, b;
 endmodule
+
+// S66 corpus: legacy Verilog-2001 non-ANSI implicit port form. Each bare
+// name in the NonAnsiPortList parses as SyntaxKind.ImplicitNonAnsiPort with
+// a PortReferenceSyntax child carrying the identifier; directions/types
+// arrive via separate input/output statements in the body (S55). The
+// concatenation entry ``{x, y}`` parses as ImplicitNonAnsiPort wrapping a
+// PortConcatenationSyntax — S66 currently skips emission for the
+// concatenation form (deferred to a future rule) since there is no single
+// port name to key on. Sibling of S1 ImplicitAnsiPort, S64 ExplicitAnsiPort,
+// S65 ExplicitNonAnsiPort.
+module legacy_implicit_demo(a, b, {x, y});
+    input a;
+    output b;
+    input x, y;
+endmodule

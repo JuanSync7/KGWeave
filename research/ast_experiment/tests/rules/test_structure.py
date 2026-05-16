@@ -37,10 +37,17 @@ def _by_role(graph, role):
             if n.get("semantic", {}).get("role") == role]
 
 
+def _s55_body_ports(graph):
+    """S55 binds at DeclaratorSyntax; filter out S66 ImplicitNonAnsiPort
+    header twins that share the same <module>.<name> path."""
+    return [p for p in _by_role(graph, "port")
+            if p.get("kind", "").endswith("Declarator")]
+
+
 def test_s55_nonansi_port_decls_promoted(fixture_bundle):
     """Every PortDeclaration Declarator in nonansi_demo surfaces as role=port."""
     _t, _c, graph = fixture_bundle
-    ports = _by_role(graph, "port")
+    ports = _s55_body_ports(graph)
     names = {p["semantic"]["name"] for p in ports
              if p["semantic"]["path"].startswith("nonansi_demo.")}
     assert names == {"a", "b", "c", "d", "e", "f"}, (
@@ -51,7 +58,7 @@ def test_s55_nonansi_port_decls_promoted(fixture_bundle):
 def test_s55_direction_attrs(fixture_bundle):
     """Each non-ANSI port carries the correct direction attribute."""
     _t, _c, graph = fixture_bundle
-    ports = {p["semantic"]["name"]: p for p in _by_role(graph, "port")
+    ports = {p["semantic"]["name"]: p for p in _s55_body_ports(graph)
              if p["semantic"]["path"].startswith("nonansi_demo.")}
     expected = {"a": "input", "b": "output", "c": "inout",
                 "d": "input", "e": "output", "f": "output"}
@@ -63,12 +70,12 @@ def test_s55_direction_attrs(fixture_bundle):
 
 
 def test_s55_has_port_edges_from_enclosing_module(fixture_bundle):
-    """Each non-ANSI port has exactly one inbound has_port edge from the
-    enclosing nonansi_demo module."""
+    """Each non-ANSI body port has exactly one inbound has_port edge from
+    the enclosing nonansi_demo module."""
     _t, _c, graph = fixture_bundle
     mods = {m["semantic"]["name"]: m for m in _by_role(graph, "module")}
     mod_id = mods["nonansi_demo"]["id"]
-    ports = [p for p in _by_role(graph, "port")
+    ports = [p for p in _s55_body_ports(graph)
              if p["semantic"]["path"].startswith("nonansi_demo.")]
     assert len(ports) == 6
     for p in ports:
@@ -82,15 +89,16 @@ def test_s55_has_port_edges_from_enclosing_module(fixture_bundle):
         )
 
 
-def test_s55_no_duplicate_port_nodes(fixture_bundle):
-    """No two queryable port nodes share a path inside nonansi_demo —
-    guards against double-promotion with the header's ImplicitNonAnsiPort
-    references."""
+def test_s55_no_duplicate_body_port_nodes(fixture_bundle):
+    """No two S55 body-port nodes share a path inside nonansi_demo. S66
+    header twins (ImplicitNonAnsiPort kind) coexist on the same path by
+    design — the header view and the body view are separate queryable
+    nodes."""
     _t, _c, graph = fixture_bundle
-    paths = [p["semantic"]["path"] for p in _by_role(graph, "port")
+    paths = [p["semantic"]["path"] for p in _s55_body_ports(graph)
              if p["semantic"]["path"].startswith("nonansi_demo.")]
     assert len(paths) == len(set(paths)), (
-        f"duplicate port paths: {sorted(paths)}"
+        f"duplicate S55 body port paths: {sorted(paths)}"
     )
 
 

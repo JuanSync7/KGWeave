@@ -108,6 +108,27 @@ def _s65_explicit_non_ansi_port(*args, **kwargs):
 _s65_explicit_non_ansi_port.__rule_id__ = "S65"
 
 
+def _s66_implicit_non_ansi_port(*args, **kwargs):
+    """ImplicitNonAnsiPort — non-ANSI bare-name header port form.
+
+    Sibling of S1 ImplicitAnsiPort, S64 ExplicitAnsiPort, and S65
+    ExplicitNonAnsiPort. Lives inside a NonAnsiPortList under the
+    ModuleHeader; the header carries only an identifier (or a port
+    concatenation), and direction/type arrive via separate PortDeclaration
+    statements in the module body (S55). The simple form is
+    ``ImplicitNonAnsiPort(expr=PortReference(name=<ident>))`` — promoted as
+    role="port" with path ``<module>.<name>``. The PortConcatenation form
+    (``{a, b}`` as a header entry) has no single port name to key on and is
+    intentionally skipped — a future rule may promote concatenations as a
+    distinct artifact. Actual implementation lives in dispatch.promote
+    (pass-1 branch).
+    """
+    return
+
+
+_s66_implicit_non_ansi_port.__rule_id__ = "S66"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ModuleDeclaration, _s1_module_decl),
     (pyslang.SyntaxKind.ImplicitAnsiPort, _s1_port),
@@ -118,4 +139,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.PortDeclaration, _s55_port_decl),
     (pyslang.SyntaxKind.ExplicitAnsiPort, _s64_explicit_ansi_port),
     (pyslang.SyntaxKind.ExplicitNonAnsiPort, _s65_explicit_non_ansi_port),
+    (pyslang.SyntaxKind.ImplicitNonAnsiPort, _s66_implicit_non_ansi_port),
 ]

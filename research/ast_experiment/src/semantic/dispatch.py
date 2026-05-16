@@ -128,7 +128,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66"}
 
 
 def _is_active(fn) -> bool:
@@ -2254,6 +2254,39 @@ def promote(
                     elif saw_dot and tk == "Identifier" and not pname:
                         pname = ch.valueText
                         break
+                if pname:
+                    ppath = f"{mname}.{pname}"
+                    _mark(nodes_list[node_offset + idx], role="port",
+                          name=pname, path=ppath)
+                    _add_edge(graph, mod_gid, gid, "has_port")
+                    name_index[ppath] = gid
+                    port_names_by_module.setdefault(mname, set()).add(pname)
+            pushed = "in_port"
+        elif c == "ImplicitNonAnsiPortSyntax":
+            # S66 — legacy non-ANSI bare-name header port form. Lives inside
+            # a NonAnsiPortList under the ModuleHeader; the header carries
+            # only an identifier (the ``a`` in ``module m(a, b);``) and
+            # directions/types arrive via separate input/output statements
+            # in the body, owned by S55 PortDeclaration. The pyslang shape is
+            # ImplicitNonAnsiPort(expr=PortReferenceSyntax(name=<token>))
+            # for the simple form; the PortConcatenation form
+            # (``module m({a,b}, c);``) wraps a PortConcatenationSyntax
+            # instead — we intentionally skip emission for that variant
+            # (no single name to key on). Path key follows the sibling S1
+            # /S64/S65 convention (``<module>.<port_name>``). The body S55
+            # Declarator may also bind a port node at the same path with
+            # the direction attribute — both nodes coexist in
+            # queryable_nodes (header view + body view of the same logical
+            # port).
+            mod_gid, mname = _cur_module()
+            if mod_gid is not None:
+                pname = ""
+                expr = getattr(node, "expr", None)
+                if expr is not None and _cls(expr) == "PortReferenceSyntax":
+                    name_tok = getattr(expr, "name", None)
+                    if name_tok is not None and _is_token(name_tok):
+                        if _token_kind_name(name_tok) == "Identifier":
+                            pname = name_tok.valueText
                 if pname:
                     ppath = f"{mname}.{pname}"
                     _mark(nodes_list[node_offset + idx], role="port",
