@@ -13,3 +13,10 @@ endinterface
 program ext_prog ();
   initial $display("ext_prog");
 endprogram
+
+interface ext_method_if (input logic clk);
+  logic ready;
+  extern function int helper_add(int a, int b);
+  extern function void helper_log(string msg);
+  extern task helper_pulse(input logic sig);
+endinterface

@@ -138,9 +138,41 @@ def rule_s45(*args, **kwargs):
 rule_s45.__rule_id__ = "S45"
 
 
+def rule_s56(*args, **kwargs):
+    """FunctionPrototype is promoted in pass 1 of dispatch.promote — see the
+    S56 branch.  This stub registers ``SyntaxKind.FunctionPrototype`` under an
+    active ``__rule_id__`` for the Bucket-1 checklist and the
+    ``_ACTIVE_RULE_IDS`` gate in dispatch.
+
+    Promotion only fires when the FunctionPrototype is wrapped by an
+    ``ExternInterfaceMethodSyntax`` (interface-scope ``extern function|task``
+    declarations).  The other two wrapper contexts that embed
+    FunctionPrototype — ``ClassMethodPrototypeSyntax`` (owned by S26) and
+    ``DPIImportSyntax`` (owned by S44) — do not push the
+    ``extern_method_stack`` discriminator, so FunctionPrototype nodes nested
+    in them stay BLOB and the wrapper-owners remain the canonical queryable
+    nodes for those constructs (lesson 5 wrapper-dedup).
+
+    Promoted shape:
+      * role = ``function_prototype``
+      * attributes["name"]        — identifier
+      * attributes["return_type"] — text for functions, ``None`` for tasks
+      * attributes["port_count"]  — number of FunctionPortSyntax entries
+      * attributes["kind"]        — "function" | "task"
+      * attributes["is_extern"]   — True (only path that promotes today)
+      * path = ``<interface>.<name>``
+      * Edge: ``(interface) -[prototypes]-> (function_prototype_node)``
+    """
+    return
+
+
+rule_s56.__rule_id__ = "S56"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ExternModuleDecl, _s29_extern_module_decl),
     (pyslang.SyntaxKind.ProgramDeclaration, _s30_program_decl),
     (pyslang.SyntaxKind.DPIImport, rule_s44),
     (pyslang.SyntaxKind.DPIExport, rule_s45),
+    (pyslang.SyntaxKind.FunctionPrototype, rule_s56),
 ]

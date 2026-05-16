@@ -54,6 +54,7 @@ from .common.tokens import (
     _extern_decl_ports,
     _forward_typedef_name_of,
     _function_name_of,
+    _function_proto_name_and_return,
     _identifier_tokens,
     _is_token,
     _lhs_target_name,
@@ -126,7 +127,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56"}
 
 
 def _is_active(fn) -> bool:
@@ -230,6 +231,16 @@ def promote(
         # header (Variable/Net/Interface PortHeader). Entries are
         # ``{"direction": str}`` dicts.
         "port_decl_stack": [],
+        # S56: extern_method_stack tracks the enclosing
+        # ExternInterfaceMethodSyntax so that the child FunctionPrototypeSyntax
+        # branch can emit a role="function_prototype" node + ``prototypes``
+        # edge from the enclosing interface scope.  Entries are simple sentinel
+        # booleans (we only need presence, not metadata — the FunctionPrototype
+        # itself carries the name / return type / port count).  S26 owns
+        # ClassMethodPrototype and S44 owns DPIImport — neither of those
+        # contexts push this stack, so FunctionPrototype embedded inside them
+        # is not double-promoted.
+        "extern_method_stack": [],
     }
 
     def _cur_module():
@@ -1878,6 +1889,120 @@ def promote(
                     # The visitor below pushes ``in_data`` to surface child
                     # Declarators as role="net" (mirroring DataDeclaration).
                     pushed = "in_data"
+        elif c == "ExternInterfaceMethodSyntax":
+            # S56 — mark that the next FunctionPrototypeSyntax descendant is
+            # an interface-scope extern method declaration so the
+            # FunctionPrototype branch promotes it (the class-scope and
+            # DPI-scope wrappers, ClassMethodPrototype and DPIImport, are
+            # owned by S26 and S44 respectively and do NOT push this stack —
+            # FunctionPrototype nested in them is silently passed through).
+            # The stack frame carries no payload: presence is the signal.
+            # Popped on subtree exit below.
+            state["extern_method_stack"].append(True)
+        elif c == "FunctionPrototypeSyntax":
+            # S56 — promote a FunctionPrototype whose enclosing wrapper is an
+            # ExternInterfaceMethod (i.e. ``extern function|task <name>(...);``
+            # inside an interface body).  Other wrapper contexts
+            # (ClassMethodPrototype → S26, DPIImport → S44) do not push
+            # ``extern_method_stack`` so this branch is silently inert there;
+            # this satisfies lesson 5 (no double-promotion with the owners of
+            # the wrapping SyntaxKind).
+            #
+            # Attributes:
+            #   name         — identifier extracted structurally from the name
+            #                  child (IdentifierName / KeywordName / ScopedName).
+            #   return_type  — for ``function``: return-type text via the same
+            #                  structural walk that S26 uses
+            #                  (_function_proto_name_and_return).  For
+            #                  ``task``: None (tasks have no return type).
+            #   port_count   — number of FunctionPortSyntax entries in the
+            #                  FunctionPortList; 0 when the port list is empty
+            #                  or absent.
+            #   kind         — "function" or "task", discriminated by the
+            #                  leading FunctionKeyword / TaskKeyword token.
+            #   is_extern    — True for the ExternInterfaceMethod path (the
+            #                  only path that reaches this branch today).
+            # The path key is ``<interface>.<name>``; the edge type is
+            # ``prototypes`` from the enclosing module_stack top (interface).
+            if state["extern_method_stack"]:
+                mod_gid, mname = _cur_module()
+                if mod_gid is not None:
+                    # Discriminate function vs task by the first keyword token.
+                    proto_kind = "function"
+                    for ch in node:
+                        if ch is None or not _is_token(ch):
+                            continue
+                        tk = _token_kind_name(ch)
+                        if tk == "FunctionKeyword":
+                            proto_kind = "function"
+                            break
+                        if tk == "TaskKeyword":
+                            proto_kind = "task"
+                            break
+                    if proto_kind == "function":
+                        fp_name, fp_rt = _function_proto_name_and_return(node)
+                    else:
+                        # Tasks: walk past the TaskKeyword, the next non-token
+                        # non-empty-SyntaxList child is the name (no return
+                        # type for tasks).
+                        fp_name = ""
+                        fp_rt = None
+                        saw_kw = False
+                        for ch in node:
+                            if ch is None:
+                                continue
+                            if _is_token(ch):
+                                if _token_kind_name(ch) == "TaskKeyword":
+                                    saw_kw = True
+                                continue
+                            if not saw_kw:
+                                continue
+                            cn = _cls(ch)
+                            if cn == "SyntaxNode":
+                                try:
+                                    kids = list(ch)
+                                except TypeError:
+                                    kids = []
+                                if not kids:
+                                    continue
+                            if cn == "FunctionPortListSyntax":
+                                break
+                            toks = _identifier_tokens(ch)
+                            if toks:
+                                fp_name = toks[0].valueText
+                                break
+                    # Port count: count FunctionPortSyntax under the
+                    # FunctionPortList child.
+                    port_count = 0
+                    for ch in node:
+                        if ch is None or _is_token(ch):
+                            continue
+                        if _cls(ch) == "FunctionPortListSyntax":
+                            for sub in ch:
+                                if sub is None or _is_token(sub):
+                                    continue
+                                if _cls(sub) == "SyntaxNode":
+                                    for gc in sub:
+                                        if (gc is not None
+                                                and not _is_token(gc)
+                                                and _cls(gc) == "FunctionPortSyntax"):
+                                            port_count += 1
+                                elif _cls(sub) == "FunctionPortSyntax":
+                                    port_count += 1
+                            break
+                    if fp_name:
+                        fp_path = f"{mname}.{fp_name}"
+                        _mark(nodes_list[node_offset + idx],
+                              role="function_prototype",
+                              name=fp_name, path=fp_path,
+                              attributes={
+                                  "return_type": fp_rt,
+                                  "port_count": port_count,
+                                  "is_extern": True,
+                                  "kind": proto_kind,
+                              })
+                        _add_edge(graph, mod_gid, gid, "prototypes")
+                        name_index[fp_path] = gid
         elif c == "PortDeclarationSyntax":
             # S55 — promote non-ANSI port body declarations
             # (``module m(a,b); input a; output [7:0] b; ...``). Distinct from
@@ -2060,6 +2185,12 @@ def promote(
         # branch above so the frame is scoped to this declaration's subtree.
         if c == "PortDeclarationSyntax" and state["port_decl_stack"]:
             state["port_decl_stack"].pop()
+        # S56: pop extern_method_stack frame pushed by the
+        # ExternInterfaceMethodSyntax branch so the marker is scoped to its
+        # own subtree (the FunctionPrototype child is visited *before* this
+        # pop runs because the recursion above already returned).
+        if c == "ExternInterfaceMethodSyntax" and state["extern_method_stack"]:
+            state["extern_method_stack"].pop()
         if popped_module:
             state["module_stack"].pop()
 

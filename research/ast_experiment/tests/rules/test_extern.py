@@ -425,3 +425,105 @@ def test_s45_roundtrip(fifo_graph):
     assert reconstructed == text, (
         f"round-trip mismatch on fifo.sv after S45 corpus addition"
     )
+
+
+# ---------------------------------------------------------------------------
+# S56 — FunctionPrototype promotion (interface-scope extern method bodies).
+#
+# pyslang surfaces ``extern function ...;`` and ``extern task ...;`` inside an
+# interface as ``ExternInterfaceMethodSyntax`` wrapping ``FunctionPrototypeSyntax``.
+# S26 (ClassMethodPrototype) and S44 (DPIImport) already own the class/DPI
+# wrapper contexts; ExternInterfaceMethod was previously unowned, so S56
+# promotes FunctionPrototype only when its enclosing wrapper is an
+# ExternInterfaceMethod (the remaining standalone-feasible site).  Path key
+# ``<interface>.<name>``; attrs ``{name, return_type, port_count, is_extern}``.
+
+
+def test_s56_function_prototype_promoted(ext_graph):
+    """Each interface-scope ``extern function|task`` surfaces as a node with
+    role=function_prototype."""
+    protos = _by_role(ext_graph, "function_prototype")
+    names = sorted(p["semantic"]["name"] for p in protos)
+    assert names == ["helper_add", "helper_log", "helper_pulse"], names
+
+
+def test_s56_function_prototype_attributes(ext_graph):
+    """The ``return_type``, ``port_count``, ``is_extern`` and ``kind``
+    attributes are extracted structurally from the FunctionPrototype child."""
+    protos = {p["semantic"]["name"]: p
+              for p in _by_role(ext_graph, "function_prototype")}
+    add = protos["helper_add"]
+    assert add["semantic"]["attributes"]["return_type"] == "int"
+    assert add["semantic"]["attributes"]["port_count"] == 2
+    assert add["semantic"]["attributes"]["is_extern"] is True
+    assert add["semantic"]["attributes"]["kind"] == "function"
+    log = protos["helper_log"]
+    assert log["semantic"]["attributes"]["return_type"] == "void"
+    assert log["semantic"]["attributes"]["port_count"] == 1
+    assert log["semantic"]["attributes"]["kind"] == "function"
+    pulse = protos["helper_pulse"]
+    # task: no return type
+    assert pulse["semantic"]["attributes"]["return_type"] is None
+    assert pulse["semantic"]["attributes"]["port_count"] == 1
+    assert pulse["semantic"]["attributes"]["kind"] == "task"
+
+
+def test_s56_has_prototype_edge_from_interface(ext_graph):
+    """Each promoted prototype has a ``prototypes`` edge from the enclosing
+    interface scope."""
+    interfaces = {n["semantic"]["name"]: n
+                  for n in _by_role(ext_graph, "interface")}
+    assert "ext_method_if" in interfaces
+    if_id = interfaces["ext_method_if"]["id"]
+    protos = _by_role(ext_graph, "function_prototype")
+    proto_ids = {p["id"] for p in protos}
+    edges = [e for e in ext_graph["edges"]
+             if e["type"] == "prototypes"
+             and e["src"] == if_id
+             and e["dst"] in proto_ids]
+    assert len(edges) == 3, f"expected 3 prototypes edges, got {len(edges)}"
+
+
+def test_s56_path_key_under_interface(ext_graph):
+    """Path key is ``<interface>.<name>`` so callers can resolve it the same
+    way they resolve interface methods / signals."""
+    protos = {p["semantic"]["name"]: p
+              for p in _by_role(ext_graph, "function_prototype")}
+    assert protos["helper_add"]["semantic"]["path"] == "ext_method_if.helper_add"
+    assert protos["helper_log"]["semantic"]["path"] == "ext_method_if.helper_log"
+    assert protos["helper_pulse"]["semantic"]["path"] == "ext_method_if.helper_pulse"
+
+
+def test_s56_no_double_count_with_s26(ext_graph):
+    """S26 owns class method prototypes; S56 must NOT promote a
+    FunctionPrototype nested inside a ClassMethodPrototype.  No
+    function_prototype node should carry a class-scoped path or duplicate any
+    method_prototype node from S26."""
+    fps = _by_role(ext_graph, "function_prototype")
+    # All function_prototype paths begin with the extern_corpus interface name.
+    for p in fps:
+        assert p["semantic"]["path"].startswith("ext_method_if."), (
+            f"S56 leaked outside ExternInterfaceMethod context: {p['semantic']}"
+        )
+
+
+def test_s56_no_double_count_with_s44(fifo_graph):
+    """fifo.sv contains DPI imports (owned by S44).  These embed
+    FunctionPrototype as a child — S56 must not promote them as
+    function_prototype nodes."""
+    fps = [n for n in fifo_graph["nodes"]
+           if n.get("semantic", {}).get("role") == "function_prototype"]
+    assert fps == [], (
+        f"S56 must skip DPIImport-embedded FunctionPrototype; got {fps}"
+    )
+
+
+def test_s56_roundtrip():
+    """Byte-equal round-trip on extern_corpus.sv after S56 additions."""
+    from research.ast_experiment.src.unlift import emit
+    from research.ast_experiment.src.lift import lift
+    text = EXT.read_text()
+    tree = pyslang.SyntaxTree.fromText(text)
+    graph_fresh = lift(tree)
+    reconstructed = emit(graph_fresh)
+    assert reconstructed == text, "round-trip mismatch on extern_corpus.sv"
