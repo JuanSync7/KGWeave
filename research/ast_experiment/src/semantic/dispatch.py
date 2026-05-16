@@ -155,7 +155,7 @@ def _deferred_mode_of(node):
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72", "S73", "S74", "S75", "S76"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72", "S73", "S74", "S75", "S76", "S77"}
 
 
 def _is_active(fn) -> bool:
@@ -2646,6 +2646,7 @@ def promote(
                                             port_count += 1
                                 except TypeError:
                                     pass
+                push_sva_frame_let: tuple | None = None
                 if let_name:
                     lpath = f"{mname}.{let_name}"
                     _mark(nodes_list[node_offset + idx], role="let_decl",
@@ -2653,6 +2654,21 @@ def promote(
                           attributes={"port_count": port_count})
                     _add_edge(graph, mod_gid, gid, "has_let")
                     name_index[lpath] = gid
+                    # S77: expose this let as the enclosing scope for any
+                    # AssertionItemPort children. Frame is popped on subtree
+                    # exit below. Pattern mirrors PropertyDeclaration /
+                    # SequenceDeclaration push above.
+                    push_sva_frame_let = (gid, lpath)
+                if push_sva_frame_let is not None:
+                    state["sva_decl_stack"].append(push_sva_frame_let)
+                else:
+                    # Symmetric sentinel push so the pop-on-exit below is
+                    # always balanced regardless of name extraction success.
+                    state["sva_decl_stack"].append((None, ""))
+            else:
+                # Even when mod_gid is None we still need a sentinel push so
+                # the LetDeclaration pop on exit stays balanced.
+                state["sva_decl_stack"].append((None, ""))
         elif c == "DefParamAssignmentSyntax":
             # S43 — ``defparam <inst>.<param> = <expr>;`` legacy override.
             # Edge-only (lesson 4): emit ``defparam_override`` from the
@@ -3071,6 +3087,99 @@ def promote(
                     # ``sub.a``) and the cross-file index keys on bare
                     # path. Traversal via has_function_port edges is the
                     # supported query path.
+        elif c == "AssertionItemPortSyntax":
+            # S77 — promote one entry of the port-formal list of a
+            # parameterised ``property`` / ``sequence`` / ``let`` as
+            # role="assertion_item_port".  Parent is the enclosing
+            # property / sequence / let scope on ``sva_decl_stack``
+            # (pushed by the PropertyDeclaration / SequenceDeclaration /
+            # LetDeclaration branches above).
+            #
+            # Layout (verified via SyntaxTree probe — pyslang exposes
+            # data descriptors directly on AssertionItemPortSyntax):
+            #
+            #   .local         -- LocalKeyword token (empty when absent)
+            #   .direction     -- Input/Output/InOut/Ref token (empty when
+            #                     absent — many properties omit direction)
+            #   .type          -- a SyntaxNode describing the data type
+            #   .name          -- Identifier token carrying the port name
+            #   .defaultValue  -- optional EqualsValueClause-style child
+            #                     ("= <expr>") or None
+            #
+            # Direction is captured via the token's ``valueText`` (no regex
+            # on source); ``local`` collapses to a boolean. ``has_default``
+            # is the boolean presence of ``defaultValue``. The default
+            # expression body itself stays in the BLOB stream (graph-as-
+            # index, blob-as-detail).
+            if state["sva_decl_stack"]:
+                parent_gid, parent_path = state["sva_decl_stack"][-1]
+            else:
+                parent_gid, parent_path = None, ""
+            if parent_gid is not None:
+                # Direction token (Unknown / empty when absent).
+                direction = ""
+                try:
+                    dir_tok = node.direction
+                    if dir_tok is not None:
+                        dv = dir_tok.valueText
+                        if dv:
+                            direction = dv
+                except Exception:
+                    direction = ""
+                # Local qualifier — token is always present but valueText
+                # is empty (kind == TokenKind.Unknown) when the source did
+                # not write ``local``. Lift to a clean boolean.
+                is_local = False
+                try:
+                    loc_tok = node.local
+                    if loc_tok is not None and loc_tok.valueText == "local":
+                        is_local = True
+                except Exception:
+                    is_local = False
+                # Data type via the structural helper (handles dims/signing).
+                dt_text = ""
+                try:
+                    type_node = node.type
+                    if type_node is not None:
+                        dt_text = _type_text_of(type_node).strip()
+                except Exception:
+                    dt_text = ""
+                # Port name — pyslang surfaces ``.name`` directly as a
+                # Token (not wrapped in a Declarator).
+                port_name = ""
+                try:
+                    name_tok = node.name
+                    if name_tok is not None:
+                        port_name = name_tok.valueText
+                except Exception:
+                    port_name = ""
+                # Default value presence.
+                has_default = False
+                try:
+                    dv_node = node.defaultValue
+                    if dv_node is not None:
+                        has_default = True
+                except Exception:
+                    has_default = False
+                if port_name:
+                    aip_path = f"{parent_path}.{port_name}"
+                    _mark(nodes_list[node_offset + idx],
+                          role="assertion_item_port",
+                          name=port_name, path=aip_path,
+                          attributes={
+                              "direction": direction,
+                              "data_type": dt_text,
+                              "name": port_name,
+                              "local": is_local,
+                              "has_default": has_default,
+                          })
+                    _add_edge(graph, parent_gid, gid,
+                              "has_assertion_item_port")
+                    # Intentionally NOT registered in name_index — port
+                    # names collide across properties / sequences / lets
+                    # (``p1.x`` vs ``p2.x``); traversal via the
+                    # has_assertion_item_port edge is the supported query
+                    # path.
         elif c == "PortDeclarationSyntax":
             # S55 — promote non-ANSI port body declarations
             # (``module m(a,b); input a; output [7:0] b; ...``). Distinct from
@@ -3263,7 +3372,11 @@ def promote(
         # Sequence declaration branches so that LocalVariableDeclaration
         # children of these constructs resolve their parent against the
         # correct enclosing scope and sibling subtrees do not leak.
-        if (c in ("PropertyDeclarationSyntax", "SequenceDeclarationSyntax")
+        # S77 extends this to LetDeclarationSyntax so that AssertionItemPort
+        # children of a parameterised let also resolve their parent against
+        # the let's path.
+        if (c in ("PropertyDeclarationSyntax", "SequenceDeclarationSyntax",
+                  "LetDeclarationSyntax")
                 and state["sva_decl_stack"]):
             state["sva_decl_stack"].pop()
         # S58: pop struct_union_stack frame pushed by the TypedefDeclaration

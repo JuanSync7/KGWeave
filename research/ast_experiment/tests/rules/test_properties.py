@@ -42,10 +42,18 @@ def test_s14_property_node_promoted(bind_graph):
     """The property declaration is promoted with role=property, correct name,
     and hierarchical path ``<module>.<property_name>``."""
     props = _by_role(bind_graph, "property")
-    assert len(props) == 1, f"expected exactly one promoted property, got {len(props)}"
-    p = props[0]
-    assert p["semantic"]["name"] == "p_push_implies_not_full"
-    assert p["semantic"]["path"] == "fifo_asserts.p_push_implies_not_full"
+    # S77 added two parameterised properties (``p_with_ports``,
+    # ``p_dir_ports``) to the same corpus module, so this scope now
+    # carries three promoted properties.
+    assert len(props) == 3, f"expected three promoted properties, got {len(props)}"
+    names = {p["semantic"]["name"] for p in props}
+    paths = {p["semantic"]["path"] for p in props}
+    assert "p_push_implies_not_full" in names
+    assert "fifo_asserts.p_push_implies_not_full" in paths
+    assert "p_with_ports" in names
+    assert "fifo_asserts.p_with_ports" in paths
+    assert "p_dir_ports" in names
+    assert "fifo_asserts.p_dir_ports" in paths
 
 
 def test_s14_has_property_edge(bind_graph):
@@ -53,7 +61,8 @@ def test_s14_has_property_edge(bind_graph):
     promoted property node."""
     props = _by_role(bind_graph, "property")
     assert props
-    prop_id = props[0]["id"]
+    prop_id = next(p["id"] for p in props
+                   if p["semantic"]["name"] == "p_push_implies_not_full")
     modules = _by_role(bind_graph, "module")
     parent = next((m for m in modules if m["semantic"]["name"] == "fifo_asserts"), None)
     assert parent is not None, "fifo_asserts module not promoted"
@@ -80,10 +89,14 @@ def test_s15_sequence_node_promoted(bind_graph):
     """The sequence declaration is promoted with role=sequence, correct name,
     and hierarchical path ``<module>.<sequence_name>``."""
     seqs = _by_role(bind_graph, "sequence")
-    assert len(seqs) == 1, f"expected exactly one promoted sequence, got {len(seqs)}"
-    s = seqs[0]
-    assert s["semantic"]["name"] == "s_push_then_full"
-    assert s["semantic"]["path"] == "fifo_asserts.s_push_then_full"
+    # S77 added a parameterised ``s_with_ports`` to the same corpus module.
+    assert len(seqs) == 2, f"expected two promoted sequences, got {len(seqs)}"
+    names = {s["semantic"]["name"] for s in seqs}
+    paths = {s["semantic"]["path"] for s in seqs}
+    assert "s_push_then_full" in names
+    assert "fifo_asserts.s_push_then_full" in paths
+    assert "s_with_ports" in names
+    assert "fifo_asserts.s_with_ports" in paths
 
 
 def test_s15_has_sequence_edge(bind_graph):
@@ -91,7 +104,8 @@ def test_s15_has_sequence_edge(bind_graph):
     sequence node."""
     seqs = _by_role(bind_graph, "sequence")
     assert seqs
-    seq_id = seqs[0]["id"]
+    seq_id = next(s["id"] for s in seqs
+                  if s["semantic"]["name"] == "s_push_then_full")
     modules = _by_role(bind_graph, "module")
     parent = next((m for m in modules if m["semantic"]["name"] == "fifo_asserts"), None)
     assert parent is not None, "fifo_asserts module not promoted"

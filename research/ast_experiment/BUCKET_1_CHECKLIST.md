@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 136 | 50 | 123 | 0 | 13 |
+| PROMOTE | 136 | 50 | 124 | 0 | 12 |
 | CONTAINER | 87 | 22 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -29,7 +29,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `AlwaysLatchBlock` | ⬜ | ✅ | S35 |
 | `AnonymousProgram` | ⬜ | ✅ | S49 |
 | `AssertPropertyStatement` | ⬜ | ✅ | S16 |
-| `AssertionItemPort` | ⬜ | ⬜ | future |
+| `AssertionItemPort` | ⬜ | ✅ | S77 |
 | `AssertionItemPortList` | ⬜ | ⬜ | future |
 | `AssumePropertyStatement` | ⬜ | ✅ | S16 |
 | `BindDirective` | ✅ | ✅ | S13 |

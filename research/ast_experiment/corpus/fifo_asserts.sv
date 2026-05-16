@@ -33,6 +33,29 @@ module fifo_asserts(
         @(posedge clk) push ##[1:2] full;
     endsequence
 
+    // S77 — AssertionItemPort: ports declared on a parameterised property /
+    // sequence / let. Each ``input bit clk`` / ``logic sig`` / ``int n``
+    // entry parses as an AssertionItemPortSyntax inside the
+    // AssertionItemPortListSyntax wrapper. S77 promotes each to role=
+    // assertion_item_port with direction/data_type/local/name attrs and a
+    // ``has_assertion_item_port`` edge from the enclosing property /
+    // sequence / let.
+    property p_with_ports(logic sig, int n);
+        @(posedge clk) sig |-> ##n !sig;
+    endproperty
+
+    sequence s_with_ports(logic a, logic b);
+        @(posedge clk) a ##1 b;
+    endsequence
+
+    // S77 — port with explicit ``local input`` direction qualifier. Per
+    // LRM 16.8, only ``local`` and (for properties) ``input``-style
+    // directions are accepted on assertion item ports; ``let`` ports do
+    // not allow a direction keyword.
+    property p_dir_ports(local input logic sig, logic gate);
+        @(posedge clk) gate |-> sig;
+    endproperty
+
     // S18 — clocking blocks. ``cb_fifo`` is an ordinary clocking block;
     // ``cb_default`` exercises the ``default clocking`` form. Clocking items
     // (input/output direction declarations) stay BLOB — only the
@@ -161,6 +184,11 @@ module let_decl_demo (
     let nonzero(x) = x != 0;
     let in_range(a, b) = a < b;
     let always_true() = 1;
+    // S77 — let with a default-valued AssertionItemPort. ``let`` ports do
+    // not accept a direction keyword (LRM forbids it); the directional
+    // case is covered via the parameterised sequence ``s_dir_ports`` in
+    // module ``fifo_asserts`` above.
+    let bounded(int x, int hi = 8) = x < hi;
 endmodule
 
 bind fifo fifo_asserts u_asserts(.clk(clk), .full(full), .push(push));

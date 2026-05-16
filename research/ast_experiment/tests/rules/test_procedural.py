@@ -337,8 +337,9 @@ def test_s42_has_let_edge_from_module(bind_graph):
     edges = [e for e in bind_graph["edges"]
              if e["type"] == "has_let"
              and e["src"] == parent["id"]]
-    assert len(edges) == 3, (
-        f"expected 3 has_let edges from let_decl_demo, got {len(edges)}"
+    # S77 added a fourth parameterised let ``bounded`` to the same module.
+    assert len(edges) == 4, (
+        f"expected 4 has_let edges from let_decl_demo, got {len(edges)}"
     )
 
 

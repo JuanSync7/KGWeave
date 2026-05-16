@@ -33,9 +33,17 @@ from the enclosing scope. Identifier tokens in the disable expression get
 ``reads`` edges so signal dependencies are queryable. Promotion lives in
 pass 1 of ``dispatch.promote`` where ``module_stack`` is maintained.
 
+S77 promotes ``AssertionItemPort`` — one entry in the formal port list
+of a parameterised ``property`` / ``sequence`` / ``let``. Each port
+surfaces as ``role="assertion_item_port"`` with direction / data_type /
+local / has_default / name attributes and a
+``has_assertion_item_port`` edge from the enclosing property /
+sequence / let scope (top of ``sva_decl_stack``, extended in S77 to
+also push for ``LetDeclaration``). Promotion lives in pass 1 of
+``dispatch.promote``.
+
 Planned future S-rule owners under this module (still stubs):
 
-* AssertionItemPort
 * AssertionItemPortList
 """
 
@@ -139,6 +147,14 @@ def _s72_deferred_assertion(*args, **kwargs):
 _s72_deferred_assertion.__rule_id__ = "S72"
 
 
+def _s77_assertion_item_port(*args, **kwargs):
+    """AssertionItemPort is promoted in pass 1 of dispatch.promote."""
+    return
+
+
+_s77_assertion_item_port.__rule_id__ = "S77"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.AssertPropertyStatement, _s16_assertion),
     (pyslang.SyntaxKind.AssumePropertyStatement, _s16_assertion),
@@ -158,4 +174,7 @@ RULES: list[tuple] = [
     # Wrapper itself stays CONTAINER; runtime augmentation of the inner
     # ImmediateAssert* node happens in the S17 dispatch branch.
     (pyslang.SyntaxKind.DeferredAssertion, _s72_deferred_assertion),
+    # S77: AssertionItemPort — port-formal of property/sequence/let.
+    # Runtime promotion lives in pass 1 of dispatch.promote.
+    (pyslang.SyntaxKind.AssertionItemPort, _s77_assertion_item_port),
 ]
