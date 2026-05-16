@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 136 | 50 | 116 | 0 | 20 |
+| PROMOTE | 136 | 50 | 117 | 0 | 19 |
 | CONTAINER | 87 | 22 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -47,7 +47,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ClassSpecifier` | ⬜ | ⬜ | future |
 | `ClockingDeclaration` | ✅ | ✅ | S18 |
 | `ClockingItem` | ✅ | ✅ | S59 |
-| `ConcurrentAssertionMember` | ✅ | ⬜ | future |
+| `ConcurrentAssertionMember` | ✅ | ✅ | S70 |
 | `ConstraintBlock` | ⬜ | ✅ | S52 |
 | `ConstraintDeclaration` | ⬜ | ✅ | S27 |
 | `ConstraintPrototype` | ⬜ | ✅ | S27 |

@@ -66,6 +66,25 @@ def rule_s39(*args, **kwargs):
 rule_s39.__rule_id__ = "S39"
 
 
+def _s70_concurrent_assertion_member(*args, **kwargs):
+    """Wrapper-only ownership marker per CLAUDE.md lesson 5.
+
+    ``ConcurrentAssertionMember`` is the module-scope grammar wrapper
+    around a ``ConcurrentAssertionStatement`` (the inner kind, registered
+    by S16). Per lesson 5, registering both wrapper and inner would
+    double-promote at module scope. We therefore leave the wrapper as
+    CONTAINER at runtime (this stub is never invoked from dispatch) and
+    use the stub only so ``build_bucket1_checklist.py`` can attribute the
+    SyntaxKind to S70 via ``__rule_id__`` introspection. Runtime
+    promotion fires via the inner statement kind (S16). No dispatch
+    branch.
+    """
+    return
+
+
+_s70_concurrent_assertion_member.__rule_id__ = "S70"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.AssertPropertyStatement, _s16_assertion),
     (pyslang.SyntaxKind.AssumePropertyStatement, _s16_assertion),
@@ -77,4 +96,6 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.ImmediateAssumeStatement, _s17_assertion),
     (pyslang.SyntaxKind.ImmediateCoverStatement, _s17_assertion),
     (pyslang.SyntaxKind.DefaultDisableDeclaration, rule_s39),
+    # S70: wrapper-only ownership stub (no dispatch branch — see lesson 5).
+    (pyslang.SyntaxKind.ConcurrentAssertionMember, _s70_concurrent_assertion_member),
 ]
