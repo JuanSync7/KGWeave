@@ -424,6 +424,49 @@ def _s82_class_specifier(*args, **kwargs):
 _s82_class_specifier.__rule_id__ = "S82"
 
 
+def _s83_constructor_name(*args, **kwargs):
+    """S83 — ConstructorName promotion ownership marker.
+
+    ``SyntaxKind.ConstructorName`` is the ``new`` keyword in name-position.
+    pyslang reuses ``KeywordNameSyntax`` for it (a shared class — lesson 1
+    of ``CLAUDE.md`` says key on ``.kind`` for dispatch, not on the class
+    name; we side-step that here because we register no runtime branch).
+
+    Probing ``corpus/cls_corpus.sv`` (which already contains two
+    ``function new(); ... endfunction`` constructors plus an ``x = new();``
+    expression in ``s52_inline_top``) shows ConstructorName arising in two
+    parent contexts:
+
+    1. As the name child of a ``FunctionPrototypeSyntax`` inside a
+       ``ClassMethodDeclarationSyntax`` (class constructor declaration).
+    2. As the callee inside a ``NewClassExpressionSyntax`` (constructor
+       invocation, ``= new()`` or ``= new``).
+
+    In both placements the node carries no information beyond "this is the
+    ``new`` keyword in name-position". Runtime semantics are **already**
+    captured:
+
+    * S26 (``ClassMethodDeclaration`` branch in ``dispatch.promote``)
+      calls ``common.tokens._is_constructor`` on the inner prototype and
+      promotes the class method with ``kind="new"`` — i.e. the
+      ConstructorName has been attribute-lifted onto the surrounding
+      class-method node.
+    * The expression-layer ``NewClassExpression`` handling absorbs the
+      constructor-call form; the inner ConstructorName is a literal
+      keyword wrapper, not a queryable entity.
+
+    Per lesson 4 (attribute/edge-only kinds), this is the same pattern as
+    S60 / S63 / S79 / S82: we register an **ownership-only stub** so the
+    Bucket-1 checklist marks ``ConstructorName`` as ``Sem ✅`` (owner
+    S83) without adding a dispatch branch (which would double-promote
+    the constructor relative to S26's existing attribute lift).
+    """
+    return
+
+
+_s83_constructor_name.__rule_id__ = "S83"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.PackageDeclaration, _s9a_package),
     (pyslang.SyntaxKind.TypedefDeclaration, _s9b_typedef),
@@ -441,4 +484,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.VirtualInterfaceType, _s60_virtual_interface_type),
     (pyslang.SyntaxKind.ForwardTypeRestriction, _s63_forward_type_restriction),
     (pyslang.SyntaxKind.ClassSpecifier, _s82_class_specifier),
+    (pyslang.SyntaxKind.ConstructorName, _s83_constructor_name),
 ]

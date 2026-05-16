@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 136 | 50 | 129 | 0 | 7 |
+| PROMOTE | 136 | 50 | 130 | 0 | 6 |
 | CONTAINER | 87 | 22 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -51,7 +51,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ConstraintBlock` | ⬜ | ✅ | S52 |
 | `ConstraintDeclaration` | ⬜ | ✅ | S27 |
 | `ConstraintPrototype` | ⬜ | ✅ | S27 |
-| `ConstructorName` | ⬜ | ⬜ | future |
+| `ConstructorName` | ⬜ | ✅ | S83 |
 | `ContinuousAssign` | ✅ | ✅ | S2 |
 | `CoverCross` | ✅ | ✅ | S23 |
 | `CoverPropertyStatement` | ⬜ | ✅ | S16 |
