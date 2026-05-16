@@ -232,6 +232,48 @@ def _s85_interface_header(*args, **kwargs):
 _s85_interface_header.__rule_id__ = "S85"
 
 
+def _s86_interface_port_header(*args, **kwargs):
+    """S86 — InterfacePortHeader attribute-augmentation onto the S1 port node.
+
+    ``SyntaxKind.InterfacePortHeader`` is the header form on an ANSI port
+    declaration that uses an interface type as the port's data type, e.g.
+    ``module m(bus_if.master b);`` — here ``bus_if.master`` is the
+    InterfacePortHeader (interface name + optional modport). pyslang shapes
+    it as ``InterfacePortHeaderSyntax(nameOrKeyword=<Identifier|InterfaceKeyword>,
+    modport=DotMemberClauseSyntax|None)``; the bare ``interface c`` form is
+    parsed as ``nameOrKeyword=InterfaceKeyword, modport=None``. When the
+    interface name is referenced without a modport (``module m(bus_if c);``),
+    pyslang routes the header through ``VariablePortHeaderSyntax`` with a
+    NamedType child rather than InterfacePortHeader — the latter only
+    appears when there is a modport dot-clause OR the literal ``interface``
+    keyword.
+
+    Per ``CLAUDE.md`` lesson 5 flavour (attribute-augmentation rather than a
+    new top-level dispatch branch), S86 is implemented inline in S1's
+    ``ImplicitAnsiPortSyntax`` dispatch branch: when the port's header is
+    InterfacePortHeader the port is promoted with ``role="interface_port"``
+    (instead of the default ``role="port"``), and two attributes are lifted
+    onto the port semantic node:
+
+    * ``interface_type`` — the interface identifier (``"bus_if"``) or the
+      literal ``"interface"`` keyword text for the keyword form.
+    * ``modport`` — the modport identifier (``"master"``) when a
+      DotMemberClause is present; omitted from ``attributes`` when absent.
+
+    The port name still comes from the sibling DeclaratorSyntax (same as S1).
+    Path and ``has_port`` edge are unchanged from S1, so downstream queries
+    that traverse ``has_port`` continue to find these ports; queries that
+    filter on ``role`` get a distinct ``interface_port`` bucket. Actual
+    implementation lives in dispatch.promote (pass-1 ImplicitAnsiPort
+    branch). The metadata stub below exists so the registry records the
+    rule_id under ``SyntaxKind.InterfacePortHeader``.
+    """
+    return
+
+
+_s86_interface_port_header.__rule_id__ = "S86"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ModuleDeclaration, _s1_module_decl),
     (pyslang.SyntaxKind.ImplicitAnsiPort, _s1_port),
@@ -246,4 +288,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.PortReference, _s67_port_reference),
     (pyslang.SyntaxKind.PortConcatenation, _s68_port_concatenation),
     (pyslang.SyntaxKind.InterfaceHeader, _s85_interface_header),
+    (pyslang.SyntaxKind.InterfacePortHeader, _s86_interface_port_header),
 ]

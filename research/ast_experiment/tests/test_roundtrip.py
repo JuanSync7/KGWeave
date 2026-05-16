@@ -27,6 +27,7 @@ BIND = HERE / "corpus" / "fifo_asserts.sv"
 CLS = HERE / "corpus" / "cls_corpus.sv"
 CHK = HERE / "corpus" / "checker_corpus.sv"
 EXT = HERE / "corpus" / "extern_corpus.sv"
+IFACE_PORT = HERE / "corpus" / "iface_port_corpus.sv"
 COVERED = HERE / "covered_classes.json"
 
 
@@ -681,3 +682,31 @@ def test_iter046_extern_module_decl(ext_tree):
     reparsed, _ = _roundtrip(ext_tree)
     _assert_class_roundtrip(ext_tree.root, reparsed.root, "ExternModuleDeclSyntax")
     _mark_covered({"ExternModuleDeclSyntax"})
+
+
+@pytest.fixture(scope="module")
+def iface_port_tree():
+    return pyslang.SyntaxTree.fromText(IFACE_PORT.read_text())
+
+
+def test_iface_port_parse_baseline(iface_port_tree):
+    """Sanity: pyslang parses iface_port_corpus.sv with no diagnostics."""
+    diags = list(iface_port_tree.diagnostics)
+    assert not diags, f"iface_port_corpus.sv parse diagnostics: {diags}"
+
+
+def test_iface_port_full_token_text_stream(iface_port_tree):
+    """Round-trip on iface_port_corpus.sv: token text stream is byte-equal."""
+    reparsed, _ = _roundtrip(iface_port_tree)
+    assert _token_text_stream(reparsed.root) == _token_text_stream(iface_port_tree.root)
+
+
+def test_iter104_interface_port_header(iface_port_tree):
+    """iter-104 (S86): InterfacePortHeaderSyntax round-trips byte-equal for
+    iface_port_corpus.sv. Exercises both the identifier-name + modport
+    variant (``fifo_if.dut a``) and the bare ``interface`` keyword variant
+    (``interface c``)."""
+    reparsed, _ = _roundtrip(iface_port_tree)
+    _assert_class_roundtrip(
+        iface_port_tree.root, reparsed.root, "InterfacePortHeaderSyntax")
+    _mark_covered({"InterfacePortHeaderSyntax"})

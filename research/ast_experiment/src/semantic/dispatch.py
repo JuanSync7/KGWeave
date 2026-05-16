@@ -157,7 +157,7 @@ def _deferred_mode_of(node):
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72", "S73", "S74", "S75", "S76", "S77", "S78", "S79", "S80", "S81", "S82", "S83", "S84", "S85"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72", "S73", "S74", "S75", "S76", "S77", "S78", "S79", "S80", "S81", "S82", "S83", "S84", "S85", "S86"}
 
 
 def _is_active(fn) -> bool:
@@ -2371,7 +2371,49 @@ def promote(
                 if ids:
                     pname = ids[0].valueText
                     ppath = f"{mname}.{pname}"
-                    _mark(nodes_list[node_offset + idx], role="port", name=pname, path=ppath)
+                    # S86 — InterfacePortHeader attribute-augmentation.
+                    # If this ImplicitAnsiPort's header is an
+                    # InterfacePortHeaderSyntax (``bus_if.master b`` /
+                    # ``interface c``), promote with role="interface_port"
+                    # and lift ``interface_type`` (interface name or the
+                    # literal ``"interface"`` keyword) and the optional
+                    # ``modport`` attribute. Otherwise keep the existing
+                    # S1 role="port" promotion unchanged.
+                    iph = next(
+                        (ch for ch in node
+                         if _cls(ch) == "InterfacePortHeaderSyntax"),
+                        None,
+                    )
+                    if iph is not None:
+                        iface_type = ""
+                        modport_name = ""
+                        for sub in iph:
+                            if sub is None:
+                                continue
+                            if _is_token(sub):
+                                tk = _token_kind_name(sub)
+                                if tk == "Identifier" and not iface_type:
+                                    iface_type = sub.valueText
+                                elif tk == "InterfaceKeyword" and not iface_type:
+                                    iface_type = sub.valueText
+                            elif _cls(sub) == "DotMemberClauseSyntax":
+                                for mp in sub:
+                                    if (mp is not None and _is_token(mp)
+                                            and _token_kind_name(mp)
+                                            == "Identifier"):
+                                        modport_name = mp.valueText
+                                        break
+                        attrs: dict[str, Any] = {}
+                        if iface_type:
+                            attrs["interface_type"] = iface_type
+                        if modport_name:
+                            attrs["modport"] = modport_name
+                        _mark(nodes_list[node_offset + idx],
+                              role="interface_port",
+                              name=pname, path=ppath, attributes=attrs)
+                    else:
+                        _mark(nodes_list[node_offset + idx],
+                              role="port", name=pname, path=ppath)
                     _add_edge(graph, mod_gid, gid, "has_port")
                     name_index[ppath] = gid
                     port_names_by_module.setdefault(mname, set()).add(pname)
