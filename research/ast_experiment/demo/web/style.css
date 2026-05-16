@@ -1,0 +1,80 @@
+/* KGWeave AST demo — SA3 skeleton stylesheet. */
+
+:root {
+  --cat-semantic: #2c6cf2;
+  --cat-structural: #888888;
+  --cat-blob: #f2d765;
+  --cat-token: #c8c8c8;
+  --edge-drives: #2aa84a;
+  --edge-reads: #3a8ad9;
+  --edge-sensitive: #8a4ad9;
+  --edge-has: #a0a0a0;
+  --edge-instantiates: #d94a3a;
+  --edge-connects: #e0852a;
+  --edge-default: #444444;
+  --bg: #0f1115;
+  --panel: #181b22;
+  --panel-2: #20242d;
+  --fg: #e3e6eb;
+  --muted: #8b94a3;
+  --accent: #2c6cf2;
+  --hl: rgba(255, 240, 120, 0.45);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 13px; }
+
+#topbar { display: flex; align-items: baseline; gap: 1rem; padding: 0.5rem 1rem; background: var(--panel); border-bottom: 1px solid #2a2f3a; }
+#topbar h1 { font-size: 1rem; margin: 0; font-weight: 600; }
+.muted { color: var(--muted); font-size: 0.85em; }
+
+#layout {
+  display: grid;
+  grid-template-columns: 180px 1fr 1fr;
+  grid-template-rows: 1fr;
+  height: calc(100vh - 40px - 160px);
+}
+
+#file-rail { background: var(--panel); border-right: 1px solid #2a2f3a; overflow-y: auto; padding: 0.5rem; }
+#file-rail button {
+  display: block; width: 100%; text-align: left; background: transparent;
+  border: 1px solid transparent; color: var(--fg); padding: 0.35rem 0.5rem;
+  border-radius: 4px; cursor: pointer; font-size: 0.85rem; margin-bottom: 2px;
+}
+#file-rail button:hover { background: var(--panel-2); }
+#file-rail button.active { background: var(--accent); color: white; }
+
+#code-pane { background: var(--panel); overflow: hidden; border-right: 1px solid #2a2f3a; }
+.cm-editor { height: 100%; font-size: 12px; }
+.cm-editor .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.cm-span-highlight { background: var(--hl); border-radius: 2px; }
+
+#graph-pane { background: var(--panel); position: relative; display: flex; flex-direction: column; }
+#filters { padding: 0.5rem; border-bottom: 1px solid #2a2f3a; font-size: 0.78rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+#filters fieldset { border: 1px solid #2a2f3a; border-radius: 4px; padding: 0.2rem 0.5rem; margin: 0; }
+#filters legend { padding: 0 0.25rem; color: var(--muted); }
+#filters label { margin-right: 0.4rem; }
+#filters button { background: var(--panel-2); color: var(--fg); border: 1px solid #2a2f3a; padding: 0.2rem 0.5rem; border-radius: 3px; cursor: pointer; }
+#cy { flex: 1; min-height: 200px; background: #11141a; }
+
+#inspector {
+  height: 160px; overflow: auto; padding: 0.5rem 1rem;
+  background: var(--panel-2); border-top: 1px solid #2a2f3a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem;
+  white-space: pre-wrap; word-break: break-word;
+}
+#inspector .insp-row { display: grid; grid-template-columns: 120px 1fr; gap: 0.5rem; padding: 1px 0; }
+#inspector .insp-key { color: var(--muted); }
+#inspector .insp-val { color: var(--fg); }
+#inspector .insp-cat-semantic { color: var(--cat-semantic); font-weight: 600; }
+#inspector .insp-cat-blob { color: var(--cat-blob); font-weight: 600; }
+#inspector .insp-cat-structural { color: var(--cat-structural); font-weight: 600; }
+#inspector .insp-cat-token { color: var(--cat-token); font-weight: 600; }
+#inspector pre { margin: 0; }
+
+.tooltip {
+  position: absolute; z-index: 50; background: #000; color: #fff;
+  padding: 0.3rem 0.5rem; border-radius: 3px; font-size: 0.75rem;
+  max-width: 320px; pointer-events: none; white-space: pre-wrap;
+  border: 1px solid #555;
+}

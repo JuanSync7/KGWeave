@@ -204,3 +204,125 @@ $ gzip -c research/ast_experiment/demo/data/graph.json | wc -c
 
 Score = 33 (matches parent commit baseline — no regression).
 
+## SA3: static FE skeleton with graph<->code bidirectional mapping
+
+**Artifacts**:
+- `research/ast_experiment/demo/web/index.html` (49 lines) — CSS-grid layout
+  with file rail / code pane / graph pane / inspector. Single `<script
+  type="module" src="./app.js">` entry. Filter checkboxes are declared in
+  HTML, wired in `wireFilters()`.
+- `research/ast_experiment/demo/web/style.css` (80 lines) — CSS custom props
+  for the category palette (`--cat-semantic` blue / `--cat-structural` gray /
+  `--cat-blob` light-yellow / `--cat-token` light-gray) and edge palette
+  (drives green, reads blue, sensitive_to purple, instantiates/of_module red,
+  connects orange, has_* light-gray, default dark). `.cm-span-highlight`
+  class drives the CodeMirror decoration overlay.
+- `research/ast_experiment/demo/web/app.js` (470 lines) — single ESM module.
+  Imports `cytoscape@3.30.4`, `@codemirror/state@6.4.1`,
+  `@codemirror/view@6.26.3` from `esm.sh`. Mounts CodeMirror (read-only,
+  dark theme, line numbers + active line) and Cytoscape (concentric layout,
+  category-coloured nodes, type-coloured directed edges).
+- `research/ast_experiment/scripts/validate_demo_html.py` (122 lines) —
+  validator: asset existence, ESM module loading, CDN URL well-formedness,
+  graph.json fetch path, no remote runtime fetches, and `node --check`
+  on `app.js` if Node is installed.
+- `research/ast_experiment/tests/demo/test_fe_skeleton.py` (130 lines) —
+  13 tests, all green.
+
+**Bidirectional click-flow contract** (the acceptance bar, walked):
+1. Pick `checker_corpus:n0003.ModuleDeclarationSyntax` (semantic, span
+   167..483, file `checker_corpus`).
+2. Cytoscape `tap` on the node fires `onGraphSelect(target, "node")`.
+3. `renderInspector(n, "node")` populates `#inspector` rows: id, type,
+   syntaxKind, category=semantic (blue), span, semantic.role=module,
+   semantic.name=checker_corpus_top.
+4. `n.span` is non-null → `highlightSpanInCode(n.span)`.
+5. `span.file === "checker_corpus"` differs from currentFile → `selectFile`
+   swaps the CodeMirror doc.
+6. View dispatches `EditorView.scrollIntoView(from, {y:"center"})` and the
+   `setHighlight` effect → `highlightField` (StateField) builds a single
+   `Decoration.mark({class:"cm-span-highlight"})` over [167, 483).
+
+**Reverse flow (code → graph)** — clicking inside the code pane runs
+`reverseLookupAtOffset(file, posAtCoords)`, sorts all spans containing the
+offset by width, prefers the smallest semantic match, selects it in
+Cytoscape (`cy.select() + cy.center()`), and re-runs the inspector +
+highlight loop.
+
+**Library version pins (and why)**:
+- `cytoscape@3.30.4` — latest 3.30.x; stable ESM build on esm.sh, no peer
+  deps, works with our raw `{group:'nodes', data:{...}}` element shape.
+  Avoided 3.31 (less battle-tested at time of writing).
+- `@codemirror/state@6.4.1` + `@codemirror/view@6.26.3` — CM6 has been
+  6.x-stable for three years; we use only `EditorState`, `EditorView`,
+  `StateField`, `StateEffect`, `Decoration`, `RangeSetBuilder`,
+  `lineNumbers`, `highlightActiveLine` — no language pack imported
+  (SystemVerilog has no first-class CM6 mode; plain text + line numbers
+  is enough for the demo).
+
+**Performance observations**:
+- 7222 nodes + 7721 edges is borderline for Cytoscape's force-directed
+  layouts (cose/fcose). We default to `concentric` which is O(n log n)
+  and renders the full graph in well under a second on a laptop.
+- Default-hide tokens (3115 of 7222) and default-hide `child` edges (7197
+  of 7721) via the filter system. Effective default-visible graph: ~4100
+  nodes, ~524 edges — buttery on Chrome stable.
+- Filters use `.dim` class with `display: none` (the cy stylesheet rule)
+  rather than `cy.remove()` so toggling is O(n) without re-layout.
+- `state.cy.batch(...)` wraps the filter sweep to avoid per-mutation
+  redraws.
+
+**Gotchas SA4 (query engine) needs to know**:
+1. The maps `state.nodesById` / `state.edgesById` are the canonical lookup
+   tables — SA4 should reuse them rather than re-indexing.
+2. `state.cy.getElementById(id)` returns an empty collection if the node
+   was filtered with `.dim` (display:none) — it's still in the graph; SA4
+   can `.removeClass('dim')` to make filtered nodes pop into view when a
+   query result lands on them.
+3. Span-projection is in **character offsets**, so any BFS that wants to
+   present a "trace line" can slice `FileEntry.source` directly.
+4. Inspector renderer is `renderInspector(entry, "node"|"edge")` — SA4
+   can call it directly with any node/edge object to update the bottom
+   tray with query metadata.
+5. The tooltip element is anchored to `document.body` with absolute
+   positioning — SA4's animation should call `hideTooltip()` before
+   running a multi-hop animation to avoid stale tooltips during BFS.
+6. We added `validate_demo_html.py` to `test_structure.py`'s allowed
+   scripts list. SA4/SA5/SA6 should keep that allow-list in sync if
+   they add new entry-point scripts.
+
+**Honest validator output**:
+```
+$ uv run python research/ast_experiment/scripts/validate_demo_html.py
+validating /home/kok-shew-juan/KGWeave/research/ast_experiment/demo/web
+  ok: index.html present (1796 bytes)
+  ok: style.css present (3588 bytes)
+  ok: app.js present (16016 bytes)
+  ok: graph.json present (4131323 bytes)
+  ok: local ref ./style.css -> style.css
+  ok: local ref ./app.js -> app.js
+  ok: index.html loads app.js as ESM module
+  ok: container "#file-rail" wired in HTML + JS
+  ok: container "#code-pane" wired in HTML + JS
+  ok: container "#graph-pane" wired in HTML + JS
+  ok: container "#inspector" wired in HTML + JS
+  ok: container "#cy" wired in HTML + JS
+  ok: CDN import cytoscape pinned
+  ok: CDN import @codemirror/state pinned
+  ok: CDN import @codemirror/view pinned
+  ok: graph.json fetched via relative path
+  ok: span/category fields wired
+  ok: no runtime remote fetch() calls
+  ok: node --check app.js: syntax OK
+VALIDATOR OK
+```
+
+**Honest pytest output**:
+```
+$ uv run pytest research/ast_experiment/tests/ -x 2>&1 | tail -2
+================== 651 passed, 1 skipped, 1 warning in 11.86s ==================
+```
+
+Score still 33 (`uv run python research/ast_experiment/scripts/score.py`).
+
+

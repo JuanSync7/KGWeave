@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>KGWeave AST Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header id="topbar">
+      <h1>KGWeave AST Demo</h1>
+      <span id="stats" class="muted">loading…</span>
+    </header>
+
+    <main id="layout">
+      <aside id="file-rail" aria-label="Corpus files"></aside>
+
+      <section id="code-pane" aria-label="Source code"></section>
+
+      <section id="graph-pane" aria-label="Knowledge graph">
+        <div id="filters">
+          <fieldset>
+            <legend>Categories</legend>
+            <label><input type="checkbox" data-category="semantic" checked /> semantic</label>
+            <label><input type="checkbox" data-category="structural" checked /> structural</label>
+            <label><input type="checkbox" data-category="blob" checked /> blob</label>
+            <label><input type="checkbox" data-category="token" /> tokens (hidden by default)</label>
+          </fieldset>
+          <fieldset>
+            <legend>Edges</legend>
+            <label><input type="checkbox" data-edge="child" /> child (hidden)</label>
+            <label><input type="checkbox" data-edge="semantic" checked /> semantic (drives/reads/contains…)</label>
+          </fieldset>
+          <fieldset>
+            <legend>Layout</legend>
+            <button id="relayout" type="button">re-layout (concentric)</button>
+          </fieldset>
+        </div>
+        <div id="cy"></div>
+      </section>
+    </main>
+
+    <footer id="inspector" aria-label="Inspector">
+      <em class="muted">Click a node or edge to inspect.</em>
+    </footer>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
