@@ -346,6 +346,44 @@ def _s88_package_header(*args, **kwargs):
 _s88_package_header.__rule_id__ = "S88"
 
 
+def _s89_program_header(*args, **kwargs):
+    """S89 — ProgramHeader ownership-only marker.
+
+    ``SyntaxKind.ProgramHeader`` is the header portion of a
+    ``ProgramDeclaration`` — the ``program [lifetime] <name>
+    [#(parameter port list)] [(port list)] ;`` clause that precedes the
+    program body. pyslang reuses the single ``ModuleHeaderSyntax``
+    Python class across the four header SyntaxKind variants
+    (``ModuleHeader`` / ``InterfaceHeader`` / ``PackageHeader`` /
+    ``ProgramHeader`` — lesson 1 shared class, discriminator on
+    ``node.kind``). S89 mirrors S85 / S87 / S88 one-for-one.
+
+    Semantic content already lifted onto the parent ``ProgramDeclaration``
+    semantic node (which is itself promoted by S1's
+    ``ModuleDeclarationSyntax`` branch under the ``ProgramDeclaration``
+    kind discriminator — ``dispatch.promote`` flips ``role="program"`` and
+    stamps ``name`` / ``path`` from the header's name token; parameters
+    land via the existing ``ParameterDeclaration`` (S1) branch under the
+    header's ``parameters`` subtree; ports land via the existing
+    ``ImplicitAnsiPort`` / ``ExplicitAnsiPort`` / ``ExplicitNonAnsiPort`` /
+    ``ImplicitNonAnsiPort`` (S1 / S64 / S65 / S66) branches under the
+    header's ``ports`` subtree). Per lesson 2 (subtler container-stack
+    variant), programs already push onto ``state["module_stack"]`` at S30
+    so the header itself carries no extra parent-resolution state.
+
+    Per ``CLAUDE.md`` lesson 5 (header ownership marker): we register an
+    **ownership-only stub** so the Bucket-1 checklist marks
+    ``ProgramHeader`` as ``Sem ✅`` (owner S89) without adding a
+    dispatch branch (which would double-promote the program relative
+    to S1's ``ProgramDeclaration`` branch via S30). Mirrors the
+    S85 / S87 / S88 ownership-only pattern.
+    """
+    return
+
+
+_s89_program_header.__rule_id__ = "S89"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ModuleDeclaration, _s1_module_decl),
     (pyslang.SyntaxKind.ImplicitAnsiPort, _s1_port),
@@ -367,4 +405,7 @@ RULES: list[tuple] = [
     # Header ownership marker per lesson 5; semantic content lifted onto
     # S29 package nodes. No dispatch branch.
     (pyslang.SyntaxKind.PackageHeader, _s88_package_header),
+    # Header ownership marker per lesson 5; semantic content lifted onto
+    # S30 program nodes. No dispatch branch.
+    (pyslang.SyntaxKind.ProgramHeader, _s89_program_header),
 ]

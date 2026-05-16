@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 136 | 50 | 135 | 0 | 1 |
+| PROMOTE | 136 | 50 | 136 | 0 | 0 |
 | CONTAINER | 87 | 22 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -144,7 +144,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ProceduralForceStatement` | ⬜ | ✅ | S20 |
 | `ProceduralReleaseStatement` | ⬜ | ✅ | S20 |
 | `ProgramDeclaration` | ⬜ | ✅ | S30 |
-| `ProgramHeader` | ⬜ | ⬜ | future |
+| `ProgramHeader` | ⬜ | ✅ | S89 |
 | `PropertyDeclaration` | ✅ | ✅ | S14 |
 | `RestrictPropertyStatement` | ⬜ | ✅ | S16 |
 | `SequenceDeclaration` | ✅ | ✅ | S15 |
