@@ -316,6 +316,27 @@ _s51_stub.__rule_id__ = "S51"
 rule_s53.__rule_id__ = "S53"
 
 
+def _s58_struct_union_member(*args, **kwargs):
+    """S58 — StructUnionMember promotion ownership marker.
+
+    The actual fan-out runs in ``dispatch.promote`` pass 1 — for each
+    StructUnionMember row inside a struct/union-bodied typedef, one
+    ``role=struct_member`` / ``role=union_member`` node is emitted per
+    Declarator (so ``logic [3:0] a, b;`` becomes two nodes) and attached
+    to the enclosing typedef via a ``has_member`` edge. Per-node attrs:
+    ``{data_type, parent_kind: "struct"|"union"}``; path key:
+    ``<typedef_path>.<field_name>``.
+
+    Anonymous inline struct / union types (no enclosing typedef) leave
+    the struct_union_stack empty, so members in those positions are
+    silently left BLOB — only typedef-fronted bodies promote.
+    """
+    return
+
+
+_s58_struct_union_member.__rule_id__ = "S58"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.PackageDeclaration, _s9a_package),
     (pyslang.SyntaxKind.TypedefDeclaration, _s9b_typedef),
@@ -329,4 +350,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.PackageImportItem, rule_s50),
     (pyslang.SyntaxKind.PackageExportAllDeclaration, rule_s51),
     (pyslang.SyntaxKind.NetTypeDeclaration, rule_s53),
+    (pyslang.SyntaxKind.StructUnionMember, _s58_struct_union_member),
 ]

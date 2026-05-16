@@ -128,7 +128,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58"}
 
 
 def _is_active(fn) -> bool:
@@ -250,6 +250,15 @@ def promote(
         # property / sequence itself wasn't promoted (e.g. nameless), which
         # makes the LVD branch silently no-op for that subtree.
         "sva_decl_stack": [],
+        # S58: struct_union_stack tracks the enclosing typedef whose body is
+        # a StructType / UnionType, so that StructUnionMember declarators
+        # fan out as queryable role=struct_member / role=union_member nodes
+        # attached to the typedef via has_member edges. Entries are
+        # ``(typedef_gid, typedef_path, body_kind)`` tuples where body_kind
+        # is "struct" or "union" (drives the role name and parent_kind attr).
+        # A sentinel ``(None, "", "")`` is pushed when the typedef itself was
+        # not promoted, keeping the pop-on-exit symmetric.
+        "struct_union_stack": [],
     }
 
     def _cur_module():
@@ -265,6 +274,7 @@ def promote(
         pushed_covergroup = False
         pushed_class = False
         pushed_coverpoint = False
+        pushed_struct_union = False
 
         if c == "ModuleDeclarationSyntax":
             kind_name = str(getattr(node, "kind", "")).rsplit(".", 1)[-1]
@@ -1532,6 +1542,9 @@ def promote(
                 name_index[tpath] = gid
         elif c == "TypedefDeclarationSyntax":
             mod_gid, mname = _cur_module()
+            # S58: pushed_struct_union flips to True if the body is a
+            # StructType / UnionType (push handled below); the matching pop
+            # at end-of-subtree only fires when we pushed.
             if mod_gid is not None:
                 tname = _typedef_name_of(node)
                 if tname:
@@ -1575,6 +1588,104 @@ def promote(
                     if not is_struct_union:
                         state["typedef_stack"].append((gid, tname, tpath))
                         pushed = "in_typedef"
+                    else:
+                        # S58: push the struct/union typedef as the enclosing
+                        # parent for fan-out of StructUnionMember declarators
+                        # visited inside this subtree.
+                        state["struct_union_stack"].append(
+                            (gid, tpath, attrs["body_kind"])
+                        )
+                        pushed_struct_union = True
+        elif c == "StructUnionMemberSyntax":
+            # S58 — fan out struct/union body fields as queryable nodes.
+            # Each StructUnionMember row carries one shared data-type prefix
+            # plus a SeparatedList(Declarator, ...) (one per name in
+            # ``logic [7:0] a, b, c;``). The enclosing typedef gid + path +
+            # body_kind ride on ``struct_union_stack`` (pushed by the
+            # TypedefDeclaration branch above when the typedef body is a
+            # StructType / UnionType). Anonymous inline struct / union types
+            # have no typedef parent — the stack is empty there, so we skip.
+            #
+            # Token-only structural walk — no regex on source text. The first
+            # non-token, non-SyntaxList, non-SeparatedList child is the
+            # data-type node (matches IntegerType / LogicType / NamedType
+            # without depending on a specific class name); the SeparatedList
+            # holds the comma-separated Declarators.
+            if state["struct_union_stack"]:
+                td_gid, td_path, body_kind = state["struct_union_stack"][-1]
+            else:
+                td_gid, td_path, body_kind = None, "", ""
+            if td_gid is not None:
+                type_node = None
+                decl_list = None
+                for ch in node:
+                    if ch is None or _is_token(ch):
+                        continue
+                    sub_kind = str(getattr(ch, "kind", "")).rsplit(".", 1)[-1]
+                    if sub_kind == "SyntaxList":
+                        continue
+                    if sub_kind == "SeparatedList":
+                        decl_list = ch
+                        continue
+                    if type_node is None:
+                        type_node = ch
+                type_text = _type_text_of(type_node)
+                # Per-Declarator names. _identifier_tokens picks the leading
+                # identifier of each DeclaratorSyntax (matches the
+                # _struct_union_members_of helper exactly).
+                names: list[str] = []
+                if decl_list is not None:
+                    try:
+                        kids = list(decl_list)
+                    except TypeError:
+                        kids = []
+                    for d in kids:
+                        if d is None or _is_token(d):
+                            continue
+                        if _cls(d) != "DeclaratorSyntax":
+                            continue
+                        ids = _identifier_tokens(d)
+                        if ids:
+                            names.append(ids[0].valueText)
+                if names:
+                    role_name = (
+                        "struct_member" if body_kind == "struct"
+                        else "union_member"
+                    )
+                    first_name = names[0]
+                    first_path = f"{td_path}.{first_name}"
+                    attrs_member = {
+                        "data_type": type_text,
+                        "parent_kind": body_kind,
+                    }
+                    _mark(nodes_list[node_offset + idx], role=role_name,
+                          name=first_name, path=first_path,
+                          attributes=attrs_member)
+                    _add_edge(graph, td_gid, gid, "has_member")
+                    name_index[first_path] = gid
+                    # Multi-declarator fan-out (S38-style synthetic siblings).
+                    for extra_name in names[1:]:
+                        extra_path = f"{td_path}.{extra_name}"
+                        extra_id = f"{role_name}:{extra_path}"
+                        nodes_list.append({
+                            "id": extra_id,
+                            "type": "StructUnionMemberSyntax",
+                            "kind": "StructUnionMember",
+                            "is_token": False,
+                            "payload": {"synthetic": True},
+                            "queryable": True,
+                            "semantic": {
+                                "role": role_name,
+                                "name": extra_name,
+                                "path": extra_path,
+                                "attributes": {
+                                    "data_type": type_text,
+                                    "parent_kind": body_kind,
+                                },
+                            },
+                        })
+                        _add_edge(graph, td_gid, extra_id, "has_member")
+                        name_index[extra_path] = extra_id
         elif c == "ForwardTypedefDeclarationSyntax":
             # S31 — promote a bare ``typedef <name>;`` forward declaration as
             # its own node. Reuses the ``has_typedef`` edge type so existing
@@ -2333,6 +2444,14 @@ def promote(
         if (c in ("PropertyDeclarationSyntax", "SequenceDeclarationSyntax")
                 and state["sva_decl_stack"]):
             state["sva_decl_stack"].pop()
+        # S58: pop struct_union_stack frame pushed by the TypedefDeclaration
+        # branch when its body is a StructType / UnionType. The local
+        # ``pushed_struct_union`` flag is True only on that path, keeping the
+        # pop symmetric with the push.
+        if (c == "TypedefDeclarationSyntax"
+                and pushed_struct_union
+                and state["struct_union_stack"]):
+            state["struct_union_stack"].pop()
         if popped_module:
             state["module_stack"].pop()
 

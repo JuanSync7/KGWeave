@@ -115,9 +115,12 @@ def test_s31_struct_members_extracted(pkg_graph):
     td = _by_path(pkg_graph, "fifo_pkg.fifo_word_t")
     members = td["semantic"]["attributes"]["members"]
     names = [m["name"] for m in members]
-    assert names == ["cmd", "payload"]
-    # Type text is non-empty and includes the integral keyword.
-    assert all("logic" in m["type_text"] for m in members)
+    assert names == ["cmd", "payload", "flag_a", "flag_b"]
+    # Type text is non-empty; cmd/payload carry logic, flag_a/flag_b carry bit.
+    assert "logic" in members[0]["type_text"]
+    assert "logic" in members[1]["type_text"]
+    assert "bit" in members[2]["type_text"]
+    assert "bit" in members[3]["type_text"]
 
 
 def test_s31_union_typedef_body_kind(pkg_graph):
@@ -682,6 +685,125 @@ def test_s53_byte_equal_roundtrip():
     result = emit(graph)
     assert src == result, (
         f"byte-equal round-trip failed after S53 promotion:\n"
+        f"  expected: {src!r}\n"
+        f"  got:      {result!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# S58: StructUnionMember — fan out struct/union body fields
+# ---------------------------------------------------------------------------
+
+
+def test_s58_struct_member_node_count(pkg_graph):
+    """fifo_pkg.fifo_word_t has four declarators across three
+    StructUnionMember rows (cmd; payload; flag_a, flag_b) — promoting yields
+    exactly four role=struct_member nodes attached to that typedef."""
+    td = _by_path(pkg_graph, "fifo_pkg.fifo_word_t")
+    assert td is not None
+    members = [
+        n for n in pkg_graph["nodes"]
+        if n.get("semantic", {}).get("role") == "struct_member"
+        and n["semantic"].get("path", "").startswith("fifo_pkg.fifo_word_t.")
+    ]
+    names = sorted(m["semantic"]["name"] for m in members)
+    assert names == ["cmd", "flag_a", "flag_b", "payload"], names
+
+
+def test_s58_union_member_node_count(pkg_graph):
+    """fifo_pkg.fifo_iu_t has two declarators (i; b) — two role=union_member
+    nodes."""
+    members = [
+        n for n in pkg_graph["nodes"]
+        if n.get("semantic", {}).get("role") == "union_member"
+        and n["semantic"].get("path", "").startswith("fifo_pkg.fifo_iu_t.")
+    ]
+    names = sorted(m["semantic"]["name"] for m in members)
+    assert names == ["b", "i"], names
+
+
+def test_s58_has_member_edges_from_struct(pkg_graph):
+    """has_member edges run from the typedef to each of its member nodes
+    (and never from the package directly to a member)."""
+    pkg = _by_path(pkg_graph, "fifo_pkg")
+    td = _by_path(pkg_graph, "fifo_pkg.fifo_word_t")
+    edges = [
+        e for e in pkg_graph["edges"]
+        if e["src"] == td["id"] and e["type"] == "has_member"
+    ]
+    assert len(edges) == 4
+    # The package should not have its own has_member edges to fields.
+    pkg_member_edges = [
+        e for e in pkg_graph["edges"]
+        if e["src"] == pkg["id"] and e["type"] == "has_member"
+    ]
+    assert pkg_member_edges == []
+
+
+def test_s58_has_member_edges_from_union(pkg_graph):
+    """Two has_member edges run from the union typedef to its members."""
+    td = _by_path(pkg_graph, "fifo_pkg.fifo_iu_t")
+    edges = [
+        e for e in pkg_graph["edges"]
+        if e["src"] == td["id"] and e["type"] == "has_member"
+    ]
+    assert len(edges) == 2
+
+
+def test_s58_parent_kind_attr(pkg_graph):
+    """Struct members carry parent_kind=struct; union members carry
+    parent_kind=union — discriminator preserved on each child."""
+    cmd = _by_path(pkg_graph, "fifo_pkg.fifo_word_t.cmd")
+    i_field = _by_path(pkg_graph, "fifo_pkg.fifo_iu_t.i")
+    assert cmd["semantic"]["attributes"]["parent_kind"] == "struct"
+    assert i_field["semantic"]["attributes"]["parent_kind"] == "union"
+
+
+def test_s58_data_type_attr(pkg_graph):
+    """Each promoted member carries data_type capturing the field type text."""
+    cmd = _by_path(pkg_graph, "fifo_pkg.fifo_word_t.cmd")
+    flag_a = _by_path(pkg_graph, "fifo_pkg.fifo_word_t.flag_a")
+    flag_b = _by_path(pkg_graph, "fifo_pkg.fifo_word_t.flag_b")
+    assert "logic" in cmd["semantic"]["attributes"]["data_type"]
+    assert "bit" in flag_a["semantic"]["attributes"]["data_type"]
+    # Multi-declarator siblings share the same type text.
+    assert (flag_a["semantic"]["attributes"]["data_type"]
+            == flag_b["semantic"]["attributes"]["data_type"])
+
+
+def test_s58_multi_declarator_fan_out_distinct_gids(pkg_graph):
+    """flag_a and flag_b share one StructUnionMember row but get distinct
+    gids and distinct name_index entries."""
+    flag_a = _by_path(pkg_graph, "fifo_pkg.fifo_word_t.flag_a")
+    flag_b = _by_path(pkg_graph, "fifo_pkg.fifo_word_t.flag_b")
+    assert flag_a is not None and flag_b is not None
+    assert flag_a["id"] != flag_b["id"]
+    idx = pkg_graph.get("semantic_name_index", {})
+    assert "fifo_pkg.fifo_word_t.flag_a" in idx
+    assert "fifo_pkg.fifo_word_t.flag_b" in idx
+
+
+def test_s58_byte_equal_roundtrip():
+    """S58 must not mutate token payloads. Inline snippet with struct +
+    union (multi-declarator forms included) must round-trip byte-equal."""
+    import tempfile
+
+    from research.ast_experiment.src.build import build_kg
+    from research.ast_experiment.src.unlift import emit
+
+    src = (
+        "package q;"
+        " typedef struct packed { logic [7:0] a; bit b, c; } s_t;"
+        " typedef union { int x; logic [3:0] y; } u_t;"
+        " endpackage"
+    )
+    tmpdir = Path(tempfile.mkdtemp(prefix="s58_rt_"))
+    p = tmpdir / "q.sv"
+    p.write_text(src)
+    graph, _trees, _ = build_kg([p])
+    result = emit(graph)
+    assert src == result, (
+        f"byte-equal round-trip failed after S58 promotion:\n"
         f"  expected: {src!r}\n"
         f"  got:      {result!r}"
     )

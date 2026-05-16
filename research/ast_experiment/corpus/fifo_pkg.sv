@@ -3,6 +3,7 @@ package fifo_pkg;
   typedef struct packed {
     logic [7:0]  cmd;
     logic [31:0] payload;
+    bit [3:0] flag_a, flag_b;
   } fifo_word_t;
   typedef union { int i; bit [31:0] b; } fifo_iu_t;
   typedef fifo_fwd_t;
