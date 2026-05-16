@@ -390,6 +390,40 @@ def _s63_forward_type_restriction(*args, **kwargs):
 _s63_forward_type_restriction.__rule_id__ = "S63"
 
 
+def _s82_class_specifier(*args, **kwargs):
+    """S82 — ClassSpecifier promotion ownership marker.
+
+    ``ClassSpecifierSyntax`` is the SystemVerilog-2023 method override
+    specifier — ``: initial`` / ``: extends`` / ``: final`` — that sits
+    between the ``function`` / ``task`` keyword and the return type on a
+    class method prototype::
+
+        class C;
+          function : initial void f();
+          endfunction
+        endclass
+
+    The node carries two tokens only (``keyword`` and ``colon``) and its
+    parent in the syntax tree is the enclosing ``FunctionPrototype``.
+    Semantically it is a single-keyword attribute of the surrounding
+    method prototype, not an independently queryable entity (lesson 4).
+
+    The live corpus is parsed with the default LRM-2017 settings
+    (``src/build.py`` uses ``pyslang.SyntaxTree.fromText`` with no
+    SV-2023 ``ParserOptions``), so ``ClassSpecifier`` will never appear
+    in any real graph today. We register an **ownership-only stub** so
+    the Bucket-1 checklist marks ``ClassSpecifier`` as ``Sem ✅`` (owned
+    by S82) — mirrors the S60 / S63 / S79 attribute-only pattern. When
+    the parser switches to SV-2023, runtime attribute-lifting onto the
+    parent ``FunctionPrototype`` semantic node can be wired in without
+    breaking this contract.
+    """
+    return
+
+
+_s82_class_specifier.__rule_id__ = "S82"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.PackageDeclaration, _s9a_package),
     (pyslang.SyntaxKind.TypedefDeclaration, _s9b_typedef),
@@ -406,4 +440,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.StructUnionMember, _s58_struct_union_member),
     (pyslang.SyntaxKind.VirtualInterfaceType, _s60_virtual_interface_type),
     (pyslang.SyntaxKind.ForwardTypeRestriction, _s63_forward_type_restriction),
+    (pyslang.SyntaxKind.ClassSpecifier, _s82_class_specifier),
 ]
