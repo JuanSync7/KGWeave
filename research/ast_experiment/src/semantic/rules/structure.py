@@ -191,6 +191,47 @@ def _s68_port_concatenation(*args, **kwargs):
 _s68_port_concatenation.__rule_id__ = "S68"
 
 
+def _s85_interface_header(*args, **kwargs):
+    """S85 — InterfaceHeader ownership-only marker.
+
+    ``SyntaxKind.InterfaceHeader`` is the header portion of an
+    ``InterfaceDeclaration`` — the ``interface [lifetime] <name>
+    [#(parameter port list)] [(port list)] ;`` clause that precedes the
+    interface body. pyslang reuses the single ``ModuleHeaderSyntax``
+    Python class across the four header SyntaxKind variants
+    (``ModuleHeader`` / ``InterfaceHeader`` / ``PackageHeader`` /
+    ``ProgramHeader`` — lesson 1 shared class, discriminator on
+    ``node.kind``).
+
+    Semantic content already lifted onto the parent ``InterfaceDeclaration``
+    semantic node (which is itself promoted by S1's ModuleDeclarationSyntax
+    branch under the ``InterfaceDeclaration`` kind discriminator —
+    ``dispatch.promote`` flips ``role="interface"`` and stamps ``name`` /
+    ``path`` from the header's name token; parameters land via the
+    existing ``ParameterDeclaration`` (S1) branch under the header's
+    ``parameters`` subtree; ports land via the existing ``ImplicitAnsiPort``
+    / ``ExplicitAnsiPort`` / ``ExplicitNonAnsiPort`` / ``ImplicitNonAnsiPort``
+    (S1 / S64 / S65 / S66) branches under the header's ``ports``
+    subtree). The ``lifetime`` token is the only header-local field that
+    is not already lifted; the live corpus never exercises
+    ``interface automatic foo`` / ``interface static foo`` so no
+    attribute-lift is wired today — if a future iteration adds a
+    lifetime-bearing interface, runtime lifting onto the parent
+    interface node can be added without breaking this contract.
+
+    Per ``CLAUDE.md`` lesson 5 (header ownership marker): we register an
+    **ownership-only stub** so the Bucket-1 checklist marks
+    ``InterfaceHeader`` as ``Sem ✅`` (owner S85) without adding a
+    dispatch branch (which would double-promote the interface relative
+    to S1's ``InterfaceDeclaration`` branch). Mirrors the S82 / S83
+    attribute-only / ownership-only pattern.
+    """
+    return
+
+
+_s85_interface_header.__rule_id__ = "S85"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ModuleDeclaration, _s1_module_decl),
     (pyslang.SyntaxKind.ImplicitAnsiPort, _s1_port),
@@ -204,4 +245,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.ImplicitNonAnsiPort, _s66_implicit_non_ansi_port),
     (pyslang.SyntaxKind.PortReference, _s67_port_reference),
     (pyslang.SyntaxKind.PortConcatenation, _s68_port_concatenation),
+    (pyslang.SyntaxKind.InterfaceHeader, _s85_interface_header),
 ]
