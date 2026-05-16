@@ -169,10 +169,44 @@ def rule_s56(*args, **kwargs):
 rule_s56.__rule_id__ = "S56"
 
 
+def rule_s80(*args, **kwargs):
+    """ExternInterfaceMethod is the interface-scope wrapper around an
+    ``extern function|task`` declaration; pyslang surfaces it as
+    ``ExternInterfaceMethodSyntax`` with an inner
+    ``FunctionPrototypeSyntax`` already owned by S56.
+
+    Per lesson 5 (wrapper-kind dedup), we do NOT register a separate node
+    for the wrapper — that would double-promote against the S56 inner.
+    Instead S80 owns the wrapper-level attribute that S56 cannot see from
+    the FunctionPrototype alone: the optional ``forkjoin`` keyword (LRM
+    25.10 — ``extern forkjoin task`` denotes a task whose body, supplied
+    later via an ``import`` statement in the implementing module, must
+    decouple via fork/join semantics).
+
+    The dispatch branch for ``ExternInterfaceMethodSyntax`` in pass 1
+    reads ``node.forkJoin`` (TokenKind.ForkJoinKeyword when present;
+    placeholder Unknown token when absent), pushes a
+    ``{"forkjoin": bool}`` frame onto ``extern_method_stack``, and the
+    S56 FunctionPrototype branch lifts that flag onto the S56 node's
+    ``attributes["forkjoin"]``.  The wrapper itself stays CONTAINER —
+    queryable identity remains on the inner FunctionPrototype node.
+
+    This stub registers ``SyntaxKind.ExternInterfaceMethod`` under an
+    active ``__rule_id__`` for the Bucket-1 checklist and the
+    ``_ACTIVE_RULE_IDS`` gate; the runtime work lives inline in
+    dispatch.promote pass 1.
+    """
+    return
+
+
+rule_s80.__rule_id__ = "S80"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ExternModuleDecl, _s29_extern_module_decl),
     (pyslang.SyntaxKind.ProgramDeclaration, _s30_program_decl),
     (pyslang.SyntaxKind.DPIImport, rule_s44),
     (pyslang.SyntaxKind.DPIExport, rule_s45),
     (pyslang.SyntaxKind.FunctionPrototype, rule_s56),
+    (pyslang.SyntaxKind.ExternInterfaceMethod, rule_s80),
 ]

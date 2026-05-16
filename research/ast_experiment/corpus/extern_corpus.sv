@@ -19,4 +19,5 @@ interface ext_method_if (input logic clk);
   extern function int helper_add(int a, int b);
   extern function void helper_log(string msg);
   extern task helper_pulse(input logic sig);
+  extern forkjoin task helper_forkjoin(input logic sig);
 endinterface

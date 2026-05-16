@@ -95,9 +95,11 @@ def test_no_function_port_list_node(fifo_graph, extern_graph):
 
 
 def test_s74_function_port_count_unchanged(fifo_graph, extern_graph):
-    """Six ``role=function_port`` nodes total — two from fifo (next_ptr.p,
-    sv_compute.x) and four from extern_corpus (helper_add.a, helper_add.b,
-    helper_log.msg, helper_pulse.sig). S75 must not perturb this count."""
+    """Seven ``role=function_port`` nodes total — two from fifo (next_ptr.p,
+    sv_compute.x) and five from extern_corpus (helper_add.a, helper_add.b,
+    helper_log.msg, helper_pulse.sig, helper_forkjoin.sig — the last
+    contributed by the S80 forkjoin task added to extend wrapper coverage).
+    S75 must not perturb this count."""
     fifo_ports = [n for n in fifo_graph["nodes"]
                   if n.get("semantic", {}).get("role") == "function_port"]
     extern_ports = [n for n in extern_graph["nodes"]
@@ -106,7 +108,7 @@ def test_s74_function_port_count_unchanged(fifo_graph, extern_graph):
         f"fifo function_port count drifted: {len(fifo_ports)}; "
         f"names={[p['semantic'].get('name') for p in fifo_ports]}"
     )
-    assert len(extern_ports) == 4, (
+    assert len(extern_ports) == 5, (
         f"extern function_port count drifted: {len(extern_ports)}; "
         f"names={[p['semantic'].get('name') for p in extern_ports]}"
     )

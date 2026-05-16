@@ -444,7 +444,9 @@ def test_s56_function_prototype_promoted(ext_graph):
     role=function_prototype."""
     protos = _by_role(ext_graph, "function_prototype")
     names = sorted(p["semantic"]["name"] for p in protos)
-    assert names == ["helper_add", "helper_log", "helper_pulse"], names
+    assert names == [
+        "helper_add", "helper_forkjoin", "helper_log", "helper_pulse",
+    ], names
 
 
 def test_s56_function_prototype_attributes(ext_graph):
@@ -481,7 +483,7 @@ def test_s56_has_prototype_edge_from_interface(ext_graph):
              if e["type"] == "prototypes"
              and e["src"] == if_id
              and e["dst"] in proto_ids]
-    assert len(edges) == 3, f"expected 3 prototypes edges, got {len(edges)}"
+    assert len(edges) == 4, f"expected 4 prototypes edges, got {len(edges)}"
 
 
 def test_s56_path_key_under_interface(ext_graph):

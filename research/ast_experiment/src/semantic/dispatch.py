@@ -155,7 +155,7 @@ def _deferred_mode_of(node):
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72", "S73", "S74", "S75", "S76", "S77", "S78", "S79"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67", "S68", "S69", "S70", "S71", "S72", "S73", "S74", "S75", "S76", "S77", "S78", "S79", "S80"}
 
 
 def _is_active(fn) -> bool:
@@ -2923,9 +2923,29 @@ def promote(
             # DPI-scope wrappers, ClassMethodPrototype and DPIImport, are
             # owned by S26 and S44 respectively and do NOT push this stack —
             # FunctionPrototype nested in them is silently passed through).
-            # The stack frame carries no payload: presence is the signal.
+            #
+            # S80 — the ExternInterfaceMethodSyntax wrapper itself carries one
+            # attribute that the inner FunctionPrototype does NOT capture:
+            # the optional ``forkjoin`` keyword (LRM 25.10 — ``extern forkjoin
+            # task`` denotes a task whose body, when later supplied via an
+            # ``import`` statement, must be fork/join-decoupled).  Per lesson 5
+            # we do not register the wrapper as its own queryable node; instead
+            # the stack frame carries the ``forkjoin`` discriminator and the
+            # FunctionPrototype branch lifts it onto the S56 attributes dict.
             # Popped on subtree exit below.
-            state["extern_method_stack"].append(True)
+            fj_flag = False
+            try:
+                fj_tok = node.forkJoin
+                if fj_tok is not None:
+                    # Present-and-valid forkjoin keyword surfaces as
+                    # TokenKind.ForkJoinKeyword; an absent slot surfaces as a
+                    # placeholder Token with TokenKind.Unknown and empty
+                    # valueText.
+                    if _token_kind_name(fj_tok) == "ForkJoinKeyword":
+                        fj_flag = True
+            except Exception:
+                fj_flag = False
+            state["extern_method_stack"].append({"forkjoin": fj_flag})
         elif c == "FunctionPrototypeSyntax":
             # S56 — promote a FunctionPrototype whose enclosing wrapper is an
             # ExternInterfaceMethod (i.e. ``extern function|task <name>(...);``
@@ -3019,6 +3039,15 @@ def promote(
                             break
                     if fp_name:
                         fp_path = f"{mname}.{fp_name}"
+                        # S80: lift the wrapper-level ``forkjoin`` flag onto
+                        # this S56 node. The discriminator is set by the
+                        # ExternInterfaceMethodSyntax push above; defaults to
+                        # False when the wrapper omits the keyword (the common
+                        # case — only ``extern forkjoin task`` flips it).
+                        fj_attr = False
+                        ems_top = state["extern_method_stack"][-1]
+                        if isinstance(ems_top, dict):
+                            fj_attr = bool(ems_top.get("forkjoin", False))
                         _mark(nodes_list[node_offset + idx],
                               role="function_prototype",
                               name=fp_name, path=fp_path,
@@ -3027,6 +3056,7 @@ def promote(
                                   "port_count": port_count,
                                   "is_extern": True,
                                   "kind": proto_kind,
+                                  "forkjoin": fj_attr,
                               })
                         _add_edge(graph, mod_gid, gid, "prototypes")
                         name_index[fp_path] = gid

@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 136 | 50 | 126 | 0 | 10 |
+| PROMOTE | 136 | 50 | 127 | 0 | 9 |
 | CONTAINER | 87 | 22 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -74,7 +74,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ExplicitAnsiPort` | ⬜ | ✅ | S64 |
 | `ExplicitNonAnsiPort` | ⬜ | ✅ | S65 |
 | `ExtendsClause` | ✅ | ✅ | S25 |
-| `ExternInterfaceMethod` | ⬜ | ⬜ | future |
+| `ExternInterfaceMethod` | ⬜ | ✅ | S80 |
 | `ExternModuleDecl` | ⬜ | ✅ | S29 |
 | `ExternUdpDecl` | ⬜ | ⬜ | future |
 | `FinalBlock` | ⬜ | ✅ | S37 |
