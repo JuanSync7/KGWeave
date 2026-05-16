@@ -56,12 +56,25 @@ def rule_s47(*args, **kwargs):
     return
 
 
+def _s55_port_decl(*args, **kwargs):
+    """PortDeclaration — non-ANSI port body decls, promoted in pass 1.
+
+    Promotes ``input a;`` / ``output [7:0] b;`` / ``inout wire c;`` etc.
+    inside a non-ANSI module body. Each Declarator under the
+    PortDeclarationSyntax surfaces as role="port" with the direction attribute
+    lifted from the parent Variable/Net/Interface PortHeader. Actual
+    implementation lives in dispatch.promote (pass-1 branch).
+    """
+    return
+
+
 _s1_module_decl.__rule_id__ = "S1"
 _s1_port.__rule_id__ = "S1"
 _s1_param_decl.__rule_id__ = "S1"
 _s1_variable_port_header.__rule_id__ = "S1"
 _s1_declarator.__rule_id__ = "S1"
 rule_s47.__rule_id__ = "S47"
+_s55_port_decl.__rule_id__ = "S55"
 
 
 RULES: list[tuple] = [
@@ -71,4 +84,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.ParameterDeclaration, _s1_param_decl),
     (pyslang.SyntaxKind.Declarator, _s1_declarator),
     (pyslang.SyntaxKind.TimeUnitsDeclaration, rule_s47),
+    (pyslang.SyntaxKind.PortDeclaration, _s55_port_decl),
 ]

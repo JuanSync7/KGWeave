@@ -126,7 +126,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55"}
 
 
 def _is_active(fn) -> bool:
@@ -224,6 +224,12 @@ def promote(
         # so that child Declarator promotions can emit ``groups_net`` edges
         # back to the group node. Entries are gid strings.
         "net_decl_stack": [],
+        # S55: port_decl_stack tracks the enclosing PortDeclarationSyntax
+        # (non-ANSI port body) so that child Declarator promotions surface as
+        # role="port" with the direction attribute lifted from the parent
+        # header (Variable/Net/Interface PortHeader). Entries are
+        # ``{"direction": str}`` dicts.
+        "port_decl_stack": [],
     }
 
     def _cur_module():
@@ -1872,9 +1878,72 @@ def promote(
                     # The visitor below pushes ``in_data`` to surface child
                     # Declarators as role="net" (mirroring DataDeclaration).
                     pushed = "in_data"
+        elif c == "PortDeclarationSyntax":
+            # S55 — promote non-ANSI port body declarations
+            # (``module m(a,b); input a; output [7:0] b; ...``). Distinct from
+            # S1 ImplicitAnsiPort, which handles the ANSI inline form. Layout
+            # (verified via SyntaxTree probe):
+            #   SyntaxList                       -- leading attributes
+            #   <Variable|Net|Interface>PortHeader
+            #     <Input|Output|InOut|Ref>Keyword  (direction)
+            #     [WireKeyword | NetType ...]
+            #     ImplicitTypeSyntax / DataTypeSyntax (type + signing + dims)
+            #   SeparatedList(DeclaratorSyntax, comma, ...)
+            #   Semicolon
+            #
+            # Strategy: extract the direction token from the header, push a
+            # frame onto ``port_decl_stack``; the DeclaratorSyntax branch
+            # below consumes the frame to emit role="port" with the direction
+            # attribute and a ``has_port`` edge from the enclosing module.
+            # Registering each port name in ``port_names_by_module`` keeps the
+            # in_data Declarator branch from re-promoting these as nets and
+            # provides a stable guard for any future Declarator visitor.
+            mod_gid, mname = _cur_module()
+            direction: str | None = None
+            if mod_gid is not None:
+                _DIRECTION_TOKENS = {
+                    "InputKeyword": "input",
+                    "OutputKeyword": "output",
+                    "InOutKeyword": "inout",
+                    "RefKeyword": "ref",
+                }
+                for ch in node:
+                    if ch is None or _is_token(ch):
+                        continue
+                    chkind = str(getattr(ch, "kind", "")).rsplit(".", 1)[-1]
+                    if chkind not in {
+                        "VariablePortHeader", "NetPortHeader",
+                        "InterfacePortHeader", "InterconnectPortHeader",
+                    }:
+                        continue
+                    for sub in ch:
+                        if (sub is not None and _is_token(sub)
+                                and _token_kind_name(sub) in _DIRECTION_TOKENS):
+                            direction = _DIRECTION_TOKENS[_token_kind_name(sub)]
+                            break
+                    break
+                state["port_decl_stack"].append({"direction": direction or ""})
         elif c == "DeclaratorSyntax":
             mod_gid, mname = _cur_module()
             ids = _identifier_tokens(node)
+            # S55: when this Declarator is a child of a PortDeclaration
+            # (non-ANSI port body), promote it as role="port" with the
+            # direction attribute from the parent header. Register the name
+            # in ``port_names_by_module`` so the in_data fall-through in the
+            # net branch below excludes these names from net-promotion (the
+            # same guard S1 ImplicitAnsiPort uses).
+            if (state["port_decl_stack"] and mod_gid is not None and ids
+                    and not state["class_stack"]):
+                pname = ids[0].valueText
+                ppath = f"{mname}.{pname}"
+                frame = state["port_decl_stack"][-1]
+                attrs = {"direction": frame["direction"]} if frame["direction"] else {}
+                _mark(nodes_list[node_offset + idx], role="port",
+                      name=pname, path=ppath,
+                      attributes=attrs)
+                _add_edge(graph, mod_gid, gid, "has_port")
+                name_index[ppath] = gid
+                port_names_by_module.setdefault(mname, set()).add(pname)
             # S26 declarator fan-out: when this Declarator is the 2nd+ name
             # under a ClassPropertyDeclaration (``int a, b, c;``), emit a
             # separate class_property node + has_class_property edge so each
@@ -1987,6 +2056,10 @@ def promote(
         # ``pushed == "in_data"`` *and* the kind being NetDeclarationSyntax).
         if c == "NetDeclarationSyntax" and pushed == "in_data" and state["net_decl_stack"]:
             state["net_decl_stack"].pop()
+        # S55: pop port_decl_stack frame pushed by the PortDeclarationSyntax
+        # branch above so the frame is scoped to this declaration's subtree.
+        if c == "PortDeclarationSyntax" and state["port_decl_stack"]:
+            state["port_decl_stack"].pop()
         if popped_module:
             state["module_stack"].pop()
 

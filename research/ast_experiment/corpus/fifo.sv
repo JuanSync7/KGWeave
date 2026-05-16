@@ -171,3 +171,18 @@ module net_demo;
     supply0 ng;
     wire signed [3:0] nss;
 endmodule
+
+// S55 corpus: non-ANSI module with PortDeclarations in the body.
+// Module header carries an ImplicitNonAnsiPort list (a, b, c, d, e, f); the
+// PortDeclarations in the body bind each name to a direction + type. S55
+// promotes each Declarator under a PortDeclarationSyntax as role="port" with
+// the direction attribute lifted from the parent header (Variable/Net port
+// header). Multiple declarators per PortDeclaration are supported
+// (``output e, f``).
+module nonansi_demo(a, b, c, d, e, f);
+    input  a;
+    output [7:0] b;
+    inout  wire c;
+    input  signed [3:0] d;
+    output e, f;
+endmodule
