@@ -274,6 +274,42 @@ def _s86_interface_port_header(*args, **kwargs):
 _s86_interface_port_header.__rule_id__ = "S86"
 
 
+def _s87_module_header(*args, **kwargs):
+    """S87 — ModuleHeader ownership-only marker.
+
+    ``SyntaxKind.ModuleHeader`` is the header portion of a
+    ``ModuleDeclaration`` — the ``module [lifetime] <name>
+    [#(parameter port list)] [(port list)] ;`` clause that precedes the
+    module body. pyslang reuses the single ``ModuleHeaderSyntax``
+    Python class across the four header SyntaxKind variants
+    (``ModuleHeader`` / ``InterfaceHeader`` / ``PackageHeader`` /
+    ``ProgramHeader`` — lesson 1 shared class, discriminator on
+    ``node.kind``). S87 mirrors S85 (InterfaceHeader) one-for-one.
+
+    Semantic content already lifted onto the parent ``ModuleDeclaration``
+    semantic node (which is itself promoted by S1's
+    ``ModuleDeclarationSyntax`` branch under the ``ModuleDeclaration``
+    kind discriminator — ``dispatch.promote`` flips ``role="module"`` and
+    stamps ``name`` / ``path`` from the header's name token; parameters
+    land via the existing ``ParameterDeclaration`` (S1) branch under the
+    header's ``parameters`` subtree; ports land via the existing
+    ``ImplicitAnsiPort`` / ``ExplicitAnsiPort`` / ``ExplicitNonAnsiPort`` /
+    ``ImplicitNonAnsiPort`` (S1 / S64 / S65 / S66) branches under the
+    header's ``ports`` subtree).
+
+    Per ``CLAUDE.md`` lesson 5 (header ownership marker): we register an
+    **ownership-only stub** so the Bucket-1 checklist marks
+    ``ModuleHeader`` as ``Sem ✅`` (owner S87) without adding a
+    dispatch branch (which would double-promote the module relative to
+    S1's ``ModuleDeclaration`` branch). Mirrors the S85
+    ownership-only pattern.
+    """
+    return
+
+
+_s87_module_header.__rule_id__ = "S87"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ModuleDeclaration, _s1_module_decl),
     (pyslang.SyntaxKind.ImplicitAnsiPort, _s1_port),
@@ -289,4 +325,7 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.PortConcatenation, _s68_port_concatenation),
     (pyslang.SyntaxKind.InterfaceHeader, _s85_interface_header),
     (pyslang.SyntaxKind.InterfacePortHeader, _s86_interface_port_header),
+    # Header ownership marker per lesson 5; semantic content already lifted
+    # onto module nodes by S1. No dispatch branch.
+    (pyslang.SyntaxKind.ModuleHeader, _s87_module_header),
 ]
