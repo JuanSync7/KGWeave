@@ -36,3 +36,8 @@ logs/*.log
 
 # Environment
 .env
+
+# Playwright E2E (demo)
+research/ast_experiment/demo/e2e/node_modules/
+research/ast_experiment/demo/e2e/playwright-report/
+research/ast_experiment/demo/e2e/test-results/

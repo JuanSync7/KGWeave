@@ -574,3 +574,128 @@ covered = 84 / 113
 
 700 passed vs SA4's 668 (+32 new: 5 q8..q12 + 27 tour/gallery), score
 unchanged (33), no regression.
+
+
+## SA6: GH-Pages deploy + Playwright E2E (sandbox-fallback noted)
+
+**Artifacts**:
+- `.github/workflows/demo-deploy.yml` (~95 lines) — on push to main /
+  autoresearch branches: `uv sync` → pytest → rebuild graph.json →
+  validate_demo_html → npm install Playwright → install chromium →
+  `npx playwright test` → stage `_site/web` + `_site/data` + a root-level
+  redirect `index.html` → `peaceiris/actions-gh-pages@v3` to `gh-pages`.
+- `research/ast_experiment/demo/e2e/` — Playwright suite. 6 spec files / 9
+  tests (page-load, graph-code-link, query[×3], tour[×2], gallery,
+  filters). `playwright.config.ts` launches `python3 -m http.server 8765`
+  from `demo/` so the FE's relative `../data/graph.json` fetch resolves
+  identically to the GH-Pages layout (`web/` and `data/` siblings).
+- `research/ast_experiment/demo/README.md` (~55 lines) — user-facing intro
+  with live URL placeholder, local-run, e2e-run.
+- Root `README.md` — appended a "Demo" section linking the demo README.
+- `research/ast_experiment/tests/demo/test_deploy_config.py` (21 tests) —
+  structural-sanity for the workflow YAML, Playwright config, spec DOM
+  selectors, queries.json canned IDs referenced by specs, and that every
+  spec wipes `localStorage` in `beforeEach`.
+
+**Workflow steps (in order)**:
+1. checkout (actions/checkout@v4)
+2. setup-python@v5 with 3.12
+3. astral-sh/setup-uv@v3
+4. `uv sync --extra dev`
+5. `uv run pytest research/ast_experiment/tests/ -x`
+6. `uv run python research/ast_experiment/scripts/export_demo_graph.py`
+7. `uv run python research/ast_experiment/scripts/validate_demo_html.py`
+8. setup-node@v4 with Node 20
+9. `npm ci || npm install` in `demo/e2e`
+10. `npx playwright install --with-deps chromium`
+11. `npx playwright test --reporter=line`
+12. Upload Playwright HTML report as artifact (always, even on failure)
+13. (main only) Stage `_site/{web,data}` + root redirect HTML
+14. (main only) `peaceiris/actions-gh-pages@v3` → publish_branch `gh-pages`
+
+**Expected live URL** (after the user enables Pages in repo Settings →
+Pages → Source = `gh-pages`):
+`https://<your-github-username>.github.io/KGWeave/` — the root publishes
+a `<meta refresh>` to `web/index.html`. We chose root-redirect over
+hosting the SPA at `/web/` because GH-Pages project sites serve from the
+repo's subpath (`/KGWeave/`); the FE's relative `../data/graph.json`
+fetch from `/KGWeave/web/index.html` resolves to `/KGWeave/data/graph.json`
+exactly as it does locally under `python3 -m http.server 8765/web/`.
+
+**Sandbox fallback (honest)**: Playwright's chromium binary refused to
+install in the sandbox (`ERROR: Playwright does not support chromium on
+ubuntu26.04-x64` — the Playwright registry doesn't ship a build for
+Ubuntu 26.04 yet; CI runs on `ubuntu-latest` (24.04) where it works).
+The suite is therefore not exercised locally; instead:
+
+- `npx playwright test --list` succeeds — every spec parses cleanly.
+  Output:
+  ```
+  Total: 9 tests in 6 files
+  ```
+- `test_deploy_config.py` enforces structural sanity that the specs
+  reference selectors that exist in the FE source (`#tour-overlay`,
+  `.tour-meta`, `.gallery-card`, `kgweave.tour.step`, `q1_all_modules`,
+  `q5_top_to_fifo_path`, etc.). If any of those drift, the Python suite
+  goes red before CI ever boots the browser.
+- The Actions workflow runs the real `npx playwright test` on
+  ubuntu-latest in CI; that is where the green-bar comes from.
+
+**Manual-verification checklist (user)** to complete the deploy:
+
+1. Push the branch / merge to `main`.
+2. In repo Settings → Pages, set Source = `Deploy from a branch`,
+   Branch = `gh-pages`, Folder = `/ (root)`. (The first push of the
+   `gh-pages` branch happens automatically once the workflow runs on
+   main.)
+3. Wait for the green check on the `demo-deploy` run; the URL appears
+   in Settings → Pages within ~1 min.
+4. Confirm the redirect at `https://<user>.github.io/KGWeave/` lands
+   on `https://<user>.github.io/KGWeave/web/index.html` and shows the
+   stats line `7222 nodes · 7721 edges · 11 files`.
+
+**Gotchas to record**:
+
+1. **Ubuntu 26.04 Playwright gap** — see above. Re-test once Playwright
+   ships a 26.04 build (or once the sandbox upgrades / downgrades).
+2. **PyYAML `on:` key quirk** — `yaml.safe_load` decodes the bare
+   `on:` trigger key as Python `True` (YAML 1.1 truthy alias). The
+   `test_workflow_yaml_exists_and_parses` test accepts either form
+   rather than quoting the workflow's `on:` key (`"on":`) which would
+   work but be uglier.
+3. **GH-Pages subpath**: the FE uses relative paths (`../data/...`,
+   `./style.css`), so it works under any project-site subpath. No
+   `<base href>` rewrite needed.
+4. **Specs share localStorage**: every spec wipes `kgweave.tour.step`
+   in `beforeEach` (per SA5 lesson 2). The deploy-config test enforces
+   this so a future spec can't silently bleed state.
+5. **No remote runtime fetch** — the FE only fetches relative
+   `graph.json` / `queries.json` / `tour.json` / `gallery.json`; CDN
+   imports happen at module-load time (esm.sh for cytoscape + cm6).
+   Per SA3's `validate_demo_html.py`, this is asserted. Production note:
+   if a paranoid security review wants zero-CDN, run a one-time
+   `npm exec esbuild` to bundle locally; the spec at SPEC §2 explicitly
+   permits CDN ESM.
+
+**Honest reports**:
+
+```
+$ uv run pytest research/ast_experiment/tests/ 2>&1 | tail -1
+================== 721 passed, 1 skipped, 1 warning in 13.77s ==================
+
+$ uv run python research/ast_experiment/scripts/validate_demo_html.py 2>&1 | tail -1
+VALIDATOR OK
+
+$ uv run python research/ast_experiment/scripts/score.py | head -2
+score = 33
+covered = 84 / 113
+
+$ cd research/ast_experiment/demo/e2e && npx playwright test --list 2>&1 | tail -1
+Total: 9 tests in 6 files
+
+$ cd research/ast_experiment/demo/e2e && npx playwright install chromium 2>&1 | tail -1
+Error: ERROR: Playwright does not support chromium on ubuntu26.04-x64
+```
+
+721 vs SA5's 700 (+21 deploy-config), score unchanged (33), no
+regression. Demo pipeline is complete.

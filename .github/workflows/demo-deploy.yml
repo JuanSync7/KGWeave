@@ -1,0 +1,107 @@
+name: demo-deploy
+
+# SA6 deliverable: build the pyslang AST demo (graph.json), run pytest +
+# Playwright E2E, then publish demo/web + demo/data to gh-pages.
+#
+# The site is served from https://<owner>.github.io/KGWeave/ once the user
+# enables Pages in repo Settings -> Pages and points the source to the
+# `gh-pages` branch (this workflow creates and pushes that branch).
+
+on:
+  push:
+    branches:
+      - main
+      - "autoresearch/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: demo-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.4.30"
+
+      - name: uv sync (project deps)
+        run: uv sync --extra dev
+
+      - name: Run pytest (AST experiment suite)
+        run: uv run pytest research/ast_experiment/tests/ -x
+
+      - name: Rebuild demo/data/graph.json
+        run: uv run python research/ast_experiment/scripts/export_demo_graph.py
+
+      - name: Validate demo HTML wiring
+        run: uv run python research/ast_experiment/scripts/validate_demo_html.py
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Playwright deps
+        working-directory: research/ast_experiment/demo/e2e
+        run: npm ci || npm install
+
+      - name: Install Playwright browsers
+        working-directory: research/ast_experiment/demo/e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E suite
+        working-directory: research/ast_experiment/demo/e2e
+        run: npx playwright test --reporter=line
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: research/ast_experiment/demo/e2e/playwright-report
+          if-no-files-found: ignore
+
+      - name: Stage GH-Pages publish directory
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p _site/web _site/data
+          cp -r research/ast_experiment/demo/web/* _site/web/
+          cp -r research/ast_experiment/demo/data/* _site/data/
+          cp research/ast_experiment/demo/README.md _site/README.md || true
+          # The site entry is web/index.html; provide a redirect at the root.
+          cat > _site/index.html <<'HTML'
+          <!doctype html>
+          <meta charset="utf-8" />
+          <title>KGWeave AST Demo</title>
+          <meta http-equiv="refresh" content="0; url=web/index.html" />
+          <link rel="canonical" href="web/index.html" />
+          <p>Redirecting to <a href="web/index.html">web/index.html</a>.</p>
+          HTML
+
+      - name: Deploy to gh-pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_site
+          publish_branch: gh-pages
+          force_orphan: true
+          commit_message: "deploy demo (${{ github.sha }})"

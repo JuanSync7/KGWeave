@@ -40,3 +40,11 @@ owner) treats KGWeave as a black box via these:
 ## Migration Plan
 
 See `docs/MIGRATION.md` for the in-place prep → extract sequence.
+
+## Demo
+
+The pyslang AST experiment ships an interactive GH-Pages demo of the
+SystemVerilog semantic+BLOB knowledge graph. See
+[research/ast_experiment/demo/README.md](research/ast_experiment/demo/README.md)
+for the user guide. Live URL (after enabling Pages on this repo):
+`https://<your-github-username>.github.io/KGWeave/`.
