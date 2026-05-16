@@ -164,6 +164,44 @@ def _s75_stub(*args, **kwargs):
 _s75_stub.__rule_id__ = "S75"
 
 
+def _s76_stub(*args, **kwargs):
+    """DefaultFunctionPort — ownership-only marker (no dispatch branch).
+
+    ``DefaultFunctionPortSyntax`` represents the bare ``default`` keyword
+    that pyslang's grammar allows in a ``FunctionPortListSyntax`` (e.g.
+    ``(default)`` or ``(input int a, default)``). The kind is reserved in
+    pyslang's SyntaxKind enum, but the parser raises
+    ``DiagCode.DefaultArgNotAllowed`` for every instance — no valid
+    SystemVerilog program ever yields a ``DefaultFunctionPort``.
+
+    All KGWeave corpus files are required to round-trip with zero
+    diagnostics, so the kind is unreachable at runtime. Per ``CLAUDE.md``
+    lesson 4 / lesson 5 (kind with no clean-SV instantiation gets an
+    ownership-only stub rather than a dispatch branch), S76 ships as:
+
+      * metadata entry ``(SyntaxKind.DefaultFunctionPort, _s76_stub)``
+        carrying ``__rule_id__='S76'`` here in RULES
+      * ``"S76"`` added to ``dispatch._ACTIVE_RULE_IDS`` so the bucket1
+        checklist regenerator attributes the kind to S76
+      * NO dispatch branch — adding one would be dead code under the
+        zero-diagnostic invariant
+
+    Sibling rule S74 (FunctionPort) and S75 (FunctionPortList wrapper)
+    cover the reachable function-port surface. If a future corpus
+    addition ever produces a ``DefaultFunctionPort`` (it would have to
+    explicitly accept the ``DefaultArgNotAllowed`` diagnostic), promote
+    this stub to a real dispatch branch with the ``function_stack``
+    parent-resolution scheme from S74 — the role would still be
+    ``function_port`` (the ``default`` keyword is itself the lexical
+    "name") with ``direction=data_type=None`` to stay honest about the
+    absent declarator.
+    """
+    return
+
+
+_s76_stub.__rule_id__ = "S76"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ProceduralAssignStatement, _s19_procedural_assign),
     (pyslang.SyntaxKind.ProceduralDeassignStatement, _s19_procedural_deassign),
@@ -179,4 +217,9 @@ RULES: list[tuple] = [
     # S75: Wrapper ownership marker per lesson 5; child FunctionPorts
     # promote via S74. No dispatch branch.
     (pyslang.SyntaxKind.FunctionPortList, _s75_stub),
+    # S76: Ownership marker for DefaultFunctionPort. pyslang reserves the
+    # kind but flags every instance with DefaultArgNotAllowed; the kind is
+    # unreachable in clean-SV corpora and ships as a stub only (lesson 4 /
+    # lesson 5). No dispatch branch.
+    (pyslang.SyntaxKind.DefaultFunctionPort, _s76_stub),
 ]
