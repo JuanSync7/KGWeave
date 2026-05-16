@@ -129,6 +129,36 @@ def _s66_implicit_non_ansi_port(*args, **kwargs):
 _s66_implicit_non_ansi_port.__rule_id__ = "S66"
 
 
+def _s67_port_reference(*args, **kwargs):
+    """PortReference — sub-expression inside non-ANSI port lists.
+
+    PortReferenceSyntax appears in three corpus contexts:
+
+    1. As the ``expr`` child of an ``ImplicitNonAnsiPort`` (legacy bare-name
+       form ``module m(a, b);``). S66 already promotes the enclosing port at
+       path ``<module>.<name>``; S67 attaches role="port_reference" to the
+       inner PortReference node using the SAME path (twin view — lesson-5
+       flavor: the parent port node remains the canonical role=port, and the
+       PortReference is queryable as a separate sub-node for callers who
+       want to find the referenced-identifier sub-expression directly).
+    2. As the connect expression inside an ``ExplicitNonAnsiPort`` (e.g.
+       ``.a(p)``), where it names the internal signal. Path key is
+       ``<module>.port_reference.<name>`` so it does not collide with S65's
+       external-port node at ``<module>.<name>``.
+    3. As an item inside a ``PortConcatenation`` (``{x, y}`` in a non-ANSI
+       header — S68 future). Same path-key shape as case 2.
+
+    Actual implementation lives in dispatch.promote (pass-1 branch). Path
+    key is keyed off the parent SyntaxKind (`_cls` of the immediate parent
+    in the walk stack) so the same PortReferenceSyntax class produces the
+    right path key in each context.
+    """
+    return
+
+
+_s67_port_reference.__rule_id__ = "S67"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.ModuleDeclaration, _s1_module_decl),
     (pyslang.SyntaxKind.ImplicitAnsiPort, _s1_port),
@@ -140,4 +170,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.ExplicitAnsiPort, _s64_explicit_ansi_port),
     (pyslang.SyntaxKind.ExplicitNonAnsiPort, _s65_explicit_non_ansi_port),
     (pyslang.SyntaxKind.ImplicitNonAnsiPort, _s66_implicit_non_ansi_port),
+    (pyslang.SyntaxKind.PortReference, _s67_port_reference),
 ]

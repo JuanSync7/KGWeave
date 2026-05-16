@@ -128,7 +128,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60", "S61", "S62", "S63", "S64", "S65", "S66", "S67"}
 
 
 def _is_active(fn) -> bool:
@@ -272,6 +272,17 @@ def promote(
         # tuples; a sentinel ``(None, "")`` is pushed when the clocking
         # declaration itself was not promoted, keeping pop-on-exit symmetric.
         "clocking_stack": [],
+        # S67: port_ref_parent_stack tracks the enclosing port-shaped
+        # container that a PortReferenceSyntax sits inside. Pushed by S65
+        # (ExplicitNonAnsiPort), S66 (ImplicitNonAnsiPort), and a future S68
+        # (PortConcatenation) branch. Entries are
+        # ``(parent_kind, port_path_or_none)`` where ``parent_kind`` is one
+        # of ``"implicit_non_ansi"``, ``"explicit_non_ansi"``, or
+        # ``"port_concatenation"`` and ``port_path_or_none`` is the path the
+        # parent already promoted (S66 case — twin the PortReference at that
+        # same path) or None (S65 / concatenation case — emit at
+        # ``<module>.port_reference.<name>``).
+        "port_ref_parent_stack": [],
     }
 
     def _cur_module():
@@ -2261,6 +2272,12 @@ def promote(
                     _add_edge(graph, mod_gid, gid, "has_port")
                     name_index[ppath] = gid
                     port_names_by_module.setdefault(mname, set()).add(pname)
+            # S67: push parent-context frame so any PortReferenceSyntax
+            # child (the internal-signal name in ``.a(p)``) promotes at a
+            # distinct path (``<module>.port_reference.<name>``) — the
+            # external port name lives at ``<module>.<external_name>``
+            # already, and overlaying them would collide.
+            state["port_ref_parent_stack"].append(("explicit_non_ansi", None))
             pushed = "in_port"
         elif c == "ImplicitNonAnsiPortSyntax":
             # S66 — legacy non-ANSI bare-name header port form. Lives inside
@@ -2279,6 +2296,7 @@ def promote(
             # queryable_nodes (header view + body view of the same logical
             # port).
             mod_gid, mname = _cur_module()
+            twin_path: str | None = None
             if mod_gid is not None:
                 pname = ""
                 expr = getattr(node, "expr", None)
@@ -2294,7 +2312,70 @@ def promote(
                     _add_edge(graph, mod_gid, gid, "has_port")
                     name_index[ppath] = gid
                     port_names_by_module.setdefault(mname, set()).add(pname)
+                    twin_path = ppath
+            # S67: push parent-context frame. For the simple form (PortRef
+            # naming the bare port name) twin_path holds the path S66 just
+            # bound — the PortReference child gets role=port_reference at
+            # the SAME path (twin view, not a new port). For the
+            # PortConcatenation form twin_path is None — the PortReference
+            # items inside surface at ``<module>.port_reference.<name>``.
+            state["port_ref_parent_stack"].append(
+                ("implicit_non_ansi", twin_path))
             pushed = "in_port"
+        elif c == "PortReferenceSyntax":
+            # S67 — promote the PortReference sub-expression inside non-ANSI
+            # port lists as a queryable ``role=port_reference`` node. The
+            # parent context (pushed by S65 / S66 / future S68) tells us
+            # which path-key convention to use:
+            #
+            # * ``implicit_non_ansi`` w/ twin_path (S66 simple form): the
+            #   enclosing port has already been promoted at the same name
+            #   we'd choose — twin the PortReference at that same path
+            #   (queryable_nodes will surface both the port node and the
+            #   port_reference node; callers querying for PortReference
+            #   sub-shapes find this one). NO new edge, NO name_index
+            #   rebind (S66's port owns the path).
+            # * ``implicit_non_ansi`` w/o twin_path (S66 PortConcatenation
+            #   case — future S68 home), or ``explicit_non_ansi`` (S65
+            #   internal-signal name): emit at
+            #   ``<module>.port_reference.<name>`` — a distinct sub-namespace
+            #   that cannot collide with S65's external port name at
+            #   ``<module>.<name>``. Register in name_index under this
+            #   distinct key so downstream resolvers can find the internal
+            #   signal reference without disturbing the external port.
+            #
+            # Dedup: idempotent on path key — re-emission for the same path
+            # is a no-op (the _mark call is the only side effect for the
+            # twin case; for the standalone case the name_index assignment
+            # is also idempotent). PortReferences outside any tracked
+            # parent context (defensive: should not arise in current
+            # corpus) silently no-op.
+            mod_gid, mname = _cur_module()
+            if (mod_gid is not None
+                    and state["port_ref_parent_stack"]):
+                parent_kind, twin = state["port_ref_parent_stack"][-1]
+                name_tok = getattr(node, "name", None)
+                pref_name = ""
+                if (name_tok is not None
+                        and _is_token(name_tok)
+                        and _token_kind_name(name_tok) == "Identifier"):
+                    pref_name = name_tok.valueText
+                if pref_name:
+                    if twin is not None:
+                        # S66 simple-form twin: share the port's path key.
+                        pref_path = twin
+                    else:
+                        pref_path = (
+                            f"{mname}.port_reference.{pref_name}")
+                    _mark(nodes_list[node_offset + idx],
+                          role="port_reference",
+                          name=pref_name,
+                          path=pref_path,
+                          parent_kind=parent_kind)
+                    if twin is None:
+                        # Only register the standalone path; never overwrite
+                        # the S66 port entry already at ``<module>.<name>``.
+                        name_index.setdefault(pref_path, gid)
         elif c == "GenvarDeclarationSyntax":
             # S38 — promote ``genvar <id1>, <id2>, ...;`` declarations.
             # A single GenvarDeclarationSyntax may declare multiple identifiers
@@ -2970,6 +3051,12 @@ def promote(
                 and pushed_clocking
                 and state["clocking_stack"]):
             state["clocking_stack"].pop()
+        # S67: pop port_ref_parent_stack frame pushed by S65
+        # ExplicitNonAnsiPort or S66 ImplicitNonAnsiPort branches above.
+        # The push is unconditional in those branches, so the pop is too.
+        if (c in ("ExplicitNonAnsiPortSyntax", "ImplicitNonAnsiPortSyntax")
+                and state["port_ref_parent_stack"]):
+            state["port_ref_parent_stack"].pop()
         if popped_module:
             state["module_stack"].pop()
 

@@ -13,7 +13,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 ## Roll-up
 | Class | Count | Struct ✅ | Sem ✅ | Sem ⏳ | Sem ⬜ |
 |--|--|--|--|--|--|
-| PROMOTE | 136 | 50 | 113 | 0 | 23 |
+| PROMOTE | 136 | 50 | 114 | 0 | 22 |
 | CONTAINER | 87 | 22 | 0 | 0 | 0 |
 | BLOB | 213 | 25 | 0 | 0 | 0 |
 | DIRECTIVE | 42 | 0 | 0 | 0 | 0 |
@@ -137,7 +137,7 @@ Per-row checkboxes — no grouping. Each SyntaxKind has its own status.
 | `ParameterValueAssignment` | ✅ | ✅ | S7 |
 | `PortConcatenation` | ⬜ | ⬜ | future |
 | `PortDeclaration` | ⬜ | ✅ | S55 |
-| `PortReference` | ⬜ | ⬜ | future |
+| `PortReference` | ⬜ | ✅ | S67 |
 | `PrimitiveInstantiation` | ⬜ | ✅ | S33 |
 | `ProceduralAssignStatement` | ✅ | ✅ | S19 |
 | `ProceduralDeassignStatement` | ✅ | ✅ | S19 |
