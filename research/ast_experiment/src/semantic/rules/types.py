@@ -337,6 +337,33 @@ def _s58_struct_union_member(*args, **kwargs):
 _s58_struct_union_member.__rule_id__ = "S58"
 
 
+def _s60_virtual_interface_type(*args, **kwargs):
+    """S60 — VirtualInterfaceType promotion ownership marker.
+
+    The actual edge emission runs in ``dispatch.promote`` pass 1 — for each
+    ``VirtualInterfaceTypeSyntax`` node (the type-expression form
+    ``virtual <interface_name> [.<modport>]`` used in class properties and
+    function ports), one ``references_interface`` edge is emitted from the
+    enclosing semantic parent (class property node, or fall back to
+    enclosing class / module) to the referenced interface node.
+
+    Payload:
+      ``modport``     — modport identifier from a ``DotMemberClause`` child,
+                        or ``None`` when the bare-interface form is used.
+      ``unresolved``  — ``True`` (with ``dst="_unresolved.<name>"``) when the
+                        referenced interface is not in the shared
+                        ``semantic_name_index`` (forward / external ref).
+
+    VirtualInterfaceType is registered here as an **edge-only** kind
+    (lesson 4): no independent semantic node is emitted; the metadata stub
+    below is the bucket1 ownership marker so the checklist credits S60.
+    """
+    return
+
+
+_s60_virtual_interface_type.__rule_id__ = "S60"
+
+
 RULES: list[tuple] = [
     (pyslang.SyntaxKind.PackageDeclaration, _s9a_package),
     (pyslang.SyntaxKind.TypedefDeclaration, _s9b_typedef),
@@ -351,4 +378,5 @@ RULES: list[tuple] = [
     (pyslang.SyntaxKind.PackageExportAllDeclaration, rule_s51),
     (pyslang.SyntaxKind.NetTypeDeclaration, rule_s53),
     (pyslang.SyntaxKind.StructUnionMember, _s58_struct_union_member),
+    (pyslang.SyntaxKind.VirtualInterfaceType, _s60_virtual_interface_type),
 ]

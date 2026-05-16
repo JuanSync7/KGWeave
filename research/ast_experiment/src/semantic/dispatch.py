@@ -128,7 +128,7 @@ def _has_deferred_modifier(node) -> bool:
 _PASS2_ACTIVE: set = set()
 # Populated lazily — we resolve by checking the function's __rule_id__ against
 # a known-active set.
-_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59"}
+_ACTIVE_RULE_IDS = {"S2", "S3", "S4", "S5", "S6", "S8", "S12a", "S13", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S51", "S52", "S53", "S54", "S55", "S56", "S57", "S58", "S59", "S60"}
 
 
 def _is_active(fn) -> bool:
@@ -1858,6 +1858,69 @@ def promote(
                         })
                         _add_edge(graph, td_gid, extra_id, "has_member")
                         name_index[extra_path] = extra_id
+        elif c == "VirtualInterfaceTypeSyntax":
+            # S60 — VirtualInterfaceType is an *edge-only* kind (lesson 4):
+            # the type-expression form ``virtual <iface> [#(...)] [.<modport>]``
+            # has no independent semantic identity, it links the enclosing
+            # declarator (class property / function port / data declaration)
+            # to the referenced interface.
+            #
+            # Children layout (verified via probe in iter-078 task):
+            #   TokenKind.VirtualKeyword
+            #   TokenKind.Identifier            — interface name
+            #   [ParameterValueAssignmentSyntax] — optional ``#(...)``
+            #   [DotMemberClauseSyntax]          — optional ``.<modport>``
+            #     ├─ TokenKind.Dot
+            #     └─ TokenKind.Identifier        — modport name
+            #
+            # Source endpoint resolution (declarator-first, then fall back):
+            #   1. Inside a ClassPropertyDeclaration → the class_property node
+            #      (``class_property_pending["decl_gid"]``).
+            #   2. Else inside a class → the enclosing class node
+            #      (``class_stack[-1]``).
+            #   3. Else → the enclosing module / package node.
+            iface_name: str | None = None
+            modport_name: str | None = None
+            for ch in node:
+                if ch is None:
+                    continue
+                if _is_token(ch):
+                    if (_token_kind_name(ch) == "Identifier"
+                            and iface_name is None):
+                        iface_name = ch.valueText
+                else:
+                    sub_kind = str(getattr(ch, "kind", "")).rsplit(".", 1)[-1]
+                    if sub_kind == "DotMemberClause":
+                        for dch in ch:
+                            if dch is None or not _is_token(dch):
+                                continue
+                            if _token_kind_name(dch) == "Identifier":
+                                modport_name = dch.valueText
+                                break
+
+            if iface_name:
+                # Determine source endpoint.
+                src_gid: str | None = None
+                pending = state.get("class_property_pending")
+                if pending is not None:
+                    src_gid = pending.get("decl_gid")
+                if src_gid is None and state["class_stack"]:
+                    src_gid, _ = state["class_stack"][-1]
+                if src_gid is None:
+                    mod_gid_s60, _ = _cur_module()
+                    src_gid = mod_gid_s60
+
+                # Cross-file resolution: the referenced interface may live
+                # in a tree whose pass1 hasn't run yet (build_kg interleaves
+                # files by parse order, not declaration-vs-reference order).
+                # Defer dst resolution to the post-pass1 sweep below by
+                # stashing the (src_gid, iface_name, modport_name) tuple on
+                # the graph; pass1's final loop walks it and emits the
+                # actual edges once name_index is fully populated.
+                if src_gid is not None:
+                    graph.setdefault("_s60_pending", []).append(
+                        (src_gid, iface_name, modport_name)
+                    )
         elif c == "ForwardTypedefDeclarationSyntax":
             # S31 — promote a bare ``typedef <name>;`` forward declaration as
             # its own node. Reuses the ``has_typedef`` edge type so existing
@@ -2648,6 +2711,34 @@ def promote(
                           kind=ext_kind)
     if phase == "pass1":
         return
+
+    # S60 post-pass1 drain — resolve VirtualInterfaceType references now that
+    # every tree has finished pass1 (so name_index has every interface and
+    # modport registered, including cross-file ones). Drain the pending list
+    # so subsequent pass2 calls (one per tree in build_kg) don't re-emit.
+    s60_pending = graph.pop("_s60_pending", None)
+    if s60_pending:
+        for src_gid, iface_name, modport_name in s60_pending:
+            unresolved = False
+            if modport_name is not None:
+                mport_path = f"{iface_name}.{modport_name}"
+                tgt_id = name_index.get(mport_path)
+                if tgt_id is None:
+                    tgt_id = (name_index.get(f"interface:{iface_name}")
+                              or name_index.get(iface_name))
+                    if tgt_id is None:
+                        tgt_id = f"_unresolved.{iface_name}"
+                        unresolved = True
+            else:
+                tgt_id = (name_index.get(f"interface:{iface_name}")
+                          or name_index.get(iface_name))
+                if tgt_id is None:
+                    tgt_id = f"_unresolved.{iface_name}"
+                    unresolved = True
+            payload: dict = {"modport": modport_name}
+            if unresolved:
+                payload["unresolved"] = True
+            _add_edge(graph, src_gid, tgt_id, "references_interface", **payload)
 
     # Pass 2: rule dispatch via RULE_TABLE.
     state2 = {"idx": 0, "module_stack": [], "in_function": 0,

@@ -57,6 +57,7 @@ def test_s24_class_nodes_promoted(cls_graph):
     assert paths == [
         "cls_pkg.base_xact",
         "cls_pkg.data_xact",
+        "cls_pkg.env_xact",
         "cls_pkg.multi_type_xact",
         "cls_pkg.para_xact",
         "cls_pkg.printable",
@@ -75,7 +76,7 @@ def test_s24_has_class_edges(cls_graph):
              if e["type"] == "has_class"
              and e["src"] == pkg["id"]
              and e["dst"] in cls_ids]
-    assert len(edges) == 6, f"expected 6 has_class edges, got {len(edges)}"
+    assert len(edges) == 7, f"expected 7 has_class edges, got {len(edges)}"
 
 
 def test_s24_modifier_attributes(cls_graph):
@@ -301,6 +302,8 @@ def test_s26_class_property_nodes_promoted(cls_graph):
         "cls_pkg.data_xact.instance_count",
         "cls_pkg.data_xact.payload",
         "cls_pkg.data_xact.rnd_field",
+        "cls_pkg.env_xact.vif",
+        "cls_pkg.env_xact.vif_drv",
         "cls_pkg.multi_type_xact.a_val",
         "cls_pkg.multi_type_xact.b_val",
         "cls_pkg.para_xact.value",

@@ -807,3 +807,155 @@ def test_s58_byte_equal_roundtrip():
         f"  expected: {src!r}\n"
         f"  got:      {result!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# S60 — VirtualInterfaceType (edge-only) tests
+# ---------------------------------------------------------------------------
+
+
+IFACE = HERE / "corpus" / "fifo_if.sv"
+
+
+@pytest.fixture(scope="module")
+def cls_iface_graph():
+    """cls_corpus.sv + fifo_if.sv promoted together so virtual-interface
+    handles inside ``env_xact`` can resolve to the real ``fifo_if`` node
+    and its modport ``fifo_if.producer``."""
+    from research.ast_experiment.src.build import build_kg
+
+    graph, _trees, _comp = build_kg([CLS, IFACE])
+    return graph
+
+
+def _refs_iface_edges(graph):
+    return [e for e in graph["edges"] if e["type"] == "references_interface"]
+
+
+def test_s60_references_interface_edge_count(cls_iface_graph):
+    """env_xact has two virtual-interface properties → exactly two
+    references_interface edges."""
+    edges = _refs_iface_edges(cls_iface_graph)
+    # Filter to edges sourced from env_xact properties (path prefix).
+    env_edges = []
+    nodes_by_id = {n["id"]: n for n in cls_iface_graph["nodes"]}
+    for e in edges:
+        src_node = nodes_by_id.get(e["src"])
+        if src_node is None:
+            continue
+        path = src_node.get("semantic", {}).get("path", "")
+        if path.startswith("cls_pkg.env_xact."):
+            env_edges.append(e)
+    assert len(env_edges) == 2, (
+        f"expected 2 references_interface edges from env_xact, "
+        f"got {len(env_edges)}: {env_edges}"
+    )
+
+
+def test_s60_resolves_bare_interface(cls_iface_graph):
+    """``virtual fifo_if vif;`` emits a references_interface edge whose dst
+    is the promoted fifo_if interface node, with modport=None and no
+    unresolved flag."""
+    vif = _by_path(cls_iface_graph, "cls_pkg.env_xact.vif")
+    assert vif is not None, "env_xact.vif class_property not promoted"
+    iface = _by_path(cls_iface_graph, "fifo_if")
+    assert iface is not None, "fifo_if interface not promoted"
+    edges = [e for e in _refs_iface_edges(cls_iface_graph)
+             if e["src"] == vif["id"]]
+    assert len(edges) == 1, f"expected 1 edge from env_xact.vif, got {edges}"
+    e = edges[0]
+    assert e["dst"] == iface["id"], (
+        f"expected dst={iface['id']} (fifo_if), got dst={e['dst']}"
+    )
+    assert e["payload"].get("modport") is None, e
+    assert not e["payload"].get("unresolved", False), e
+
+
+def test_s60_resolves_modport_qualified(cls_iface_graph):
+    """``virtual fifo_if.producer vif_drv;`` emits an edge with
+    modport='producer'. The dst resolves to the modport node when
+    fifo_if.producer is in name_index."""
+    vd = _by_path(cls_iface_graph, "cls_pkg.env_xact.vif_drv")
+    assert vd is not None, "env_xact.vif_drv class_property not promoted"
+    edges = [e for e in _refs_iface_edges(cls_iface_graph)
+             if e["src"] == vd["id"]]
+    assert len(edges) == 1, f"expected 1 edge from env_xact.vif_drv, got {edges}"
+    e = edges[0]
+    assert e["payload"].get("modport") == "producer", e
+    assert not e["payload"].get("unresolved", False), e
+    # dst should be the modport node (fifo_if.producer) when present.
+    modport_node = _by_path(cls_iface_graph, "fifo_if.producer")
+    assert modport_node is not None, "fifo_if.producer modport not promoted"
+    assert e["dst"] == modport_node["id"], (
+        f"expected dst={modport_node['id']} (fifo_if.producer modport), "
+        f"got dst={e['dst']}"
+    )
+
+
+def test_s60_unresolved_fallback_when_interface_missing():
+    """When the referenced interface is not in name_index, the edge dst
+    is ``_unresolved.<name>`` and payload['unresolved'] is True."""
+    import tempfile
+
+    from research.ast_experiment.src.build import build_kg
+
+    src = (
+        "package p;"
+        "  class env;"
+        "    virtual ghost_if vif;"
+        "  endclass"
+        "endpackage"
+    )
+    tmpdir = Path(tempfile.mkdtemp(prefix="s60_unres_"))
+    p = tmpdir / "f.sv"
+    p.write_text(src)
+    graph, _trees, _comp = build_kg([p])
+    edges = [e for e in graph["edges"] if e["type"] == "references_interface"]
+    assert len(edges) == 1, f"expected 1 edge, got {edges}"
+    e = edges[0]
+    assert e["dst"] == "_unresolved.ghost_if", e
+    assert e["payload"].get("unresolved") is True, e
+    assert e["payload"].get("modport") is None, e
+
+
+def test_s60_byte_equal_roundtrip():
+    """S60 must not mutate token payloads. Inline snippet with two virtual-
+    interface forms (bare + modport) must round-trip byte-equal."""
+    import tempfile
+
+    from research.ast_experiment.src.build import build_kg
+    from research.ast_experiment.src.unlift import emit
+
+    src = (
+        "interface bus_if; logic d; modport drv (output d); endinterface "
+        "class e; virtual bus_if h; virtual bus_if.drv h2; endclass"
+    )
+    tmpdir = Path(tempfile.mkdtemp(prefix="s60_rt_"))
+    p = tmpdir / "q.sv"
+    p.write_text(src)
+    graph, _trees, _ = build_kg([p])
+    result = emit(graph)
+    assert src == result, (
+        f"byte-equal round-trip failed after S60 promotion:\n"
+        f"  expected: {src!r}\n"
+        f"  got:      {result!r}"
+    )
+
+
+def test_s60_rule_id_marker_in_types_rules():
+    """S60 is registered in rules/types.py RULES with __rule_id__='S60'
+    on its metadata stub — required for the BUCKET_1 checklist derivation
+    to credit S60 as the owner of VirtualInterfaceType."""
+    import pyslang as _ps
+
+    from research.ast_experiment.src.semantic.rules import types as types_mod
+
+    rules_dict = dict(types_mod.RULES)
+    assert _ps.SyntaxKind.VirtualInterfaceType in rules_dict, (
+        "VirtualInterfaceType missing from rules/types.py RULES"
+    )
+    fn = rules_dict[_ps.SyntaxKind.VirtualInterfaceType]
+    assert getattr(fn, "__rule_id__", None) == "S60", (
+        f"expected __rule_id__='S60', got "
+        f"{getattr(fn, '__rule_id__', None)!r}"
+    )

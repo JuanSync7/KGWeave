@@ -41,6 +41,14 @@ package cls_pkg;
     endfunction
   endclass
 
+  // S60 corpus: VirtualInterfaceType — class properties holding virtual
+  // interface handles. ``vif`` references the bare interface ``fifo_if``;
+  // ``vif_drv`` references ``fifo_if.producer`` (modport-qualified).
+  class env_xact;
+    virtual fifo_if vif;
+    virtual fifo_if.producer vif_drv;
+  endclass
+
 endpackage
 
 // S52 corpus: inline randomize() with { ... } — ConstraintBlock appears
