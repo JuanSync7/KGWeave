@@ -52,8 +52,10 @@ def test_workflow_references_real_paths() -> None:
     assert "research/ast_experiment/scripts/export_demo_graph.py" in text
     assert "research/ast_experiment/scripts/validate_demo_html.py" in text
     assert "research/ast_experiment/demo/e2e" in text
-    # Ensure the publish dir wiring touches both web/ and data/.
-    assert "_site/web" in text and "_site/data" in text
+    # Ensure the publish dir wiring stages the demo under sv-ast-demo/
+    # (so KGWeave's Pages site can grow other sibling sections later).
+    assert "_site/sv-ast-demo" in text
+    assert "_site/sv-ast-demo/data" in text
 
 
 def test_workflow_pins_action_versions() -> None:

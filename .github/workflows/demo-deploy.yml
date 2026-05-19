@@ -82,18 +82,45 @@ jobs:
       - name: Stage GH-Pages publish directory
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          mkdir -p _site/web _site/data
-          cp -r research/ast_experiment/demo/web/* _site/web/
-          cp -r research/ast_experiment/demo/data/* _site/data/
-          cp research/ast_experiment/demo/README.md _site/README.md || true
-          # The site entry is web/index.html; provide a redirect at the root.
+          mkdir -p _site/sv-ast-demo/data
+          cp -r research/ast_experiment/demo/web/* _site/sv-ast-demo/
+          cp -r research/ast_experiment/demo/data/* _site/sv-ast-demo/data/
+          cp research/ast_experiment/demo/README.md _site/sv-ast-demo/README.md || true
+          # Flatten relative fetch paths: locally web/ and data/ are siblings
+          # (so the source uses "../data/"); deployed they're parent+child
+          # under sv-ast-demo/, so "./data/" is the correct relative ref.
+          find _site/sv-ast-demo -maxdepth 1 -name '*.js' -type f -print0 \
+            | xargs -0 sed -i 's|\.\./data/|./data/|g'
+          # Root landing page links into the demo and leaves room for future
+          # KGWeave content (docs, API ref, prod UI) at sibling paths.
           cat > _site/index.html <<'HTML'
           <!doctype html>
+          <html lang="en"><head>
           <meta charset="utf-8" />
-          <title>KGWeave AST Demo</title>
-          <meta http-equiv="refresh" content="0; url=web/index.html" />
-          <link rel="canonical" href="web/index.html" />
-          <p>Redirecting to <a href="web/index.html">web/index.html</a>.</p>
+          <title>KGWeave</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <style>
+            body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+                   max-width: 720px; margin: 4rem auto; padding: 0 1rem;
+                   color: #1a1d24; line-height: 1.55; }
+            h1 { margin-bottom: 0.2rem; }
+            .lead { color: #5b6471; margin-top: 0; }
+            ul { padding-left: 1.2rem; }
+            li { margin: 0.4rem 0; }
+            a { color: #2c6cf2; }
+            code { background: #f1f3f7; padding: 0 0.3em; border-radius: 3px; }
+          </style>
+          </head><body>
+            <h1>KGWeave</h1>
+            <p class="lead">Knowledge-graph extraction for SystemVerilog (and beyond).</p>
+            <h2>Demos</h2>
+            <ul>
+              <li><a href="sv-ast-demo/">SystemVerilog AST demo</a> — interactive pyslang
+                  knowledge graph with 1:1 code↔graph mapping, 12 canned queries,
+                  freeform DSL, and guided tour.</li>
+            </ul>
+            <p><small>Source: <a href="https://github.com/JuanSync7/KGWeave">github.com/JuanSync7/KGWeave</a></small></p>
+          </body></html>
           HTML
 
       - name: Deploy to gh-pages
