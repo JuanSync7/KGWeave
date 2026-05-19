@@ -797,8 +797,21 @@ def _filter_graph_to_origins(
         n["id"] for n in nodes if node_origin[n["id"]].id in touched_origin_ids
     }
     kept_nodes = [n for n in nodes if n["id"] in keep_ids]
+    # ``_unresolved.<name>`` endpoints are NOT in ``graph['nodes']`` — they're
+    # synthesized by the writer's Phase-C.5 placeholder loop when an edge
+    # references an unknown id. Treat them as implicitly-present here so the
+    # filter doesn't strip the edge BEFORE the writer gets a chance to
+    # materialize the placeholder. Without this, every ``imports``,
+    # ``dpi_exports``, ``bind_target``, ... edge to an unresolved symbol is
+    # silently dropped — a lossless-property regression that masks itself
+    # because no exception fires.
+    def _endpoint_ok(eid: Any) -> bool:
+        return (
+            isinstance(eid, str)
+            and (eid in keep_ids or eid.startswith("_unresolved."))
+        )
     kept_edges = [
-        e for e in edges if e.get("src") in keep_ids and e.get("dst") in keep_ids
+        e for e in edges if _endpoint_ok(e.get("src")) and _endpoint_ok(e.get("dst"))
     ]
     kept_order = [oid for oid in order if oid in keep_ids]
     return {"nodes": kept_nodes, "edges": kept_edges, "order": kept_order}
