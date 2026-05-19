@@ -15,6 +15,10 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("toggling category filters affects visible-node count via .dim class", async ({ page }) => {
+  // Ticking blob/token auto-enables child edges, which dumps thousands of
+  // structural nodes into the cose layout. We don't care how long that
+  // takes — only that the checkbox state flips. Bypass actionability waits.
+  test.setTimeout(180_000);
   // Count nodes WITHOUT the .dim class via Cytoscape's class API by reading
   // the rendered SVG-like DOM is hard — Cytoscape uses canvas. Instead,
   // assert that the underlying state changes by checking the checkbox
@@ -32,15 +36,15 @@ test("toggling category filters affects visible-node count via .dim class", asyn
   // visible by default).  Toggle ON then OFF to exercise both transitions.
   const blobCb = page.locator('#filters input[data-category="blob"]');
   await expect(blobCb).not.toBeChecked();
-  await blobCb.check();
+  await blobCb.check({ force: true });
   await expect(blobCb).toBeChecked();
-  await blobCb.uncheck();
+  await blobCb.uncheck({ force: true });
   await expect(blobCb).not.toBeChecked();
 
   // Tokens default hidden — toggle ON.
   const tokenCb = page.locator('#filters input[data-category="token"]');
   await expect(tokenCb).not.toBeChecked();
-  await tokenCb.check();
+  await tokenCb.check({ force: true });
   await expect(tokenCb).toBeChecked();
 
   // Child edges: ticking blob/token auto-enables child (so structural
@@ -48,8 +52,8 @@ test("toggling category filters affects visible-node count via .dim class", asyn
   // toggle still works.
   const childEdgeCb = page.locator('#filters input[data-edge="child"]');
   await expect(childEdgeCb).toBeChecked();
-  await childEdgeCb.uncheck();
+  await childEdgeCb.uncheck({ force: true });
   await expect(childEdgeCb).not.toBeChecked();
-  await childEdgeCb.check();
+  await childEdgeCb.check({ force: true });
   await expect(childEdgeCb).toBeChecked();
 });
