@@ -268,19 +268,26 @@ the python `semantic/queries/` helper.
 parameterized Cypher; RawCypher rejects writes; on the fixture corpus,
 each intent type returns the documented shape.
 
-### Phase E — incremental merge
+### Phase E — incremental merge — **COMPLETE**
 **Deliverable:** `store/kuzu.py` extract path keyed on
-`(source, corpus, origin_id, origin_sha256)`.
+`(uri, source, corpus)` (live origin) + `sha256` (change detection).
+Original plan said `(source, corpus, origin_id, origin_sha256)`; the
+implementation keys on `(uri, source, corpus)` because `origin_id`
+embeds the sha and so cannot be a stable replacement key. Behaviour
+matches the original intent.
 **Gate (I6 + I7):** double-extract → zero deltas; touch-one-file → only its
 subtree replaced; `source='probe'` hand-written rows survive an SV
 re-extract.
 
-### Phase F — facade + connector protocol + e2e
-**Deliverable:** `src/knowledge_graph/__init__.py`, `connectors/protocol.py`,
-`examples/quickstart.py`.
+### Phase F — facade + connector protocol + e2e — **COMPLETE**
+**Deliverable:** `src/knowledge_graph/__init__.py` (full public API),
+`connectors/protocol.py` (Connector Protocol), `connectors/__init__.py`
+(trivial `SemanticSelfRefConnector` to exercise the registry),
+`examples/quickstart.py` (runnable end-to-end).
 **Gate:** `python -m knowledge_graph.examples.quickstart` runs end-to-end
 against the fixture, exercising open_store → register SV builder → extract
-→ intent query → raw Cypher query → source_at.
+→ intent query → raw Cypher query → source_at. Enforced by
+`tests/knowledge_graph/facade/`.
 
 ## Subagent operating contract
 
