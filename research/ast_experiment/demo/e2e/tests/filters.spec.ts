@@ -28,21 +28,27 @@ test("toggling category filters affects visible-node count via .dim class", asyn
   });
   expect(blobCount).toBeGreaterThan(0);
 
-  // Toggle blob OFF.
+  // Default: blob hidden (post-iter-114 UX — only semantic + unresolved
+  // visible by default).  Toggle ON then OFF to exercise both transitions.
   const blobCb = page.locator('#filters input[data-category="blob"]');
+  await expect(blobCb).not.toBeChecked();
+  await blobCb.check();
   await expect(blobCb).toBeChecked();
   await blobCb.uncheck();
   await expect(blobCb).not.toBeChecked();
 
-  // Toggle tokens ON (default hidden) — the count of visible cytoscape
-  // canvas pixels won't be assertable, but the DOM checkbox state is.
+  // Tokens default hidden — toggle ON.
   const tokenCb = page.locator('#filters input[data-category="token"]');
   await expect(tokenCb).not.toBeChecked();
   await tokenCb.check();
   await expect(tokenCb).toBeChecked();
 
-  // Toggle child edges ON.
+  // Child edges: ticking blob/token auto-enables child (so structural
+  // nodes don't appear as a disconnected cloud). Confirm and that manual
+  // toggle still works.
   const childEdgeCb = page.locator('#filters input[data-edge="child"]');
+  await expect(childEdgeCb).toBeChecked();
+  await childEdgeCb.uncheck();
   await expect(childEdgeCb).not.toBeChecked();
   await childEdgeCb.check();
   await expect(childEdgeCb).toBeChecked();

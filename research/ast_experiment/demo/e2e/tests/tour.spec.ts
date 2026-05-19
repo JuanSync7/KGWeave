@@ -7,10 +7,14 @@
 import { test, expect } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
+  // NOTE: do NOT use addInitScript to clear localStorage — Playwright re-runs
+  // init scripts on every page nav including page.reload(), which would wipe
+  // the tour step state this suite explicitly tests for persistence.
+  await page.goto("index.html");
+  await page.evaluate(() => {
     try { window.localStorage.clear(); } catch (_) {}
   });
-  await page.goto("index.html");
+  await page.reload();
   await expect(page.locator("#stats")).not.toHaveText(/loading/i, { timeout: 30_000 });
 });
 

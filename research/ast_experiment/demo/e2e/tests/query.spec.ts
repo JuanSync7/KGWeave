@@ -17,7 +17,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("canned query q5 returns a path and animates edges", async ({ page }) => {
-  await page.locator("#query-select").selectOption("q5_top_to_fifo_path");
+  await page.locator('.chip[data-query-id="q5_top_to_fifo_path"]').click();
   // Results header updates with a "N nodes · M edges" summary.
   const summary = page.locator("#results-summary");
   await expect(summary).toContainText(/\d+ nodes/);
@@ -43,7 +43,7 @@ test("freeform 'role=port file=fifo' returns ports in fifo", async ({ page }) =>
 });
 
 test("clear button resets the results panel", async ({ page }) => {
-  await page.locator("#query-select").selectOption("q1_all_modules");
+  await page.locator('.chip[data-query-id="q1_all_modules"]').click();
   await expect(page.locator("#results-list li").first()).toBeVisible();
   await page.locator("#query-clear").click();
   await expect(page.locator("#results-summary")).toContainText(/no query/);

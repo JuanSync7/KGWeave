@@ -59,7 +59,7 @@ test("clicking a graph node populates the inspector and highlights code", async 
 
   // Easier path: run the canned query q1_all_modules then click the
   // matching result-list entry, which calls renderInspector + highlight.
-  await page.locator("#query-select").selectOption("q1_all_modules");
+  await page.locator('.chip[data-query-id="q1_all_modules"]').click();
   // Wait for results to render.
   await expect(page.locator("#results-list li")).not.toHaveCount(0, { timeout: 10_000 });
 
