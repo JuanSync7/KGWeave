@@ -689,6 +689,7 @@ def extract(
     corpus: str,
     lang: str = "systemverilog",
     prune: bool = False,
+    gc: bool = False,
 ) -> tuple[dict[str, Any] | None, dict[str, OriginRef], ExtractStats]:
     """Incremental SV extract with replacement semantics.
 
@@ -704,6 +705,15 @@ def extract(
     If ``prune=True``, any current origin for ``(source, corpus)`` whose
     ``uri`` is not in the input set is swept the same way (use for "this is
     now the complete corpus" semantics).
+
+    If ``gc=True``, the call (a) implies ``prune=True`` — the input set is
+    the complete corpus and origins outside it within
+    ``(source, corpus)`` are swept — and (b) runs
+    :meth:`KGStore.prune_orphaned_origins` scoped to ``(source, corpus)``
+    once writes complete, dropping any Origin row that ended up without a
+    child Node. The double-sweep is cheap on a clean store
+    (idempotent — returns 0) and closes the orphan-hygiene gap surfaced
+    by JOURNAL v1.2 item #5.
 
     The Cypher write step only pushes nodes whose origin is in the
     ``touched_paths`` set. Untouched origins, their nodes, and rels between
@@ -740,7 +750,8 @@ def extract(
         touched_paths.append(p)
         stats_e.touched_paths.append(uri)
 
-    if prune:
+    effective_prune = prune or gc
+    if effective_prune:
         res = store.conn.execute(
             """
             MATCH (o:Origin)
@@ -757,6 +768,8 @@ def extract(
                 stats_e.deleted_paths.append(uri)
 
     if not touched_paths:
+        if gc:
+            store.prune_orphaned_origins(source=source, corpus=corpus)
         return None, origins_by_prefix, stats_e
 
     for p in touched_paths:
@@ -774,6 +787,8 @@ def extract(
         store, filtered, source=source, corpus=corpus, origins=origins_by_prefix
     )
     stats_e.write_stats = write_stats
+    if gc:
+        store.prune_orphaned_origins(source=source, corpus=corpus)
     return graph, origins_by_prefix, stats_e
 
 

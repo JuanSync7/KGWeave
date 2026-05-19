@@ -157,6 +157,84 @@ class KGStore:
         # Silence the unused result.
         del ids_res
 
+    # --------------------------------------------------------------- gc
+
+    def prune_orphaned_origins(
+        self,
+        *,
+        source: str | None = None,
+        corpus: str | None = None,
+    ) -> int:
+        """Sweep ``:Origin`` rows that own zero ``:Node`` children.
+
+        Replacement-merge (``delete_origin_subtree`` + re-write) deletes
+        the Nodes of a swapped file, but the Origin row itself is also
+        deleted in that path. Orphan rows still arise when:
+
+        * a Node is hand-deleted, leaving its Origin childless;
+        * a partial extract materializes the Origin row but crashes before
+          writing any Nodes;
+        * a builder is retired and its rows are torn down piecewise.
+
+        This method DETACH-DELETEs every Origin with no child Node (no row
+        in ``Node`` carrying ``origin_id`` equal to ``o.id``). Optional
+        ``source`` / ``corpus`` filters scope the sweep to a single
+        builder + corpus pair — critical for I7-style isolation so one
+        builder's GC pass cannot drop another builder's orphans.
+
+        Returns the number of Origin rows deleted. Idempotent: a second
+        call on a clean store returns 0.
+
+        Note: ``content`` lives on the Origin row itself — deleting the
+        Origin also drops its content blob. Callers must re-snapshot to
+        recreate it.
+        """
+        cypher_select = "MATCH (o:Origin)"
+        where: list[str] = []
+        params: dict[str, str] = {}
+        if source is not None:
+            where.append("o.source = $source")
+            params["source"] = source
+        if corpus is not None:
+            where.append("o.corpus = $corpus")
+            params["corpus"] = corpus
+        # Two-step: collect orphan ids first (a subquery NOT EXISTS form
+        # would be cleaner, but Kuzu 0.11.x doesn't support correlated
+        # NOT EXISTS subqueries in WHERE the way openCypher does). Match
+        # all candidate origins, then drop those that have any Node child.
+        select_clauses = list(where)
+        cypher = cypher_select + (
+            " WHERE " + " AND ".join(select_clauses) if select_clauses else ""
+        ) + " RETURN o.id"
+        res = self._conn.execute(cypher, params) if params else self._conn.execute(cypher)
+        candidate_ids: list[str] = []
+        while res.has_next():
+            candidate_ids.append(res.get_next()[0])
+
+        if not candidate_ids:
+            return 0
+
+        # Find which of those have at least one Node child.
+        live: set[str] = set()
+        for oid in candidate_ids:
+            child_res = self._conn.execute(
+                "MATCH (n:Node) WHERE n.origin_id = $oid RETURN n.id LIMIT 1",
+                {"oid": oid},
+            )
+            if child_res.has_next():
+                live.add(oid)
+
+        deleted = 0
+        for oid in candidate_ids:
+            if oid in live:
+                continue
+            self._conn.execute(
+                "MATCH (o:Origin {id: $oid}) DETACH DELETE o",
+                {"oid": oid},
+            )
+            deleted += 1
+        return deleted
+
     # --------------------------------------------------------------- close
 
     def close(self) -> None:

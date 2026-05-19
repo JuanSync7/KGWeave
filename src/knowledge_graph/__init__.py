@@ -190,6 +190,21 @@ def source_at(
     return store.source_at(origin_id, start, end)
 
 
+def prune_orphaned_origins(
+    store: KGStore,
+    *,
+    source: str | None = None,
+    corpus: str | None = None,
+) -> int:
+    """Sweep ``:Origin`` rows that own zero ``:Node`` children.
+
+    Thin facade wrapper over :meth:`KGStore.prune_orphaned_origins`.
+    Returns the number of Origins deleted; idempotent on a clean store.
+    See the method docstring for scoping and isolation semantics.
+    """
+    return store.prune_orphaned_origins(source=source, corpus=corpus)
+
+
 def run_connectors(
     store: KGStore, *, only: list[str] | None = None
 ) -> dict[str, int]:
@@ -252,6 +267,7 @@ __all__ = [
     "query",
     "cypher",
     "source_at",
+    "prune_orphaned_origins",
     "register_connector",
     "run_connectors",
     # core types
