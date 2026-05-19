@@ -35,7 +35,7 @@ CLS = HERE / "corpus" / "cls_corpus.sv"
 def multi_graph(tmp_path_factory):
     """fifo_pkg.sv + fifo.sv promoted into a single shared graph via the
     production build_kg path (mirrors tests/queries/test_multi.py)."""
-    from research.ast_experiment.src.build import build_kg
+    from knowledge_graph.builders.sv.build import build_kg
 
     graph, _trees, _comp = build_kg([PKG, FIFO])
     return graph
@@ -47,7 +47,7 @@ def _build_inline_graph(*sv_texts):
     identical to production."""
     import tempfile
 
-    from research.ast_experiment.src.build import build_kg
+    from knowledge_graph.builders.sv.build import build_kg
 
     tmpdir = Path(tempfile.mkdtemp(prefix="s32_"))
     paths = []
@@ -65,8 +65,8 @@ def pkg_graph():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -344,8 +344,8 @@ def test_s50_byte_equal_roundtrip():
     """Byte-equal roundtrip: S50 must not mutate token payloads. The fifo.sv
     corpus (which carries the multi-item import) must round-trip identically
     through lift → promote → emit."""
-    from research.ast_experiment.src.build import build_kg
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.build import build_kg
+    from knowledge_graph.builders.sv.unlift import emit
 
     fifo_path = HERE / "corpus" / "fifo.sv"
     fifo_pkg_path = HERE / "corpus" / "fifo_pkg.sv"
@@ -389,7 +389,7 @@ def test_s50_does_not_disturb_s32_imports_edges(multi_graph):
 @pytest.fixture(scope="module")
 def fifo_graph():
     """fifo.sv alone — exercises the module-scoped type parameter."""
-    from research.ast_experiment.src.build import build_kg
+    from knowledge_graph.builders.sv.build import build_kg
 
     graph, _trees, _comp = build_kg([FIFO])
     return graph
@@ -398,7 +398,7 @@ def fifo_graph():
 @pytest.fixture(scope="module")
 def cls_graph():
     """cls_corpus.sv alone — exercises class-scoped type parameters."""
-    from research.ast_experiment.src.build import build_kg
+    from knowledge_graph.builders.sv.build import build_kg
 
     graph, _trees, _comp = build_kg([CLS])
     return graph
@@ -494,7 +494,7 @@ def test_s48_multi_assignment_both_edges(cls_graph):
 
 def test_s48_no_default_type_is_absent(tmp_path):
     """``parameter type T;`` (no default) promotes with no default_type attr."""
-    from research.ast_experiment.src.build import build_kg
+    from knowledge_graph.builders.sv.build import build_kg
 
     sv = tmp_path / "nodefault.sv"
     sv.write_text("module m #(parameter type T); endmodule\n")
@@ -509,8 +509,8 @@ def test_s48_no_default_type_is_absent(tmp_path):
 def test_s48_roundtrip(fifo_graph):
     """Byte-equal round-trip: lift → promote → emit must reproduce the
     source text for fifo.sv, confirming S48 did not mutate token payloads."""
-    from research.ast_experiment.src.build import build_kg
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.build import build_kg
+    from knowledge_graph.builders.sv.unlift import emit
 
     fifo_path = HERE / "corpus" / "fifo.sv"
     graph, _trees, _ = build_kg([fifo_path])
@@ -562,8 +562,8 @@ def test_s51_byte_equal_roundtrip():
     promote → emit must not mutate any token payloads introduced by S51.
     We build a single-file graph from an inline SV snippet (no trailing-EOF
     quirk) to verify the token stream is preserved exactly."""
-    from research.ast_experiment.src.build import build_kg
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.build import build_kg
+    from knowledge_graph.builders.sv.unlift import emit
     import tempfile
 
     # Use a self-contained snippet so the test is not sensitive to the
@@ -669,8 +669,8 @@ def test_s53_byte_equal_roundtrip():
     for the same pattern)."""
     import tempfile
 
-    from research.ast_experiment.src.build import build_kg
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.build import build_kg
+    from knowledge_graph.builders.sv.unlift import emit
 
     src = (
         "package p;"
@@ -788,8 +788,8 @@ def test_s58_byte_equal_roundtrip():
     union (multi-declarator forms included) must round-trip byte-equal."""
     import tempfile
 
-    from research.ast_experiment.src.build import build_kg
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.build import build_kg
+    from knowledge_graph.builders.sv.unlift import emit
 
     src = (
         "package q;"
@@ -822,7 +822,7 @@ def cls_iface_graph():
     """cls_corpus.sv + fifo_if.sv promoted together so virtual-interface
     handles inside ``env_xact`` can resolve to the real ``fifo_if`` node
     and its modport ``fifo_if.producer``."""
-    from research.ast_experiment.src.build import build_kg
+    from knowledge_graph.builders.sv.build import build_kg
 
     graph, _trees, _comp = build_kg([CLS, IFACE])
     return graph
@@ -897,7 +897,7 @@ def test_s60_unresolved_fallback_when_interface_missing():
     is ``_unresolved.<name>`` and payload['unresolved'] is True."""
     import tempfile
 
-    from research.ast_experiment.src.build import build_kg
+    from knowledge_graph.builders.sv.build import build_kg
 
     src = (
         "package p;"
@@ -923,8 +923,8 @@ def test_s60_byte_equal_roundtrip():
     interface forms (bare + modport) must round-trip byte-equal."""
     import tempfile
 
-    from research.ast_experiment.src.build import build_kg
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.build import build_kg
+    from knowledge_graph.builders.sv.unlift import emit
 
     src = (
         "interface bus_if; logic d; modport drv (output d); endinterface "
@@ -948,7 +948,7 @@ def test_s60_rule_id_marker_in_types_rules():
     to credit S60 as the owner of VirtualInterfaceType."""
     import pyslang as _ps
 
-    from research.ast_experiment.src.semantic.rules import types as types_mod
+    from knowledge_graph.builders.sv.semantic.rules import types as types_mod
 
     rules_dict = dict(types_mod.RULES)
     assert _ps.SyntaxKind.VirtualInterfaceType in rules_dict, (
@@ -1014,8 +1014,8 @@ def test_s63_forward_typedef_interface_class_restriction(pkg_graph):
 def test_s63_roundtrip_fifo_pkg():
     """Byte-equal round-trip on fifo_pkg.sv after extending it with five
     restriction-tagged forward typedefs — lossless structural lift holds."""
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.unlift import emit
 
     src = PKG.read_text()
     tree = pyslang.SyntaxTree.fromText(src)
@@ -1035,7 +1035,7 @@ def test_s63_rule_id_marker_in_types_rules():
     to credit S63 as the owner of ForwardTypeRestriction."""
     import pyslang as _ps
 
-    from research.ast_experiment.src.semantic.rules import types as types_mod
+    from knowledge_graph.builders.sv.semantic.rules import types as types_mod
 
     rules_dict = dict(types_mod.RULES)
     assert _ps.SyntaxKind.ForwardTypeRestriction in rules_dict, (

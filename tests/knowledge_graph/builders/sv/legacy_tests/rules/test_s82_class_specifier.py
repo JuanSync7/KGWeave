@@ -50,14 +50,14 @@ import pyslang
 def test_s82_in_active_rule_ids():
     """S82 must be listed in ``_ACTIVE_RULE_IDS`` so the bucket1 checklist
     regenerator treats the stub as a live owner."""
-    from research.ast_experiment.src.semantic.dispatch import _ACTIVE_RULE_IDS
+    from knowledge_graph.builders.sv.semantic.dispatch import _ACTIVE_RULE_IDS
     assert "S82" in _ACTIVE_RULE_IDS
 
 
 def test_s82_stub_owns_class_specifier():
     """The metadata stub registered for ``SyntaxKind.ClassSpecifier`` must
     pin ``__rule_id__ == 'S82'``."""
-    from research.ast_experiment.src.semantic.rules import types
+    from knowledge_graph.builders.sv.semantic.rules import types
     matches = [
         fn for (kind, fn) in types.RULES
         if kind == pyslang.SyntaxKind.ClassSpecifier
@@ -72,7 +72,7 @@ def test_s82_dispatches_through_rule_table():
     """``SyntaxKind.ClassSpecifier`` must resolve through the composed
     RULE_TABLE (i.e. no duplicate-dispatch assertion fires when the
     rules package is imported, and the kind maps to the S82 stub)."""
-    from research.ast_experiment.src.semantic.rules import RULE_TABLE
+    from knowledge_graph.builders.sv.semantic.rules import RULE_TABLE
     fn = RULE_TABLE.get(pyslang.SyntaxKind.ClassSpecifier)
     assert fn is not None, (
         "ClassSpecifier missing from RULE_TABLE — types.RULES did not "

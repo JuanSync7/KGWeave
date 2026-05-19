@@ -33,8 +33,8 @@ def bind_graph():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -187,8 +187,8 @@ def test_s23_synthetic_coverpoint_name_fallback():
     endmodule
     """
     import pyslang  # noqa: PLC0415
-    from research.ast_experiment.src.lift import lift  # noqa: PLC0415
-    from research.ast_experiment.src.semantic import promote  # noqa: PLC0415
+    from knowledge_graph.builders.sv.lift import lift  # noqa: PLC0415
+    from knowledge_graph.builders.sv.semantic import promote  # noqa: PLC0415
 
     tree = pyslang.SyntaxTree.fromText(src)
     comp = pyslang.Compilation()
@@ -257,14 +257,14 @@ def test_s41_array_form_attribute(bind_graph):
 def test_s41_roundtrip(bind_graph):
     """Bins promotion must not alter the lossless round-trip property: every
     corpus file lifts and emits to byte-equal source."""
-    from research.ast_experiment.src.unlift import emit  # noqa: PLC0415
+    from knowledge_graph.builders.sv.unlift import emit  # noqa: PLC0415
 
     text = BIND.read_text()
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift  # noqa: PLC0415
-    from research.ast_experiment.src.semantic import promote  # noqa: PLC0415
+    from knowledge_graph.builders.sv.lift import lift  # noqa: PLC0415
+    from knowledge_graph.builders.sv.semantic import promote  # noqa: PLC0415
 
     graph = lift(tree)
     promote(graph, tree, comp)

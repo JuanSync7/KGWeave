@@ -32,8 +32,8 @@ def genvar_graph():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -141,8 +141,8 @@ def test_s38_name_index_registration(genvar_graph):
 def test_s38_roundtrip():
     """lift → emit reconstructs original fifo.sv text exactly (byte-equal)."""
     import pyslang as _pyslang
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.unlift import emit
 
     text = FIFO.read_text()
     tree = _pyslang.SyntaxTree.fromText(text)

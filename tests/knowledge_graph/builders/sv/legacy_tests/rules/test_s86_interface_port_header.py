@@ -55,8 +55,8 @@ def _build(src: Path):
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -78,7 +78,7 @@ def fifo_bundle():
 def test_s86_in_active_rule_ids():
     """S86 must be listed in ``_ACTIVE_RULE_IDS`` so the bucket1 checklist
     regenerator treats the stub as a live owner."""
-    from research.ast_experiment.src.semantic.dispatch import _ACTIVE_RULE_IDS
+    from knowledge_graph.builders.sv.semantic.dispatch import _ACTIVE_RULE_IDS
     assert "S86" in _ACTIVE_RULE_IDS
 
 
@@ -86,7 +86,7 @@ def test_s86_stub_owns_interface_port_header():
     """The metadata stub registered for ``SyntaxKind.InterfacePortHeader``
     must pin ``__rule_id__ == 'S86'`` and there must be exactly one
     registration for the kind."""
-    from research.ast_experiment.src.semantic.rules import structure
+    from knowledge_graph.builders.sv.semantic.rules import structure
     matches = [
         fn for (kind, fn) in structure.RULES
         if kind == pyslang.SyntaxKind.InterfacePortHeader
@@ -101,7 +101,7 @@ def test_s86_stub_owns_interface_port_header():
 def test_s86_dispatches_through_rule_table():
     """``SyntaxKind.InterfacePortHeader`` must resolve through the composed
     ``RULE_TABLE`` to the S86 stub."""
-    from research.ast_experiment.src.semantic.rules import RULE_TABLE
+    from knowledge_graph.builders.sv.semantic.rules import RULE_TABLE
     fn = RULE_TABLE.get(pyslang.SyntaxKind.InterfacePortHeader)
     assert fn is not None, (
         "InterfacePortHeader missing from RULE_TABLE — structure.RULES "
@@ -183,8 +183,8 @@ def test_s86_round_trip_token_stream():
     """Round-trip the iface_port_corpus.sv source through the lift + emit
     pipeline; the reparsed token text stream must match the original
     (same oracle the test_roundtrip suite uses)."""
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.unlift import emit
 
     def _token_text_stream(node, out=None):
         if out is None:

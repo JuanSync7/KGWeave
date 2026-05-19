@@ -47,14 +47,14 @@ import pyslang
 def test_s83_in_active_rule_ids():
     """S83 must be listed in ``_ACTIVE_RULE_IDS`` so the bucket1 checklist
     regenerator treats the stub as a live owner."""
-    from research.ast_experiment.src.semantic.dispatch import _ACTIVE_RULE_IDS
+    from knowledge_graph.builders.sv.semantic.dispatch import _ACTIVE_RULE_IDS
     assert "S83" in _ACTIVE_RULE_IDS
 
 
 def test_s83_stub_owns_constructor_name():
     """The metadata stub registered for ``SyntaxKind.ConstructorName`` must
     pin ``__rule_id__ == 'S83'``."""
-    from research.ast_experiment.src.semantic.rules import types
+    from knowledge_graph.builders.sv.semantic.rules import types
     matches = [
         fn for (kind, fn) in types.RULES
         if kind == pyslang.SyntaxKind.ConstructorName
@@ -69,7 +69,7 @@ def test_s83_dispatches_through_rule_table():
     """``SyntaxKind.ConstructorName`` must resolve through the composed
     RULE_TABLE (i.e. no duplicate-dispatch assertion fires when the
     rules package is imported, and the kind maps to the S83 stub)."""
-    from research.ast_experiment.src.semantic.rules import RULE_TABLE
+    from knowledge_graph.builders.sv.semantic.rules import RULE_TABLE
     fn = RULE_TABLE.get(pyslang.SyntaxKind.ConstructorName)
     assert fn is not None, (
         "ConstructorName missing from RULE_TABLE — types.RULES did not "

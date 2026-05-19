@@ -27,7 +27,7 @@ TOP = HERE / "corpus" / "top.sv"
 
 @pytest.fixture(scope="module")
 def prim_graph():
-    from research.ast_experiment.src.build import build_kg
+    from knowledge_graph.builders.sv.build import build_kg
 
     graph, _trees, _comp = build_kg([PRIM])
     return graph
@@ -141,7 +141,7 @@ def test_rule_s33_metadata_registered():
     """The new rule is registered in the dispatch table with __rule_id__=S33."""
     import pyslang  # noqa: PLC0415
 
-    from research.ast_experiment.src.semantic.dispatch import RULE_TABLE
+    from knowledge_graph.builders.sv.semantic.dispatch import RULE_TABLE
     fn = RULE_TABLE.get(pyslang.SyntaxKind.PrimitiveInstantiation)
     assert fn is not None
     assert getattr(fn, "__rule_id__", None) == "S33"
@@ -152,8 +152,8 @@ def test_round_trip_primitive_instantiation():
     lift→emit→reparse, mirroring the round-trip oracle used by S6/S7/S13."""
     import pyslang  # noqa: PLC0415
 
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.unlift import emit
 
     src = PRIM.read_text()
     tree = pyslang.SyntaxTree.fromText(src)
@@ -189,7 +189,7 @@ def test_round_trip_primitive_instantiation():
 @pytest.fixture(scope="module")
 def top_graph():
     """Build a combined FIFO+TOP graph so defparam u_fifo.DEPTH resolves."""
-    from research.ast_experiment.src.build import build_kg
+    from knowledge_graph.builders.sv.build import build_kg
 
     graph, _trees, _comp = build_kg([FIFO, TOP])
     return graph
@@ -212,7 +212,7 @@ TB = HERE / "corpus" / "tb_fifo.sv"
 @pytest.fixture(scope="module")
 def tb_graph():
     """Build the tb_fifo graph which now contains an anonymous program block."""
-    from research.ast_experiment.src.build import build_kg
+    from knowledge_graph.builders.sv.build import build_kg
 
     graph, _trees, _comp = build_kg([TB])
     return graph
@@ -285,8 +285,8 @@ def test_s49_round_trip_anon_program():
     """AnonymousProgramSyntax round-trips byte-equal through lift→emit→reparse."""
     import pyslang  # noqa: PLC0415
 
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.unlift import emit
 
     src = TB.read_text()
     tree = pyslang.SyntaxTree.fromText(src)
@@ -318,7 +318,7 @@ def test_s49_rule_registered():
     """S49 is registered in the RULE_TABLE under AnonymousProgram."""
     import pyslang  # noqa: PLC0415
 
-    from research.ast_experiment.src.semantic.dispatch import RULE_TABLE
+    from knowledge_graph.builders.sv.semantic.dispatch import RULE_TABLE
 
     fn = RULE_TABLE.get(pyslang.SyntaxKind.AnonymousProgram)
     assert fn is not None, "AnonymousProgram must have a RULE_TABLE entry"
@@ -353,7 +353,7 @@ def test_defparam_rule_registered():
     """DefParamAssignment (innermost kind) is registered with __rule_id__='S43'."""
     import pyslang  # noqa: PLC0415
 
-    from research.ast_experiment.src.semantic.dispatch import RULE_TABLE
+    from knowledge_graph.builders.sv.semantic.dispatch import RULE_TABLE
 
     fn = RULE_TABLE.get(pyslang.SyntaxKind.DefParamAssignment)
     assert fn is not None, "DefParamAssignment not in RULE_TABLE"
@@ -365,8 +365,8 @@ def test_defparam_round_trip(top_graph):
     lift → emit → reparse."""
     import pyslang  # noqa: PLC0415
 
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.unlift import emit
 
     src = TOP.read_text()
     tree = pyslang.SyntaxTree.fromText(src)
@@ -405,7 +405,7 @@ def bind_target_graph():
     """Build a combined FIFO + TOP + FIFO_ASSERTS graph so the BindTargetList
     referencing ``u_fifo_a`` / ``u_fifo_b`` instances of ``top`` is resolvable
     via the cross-file semantic name index."""
-    from research.ast_experiment.src.build import build_kg
+    from knowledge_graph.builders.sv.build import build_kg
 
     graph, _trees, _comp = build_kg([FIFO, TOP, FIFO_ASSERTS])
     return graph
@@ -481,7 +481,7 @@ def test_s61_rule_metadata_registered():
     as an ownership marker (lesson 4 edge-only kind — stub function)."""
     import pyslang  # noqa: PLC0415
 
-    from research.ast_experiment.src.semantic.dispatch import RULE_TABLE
+    from knowledge_graph.builders.sv.semantic.dispatch import RULE_TABLE
     fn = RULE_TABLE.get(pyslang.SyntaxKind.BindTargetList)
     assert fn is not None
     assert getattr(fn, "__rule_id__", None) == "S61"
@@ -493,8 +493,8 @@ def test_s61_round_trip_bind_target_list():
     structural lift."""
     import pyslang  # noqa: PLC0415
 
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.unlift import emit
 
     src = FIFO_ASSERTS.read_text()
     tree = pyslang.SyntaxTree.fromText(src)

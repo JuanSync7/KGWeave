@@ -18,8 +18,8 @@ TOP = HERE / "corpus" / "top.sv"
 
 def test_build_kg_unifies_cross_file_of_module_edge():
     """build_kg([FIFO, TOP]) must materialise the top.u_fifo --of_module--> fifo edge."""
-    from research.ast_experiment.src.build import build_kg
-    from research.ast_experiment.src.semantic import find_by_name, neighbors
+    from knowledge_graph.builders.sv.build import build_kg
+    from knowledge_graph.builders.sv.semantic import find_by_name, neighbors
 
     graph, _trees, _comp = build_kg([FIFO, TOP])
 
@@ -34,7 +34,7 @@ def test_build_kg_unifies_cross_file_of_module_edge():
 
 def test_build_kg_node_ids_globally_unique():
     """No two nodes in the combined graph share an id (lift counter collision check)."""
-    from research.ast_experiment.src.build import build_kg
+    from knowledge_graph.builders.sv.build import build_kg
 
     graph, _trees, _comp = build_kg([FIFO, TOP])
     ids = [n["id"] for n in graph["nodes"]]
@@ -43,8 +43,8 @@ def test_build_kg_node_ids_globally_unique():
 
 def test_build_kg_both_modules_promoted():
     """Both 'fifo' and 'top' modules are promoted under the same name_index."""
-    from research.ast_experiment.src.build import build_kg
-    from research.ast_experiment.src.semantic import find_by_name
+    from knowledge_graph.builders.sv.build import build_kg
+    from knowledge_graph.builders.sv.semantic import find_by_name
 
     graph, _trees, _comp = build_kg([FIFO, TOP])
     assert find_by_name(graph, "fifo")["semantic"]["role"] == "module"

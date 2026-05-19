@@ -24,8 +24,8 @@ def fixture_bundle():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -33,7 +33,7 @@ def fixture_bundle():
 
 
 def _queryable_by_role(graph, role):
-    from research.ast_experiment.src.semantic import queryable_nodes
+    from knowledge_graph.builders.sv.semantic import queryable_nodes
 
     return [n for n in queryable_nodes(graph) if n.get("semantic", {}).get("role") == role]
 
@@ -41,7 +41,7 @@ def _queryable_by_role(graph, role):
 def test_roundtrip_after_promote(fixture_bundle):
     """Promotion must not mutate token payloads — emit() still reproduces source."""
     tree, _comp, graph = fixture_bundle
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.unlift import emit
 
     emitted = emit(graph)
     reparsed = pyslang.SyntaxTree.fromText(emitted)
@@ -81,7 +81,7 @@ def test_s1_module_promotes_ports_params_nets(fixture_bundle):
 def test_s2_continuous_assign_drives_and_reads(fixture_bundle):
     """S2: who_drives('dout') yields exactly one continuous_assign node."""
     _tree, _comp, graph = fixture_bundle
-    from research.ast_experiment.src.semantic import find_drivers
+    from knowledge_graph.builders.sv.semantic import find_drivers
 
     drivers = find_drivers(graph, "dout")
     assert len(drivers) == 1
@@ -90,7 +90,7 @@ def test_s2_continuous_assign_drives_and_reads(fixture_bundle):
     full_drivers = find_drivers(graph, "full")
     assert len(full_drivers) == 1
     # The 'full' assign reads `count` (and the param DEPTH via name resolution).
-    from research.ast_experiment.src.semantic import neighbors
+    from knowledge_graph.builders.sv.semantic import neighbors
 
     reads = neighbors(graph, full_drivers[0]["id"], edge_type="reads", direction="out")
     read_names = {r["semantic"].get("name") for r in reads}
@@ -104,7 +104,7 @@ def test_s3_always_ff_sensitivity_and_drives(fixture_bundle):
     always = _queryable_by_role(graph, "always_ff")
     assert len(always) == 1
     aff = always[0]
-    from research.ast_experiment.src.semantic import neighbors
+    from knowledge_graph.builders.sv.semantic import neighbors
 
     sens = neighbors(graph, aff["id"], edge_type="sensitive_to", direction="out")
     sens_names = {s["semantic"].get("name") for s in sens}
@@ -130,7 +130,7 @@ def test_s4_identifier_select_reads_base(fixture_bundle):
     bases = {s["semantic"]["base"] for s in selects}
     assert {"mem", "rd_ptr", "wr_ptr"} <= bases
     # mem and rd_ptr appear in the same expression — both must have a reads edge.
-    from research.ast_experiment.src.semantic import neighbors
+    from knowledge_graph.builders.sv.semantic import neighbors
 
     for s in selects:
         if s["semantic"]["base"] == "mem":
@@ -143,7 +143,7 @@ def test_s5_system_call_clog2_reads_depth(fixture_bundle):
     _tree, _comp, graph = fixture_bundle
     calls = _queryable_by_role(graph, "system_call")
     assert calls, "expected at least one $clog2 invocation"
-    from research.ast_experiment.src.semantic import neighbors
+    from knowledge_graph.builders.sv.semantic import neighbors
 
     for c in calls:
         assert c["semantic"]["name"] == "$clog2"
@@ -196,7 +196,7 @@ def test_s34_always_ff_and_comb_unchanged(s34_bundle):
 def test_s34_edge_sensitive_has_sensitive_to(s34_bundle):
     """The always @(posedge clk) block emits a sensitive_to edge to clk
     with edge='posedge'."""
-    from research.ast_experiment.src.semantic import neighbors
+    from knowledge_graph.builders.sv.semantic import neighbors
 
     always_blocks = [n for n in s34_bundle["nodes"]
                      if n.get("semantic", {}).get("role") == "always"]
@@ -223,7 +223,7 @@ def test_s34_edge_sensitive_has_sensitive_to(s34_bundle):
 def test_s34_level_sensitive_has_sensitive_to(s34_bundle):
     """The always @(a or b) block emits sensitive_to edges to both a and b
     (no edge qualifier — level-sensitive)."""
-    from research.ast_experiment.src.semantic import neighbors
+    from knowledge_graph.builders.sv.semantic import neighbors
 
     always_blocks = [n for n in s34_bundle["nodes"]
                      if n.get("semantic", {}).get("role") == "always"]
@@ -260,7 +260,7 @@ def test_s34_roundtrip_after_promote(fixture_bundle):
     """S34 must not mutate token payloads — emit() still reproduces source
     byte-for-byte after always_demo blocks are promoted."""
     tree, _comp, graph = fixture_bundle
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.unlift import emit
 
     emitted = emit(graph)
     reparsed = pyslang.SyntaxTree.fromText(emitted)
@@ -296,8 +296,8 @@ def s35_bundle():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -401,7 +401,7 @@ def test_s35_roundtrip_after_promote(s35_bundle):
     byte-for-byte after latch_demo block is promoted."""
     text = LATCH_SRC.read_text()
     tree = pyslang.SyntaxTree.fromText(text)
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.unlift import emit
 
     emitted = emit(s35_bundle)
     reparsed = pyslang.SyntaxTree.fromText(emitted)
@@ -434,8 +434,8 @@ def s36_bundle():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -535,7 +535,7 @@ def test_s36_roundtrip_after_promote(s36_bundle):
     byte-for-byte after initial blocks are promoted."""
     text = TB_SRC.read_text()
     tree = pyslang.SyntaxTree.fromText(text)
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.unlift import emit
 
     emitted = emit(s36_bundle)
     reparsed = pyslang.SyntaxTree.fromText(emitted)
@@ -569,8 +569,8 @@ def s37_bundle():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -665,7 +665,7 @@ def test_s37_roundtrip_after_promote(s37_bundle):
     byte-for-byte after the final block is promoted."""
     text = TB_SRC.read_text()
     tree = pyslang.SyntaxTree.fromText(text)
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.unlift import emit
 
     emitted = emit(s37_bundle)
     reparsed = pyslang.SyntaxTree.fromText(emitted)
@@ -700,8 +700,8 @@ def s46_bundle():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -765,7 +765,7 @@ def test_s46_roundtrip_after_promote(s46_bundle):
     byte-for-byte after alias_demo is promoted."""
     text = ALIAS_SRC.read_text()
     tree = pyslang.SyntaxTree.fromText(text)
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.unlift import emit
 
     emitted = emit(s46_bundle)
     reparsed = pyslang.SyntaxTree.fromText(emitted)
@@ -802,8 +802,8 @@ def s47_bundle():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -864,7 +864,7 @@ def test_s47_roundtrip_after_promote(s47_bundle):
     byte-for-byte after TimeUnitsDeclaration nodes are promoted."""
     text = TIMEUNITS_SRC.read_text()
     tree = pyslang.SyntaxTree.fromText(text)
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.unlift import emit
 
     emitted = emit(s47_bundle)
     reparsed = pyslang.SyntaxTree.fromText(emitted)
@@ -893,8 +893,8 @@ def s54_bundle():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -1000,7 +1000,7 @@ def test_s54_roundtrip_after_promote(s54_bundle):
     byte-for-byte after net_demo is promoted."""
     text = NETDECL_SRC.read_text()
     tree = pyslang.SyntaxTree.fromText(text)
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.unlift import emit
 
     emitted = emit(s54_bundle)
     reparsed = pyslang.SyntaxTree.fromText(emitted)

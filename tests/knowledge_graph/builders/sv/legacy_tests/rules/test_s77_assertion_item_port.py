@@ -47,8 +47,8 @@ def asserts_graph():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -66,7 +66,7 @@ def _by_role(graph, role):
 
 def test_s77_ownership_stub_attributed():
     """``AssertionItemPort`` in the assertions RULES table carries ``S77``."""
-    from research.ast_experiment.src.semantic.rules.assertions import RULES
+    from knowledge_graph.builders.sv.semantic.rules.assertions import RULES
 
     matches = [(k, fn) for (k, fn) in RULES
                if k == pyslang.SyntaxKind.AssertionItemPort]
@@ -77,14 +77,14 @@ def test_s77_ownership_stub_attributed():
 
 def test_s77_active_rule_registered():
     """S77 is in ``_ACTIVE_RULE_IDS``."""
-    from research.ast_experiment.src.semantic.dispatch import _ACTIVE_RULE_IDS
+    from knowledge_graph.builders.sv.semantic.dispatch import _ACTIVE_RULE_IDS
 
     assert "S77" in _ACTIVE_RULE_IDS
 
 
 def test_s77_kind_in_rule_table():
     """Composed RULE_TABLE dispatches ``AssertionItemPort`` to the S77 stub."""
-    from research.ast_experiment.src.semantic.rules import RULE_TABLE
+    from knowledge_graph.builders.sv.semantic.rules import RULE_TABLE
 
     fn = RULE_TABLE.get(pyslang.SyntaxKind.AssertionItemPort)
     assert fn is not None
@@ -199,5 +199,5 @@ def test_s77_has_assertion_item_port_edges(asserts_graph):
 
 def test_s77_roundtrip(asserts_graph):
     """Promotion does not perturb the token stream — emit() == source."""
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.unlift import emit
     assert emit(asserts_graph) == ASSERTS.read_text()

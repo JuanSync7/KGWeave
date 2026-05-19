@@ -45,7 +45,7 @@ def test_s73_ownership_stub_attributed():
     """The ``MemberAccessExpression`` SyntaxKind in the RULES table must
     carry ``__rule_id__ == 'S73'`` (ownership-stub pattern, like
     S70 / S71 / S72)."""
-    from research.ast_experiment.src.semantic.rules.expressions import RULES
+    from knowledge_graph.builders.sv.semantic.rules.expressions import RULES
 
     matches = [(k, fn) for (k, fn) in RULES
                if k == pyslang.SyntaxKind.MemberAccessExpression]
@@ -57,7 +57,7 @@ def test_s73_ownership_stub_attributed():
 def test_s73_active_rule_registered():
     """S73 must be in ``_ACTIVE_RULE_IDS`` so the bucket1 checklist
     counts ``MemberAccessExpression`` as PROMOTE_NOW (Sem ✅)."""
-    from research.ast_experiment.src.semantic.dispatch import _ACTIVE_RULE_IDS
+    from knowledge_graph.builders.sv.semantic.dispatch import _ACTIVE_RULE_IDS
 
     assert "S73" in _ACTIVE_RULE_IDS
 
@@ -66,7 +66,7 @@ def test_s73_kind_in_rule_table():
     """The composed ``RULE_TABLE`` must dispatch
     ``MemberAccessExpression`` to S73's stub (composition assertion in
     ``rules/__init__.py`` would have caught a duplicate)."""
-    from research.ast_experiment.src.semantic.rules import RULE_TABLE
+    from knowledge_graph.builders.sv.semantic.rules import RULE_TABLE
 
     fn = RULE_TABLE.get(pyslang.SyntaxKind.MemberAccessExpression)
     assert fn is not None
@@ -76,7 +76,7 @@ def test_s73_kind_in_rule_table():
 def test_s73_expressions_module_listed():
     """The new ``expressions`` module must be in ``ALL_RULE_MODULES`` so
     its RULES contribute to the composed ``RULE_TABLE``."""
-    from research.ast_experiment.src.semantic.rules import (
+    from knowledge_graph.builders.sv.semantic.rules import (
         ALL_RULE_MODULES, expressions,
     )
 
@@ -118,8 +118,8 @@ def test_s73_no_member_access_edges_against_corpus():
     ``member_access`` edges against the present syntax-only corpus
     (consistent with the dormancy claim above). When the experiment
     adds a bound-tree lift this expectation will flip."""
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     total = 0
     for corpus_file in sorted(CORPUS_DIR.glob("*.sv")):

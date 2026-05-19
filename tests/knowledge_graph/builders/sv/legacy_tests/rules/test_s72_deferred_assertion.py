@@ -31,8 +31,8 @@ def bind_graph():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -101,7 +101,7 @@ def test_s72_one_promoted_node_per_assert(bind_graph):
 def test_s72_active_rule_registered():
     """S72 must be in ``_ACTIVE_RULE_IDS`` so the bucket1 checklist
     counts ``DeferredAssertion`` as PROMOTE_NOW."""
-    from research.ast_experiment.src.semantic.dispatch import _ACTIVE_RULE_IDS
+    from knowledge_graph.builders.sv.semantic.dispatch import _ACTIVE_RULE_IDS
     assert "S72" in _ACTIVE_RULE_IDS
 
 
@@ -109,7 +109,7 @@ def test_s72_ownership_stub_attributed():
     """The ``DeferredAssertion`` SyntaxKind in the RULES table must
     carry ``__rule_id__ == 'S72'`` so the checklist builder credits the
     rule (ownership-stub pattern, like S70 / S71 / S63)."""
-    from research.ast_experiment.src.semantic.rules.assertions import RULES
+    from knowledge_graph.builders.sv.semantic.rules.assertions import RULES
     matches = [(k, fn) for (k, fn) in RULES
                if k == pyslang.SyntaxKind.DeferredAssertion]
     assert len(matches) == 1

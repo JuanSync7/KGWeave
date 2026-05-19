@@ -30,8 +30,8 @@ def bind_graph():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -171,8 +171,8 @@ def inline_graph():
     tree = pyslang.SyntaxTree.fromText(_INLINE)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -388,8 +388,8 @@ def test_s39_name_index_registered(bind_graph):
 def test_s39_round_trip():
     """Round-trip: lift → emit on the corpus file including the
     ``default disable iff`` statement preserves the AST class stream byte-for-byte."""
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.unlift import emit
 
     text = BIND.read_text()
     tree = pyslang.SyntaxTree.fromText(text)

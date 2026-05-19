@@ -24,7 +24,7 @@ _SEMANTIC_DIR = _SRC_DIR / "semantic"
 _SCRIPTS_DIR = _EXPERIMENT_DIR / "scripts"
 
 
-# Public API exported from research.ast_experiment.src.semantic
+# Public API exported from knowledge_graph.builders.sv.semantic
 _PUBLIC_API = [
     "promote",
     "queryable_nodes",
@@ -80,13 +80,13 @@ _ACTIVE_RULE_KINDS = {
 
 def test_semantic_package_exists():
     """src/semantic/ is importable."""
-    mod = importlib.import_module("research.ast_experiment.src.semantic")
+    mod = importlib.import_module("knowledge_graph.builders.sv.semantic")
     assert mod is not None
 
 
 def test_public_api_exports():
     """Every name in the public-API list is importable from src.semantic."""
-    mod = importlib.import_module("research.ast_experiment.src.semantic")
+    mod = importlib.import_module("knowledge_graph.builders.sv.semantic")
     missing = [n for n in _PUBLIC_API if not hasattr(mod, n)]
     assert not missing, f"public API missing: {missing}"
 
@@ -96,7 +96,7 @@ def test_dispatch_table_exists():
     pyslang.SyntaxKind."""
     import pyslang  # noqa: PLC0415
     dispatch = importlib.import_module(
-        "research.ast_experiment.src.semantic.dispatch"
+        "knowledge_graph.builders.sv.semantic.dispatch"
     )
     assert hasattr(dispatch, "RULE_TABLE"), "dispatch.RULE_TABLE missing"
     table = dispatch.RULE_TABLE
@@ -110,13 +110,13 @@ def test_dispatch_table_exists():
 def test_no_duplicate_dispatch():
     """Composing RULE_TABLE from all rule modules raises no AssertionError."""
     # The act of importing rules/__init__.py runs the composition assertion.
-    importlib.import_module("research.ast_experiment.src.semantic.rules")
+    importlib.import_module("knowledge_graph.builders.sv.semantic.rules")
 
 
 def test_active_rule_kinds_present():
     """Every active rule kind appears in RULE_TABLE."""
     dispatch = importlib.import_module(
-        "research.ast_experiment.src.semantic.dispatch"
+        "knowledge_graph.builders.sv.semantic.dispatch"
     )
     present = {k.name for k in dispatch.RULE_TABLE}
     missing = _ACTIVE_RULE_KINDS - present
@@ -130,7 +130,7 @@ def test_stub_modules_export_empty_rules(name):
 
     (Parametrize list now empty: constraints became active in S27.)"""
     mod = importlib.import_module(
-        f"research.ast_experiment.src.semantic.rules.{name}"
+        f"knowledge_graph.builders.sv.semantic.rules.{name}"
     )
     assert hasattr(mod, "RULES"), f"rules.{name} missing RULES"
     assert mod.RULES == [], f"rules.{name}.RULES should be empty"
@@ -194,7 +194,7 @@ def test_each_active_rule_module_exports_rules():
     """Every active rule module exports a non-empty RULES list."""
     for name in _TARGET_ACTIVE_MODULES:
         mod = importlib.import_module(
-            f"research.ast_experiment.src.semantic.rules.{name}"
+            f"knowledge_graph.builders.sv.semantic.rules.{name}"
         )
         assert hasattr(mod, "RULES"), f"rules.{name} missing RULES"
         assert mod.RULES, f"rules.{name}.RULES should be non-empty"
@@ -204,7 +204,7 @@ def test_each_stub_module_exports_empty_rules():
     """Every stub rule module exports RULES == []."""
     for name in _TARGET_STUB_MODULES:
         mod = importlib.import_module(
-            f"research.ast_experiment.src.semantic.rules.{name}"
+            f"knowledge_graph.builders.sv.semantic.rules.{name}"
         )
         assert hasattr(mod, "RULES"), f"rules.{name} missing RULES"
         assert mod.RULES == [], f"rules.{name}.RULES should be empty"
@@ -215,7 +215,7 @@ def test_active_rule_kinds_unchanged():
     union: set[str] = set()
     for name in _TARGET_ACTIVE_MODULES:
         mod = importlib.import_module(
-            f"research.ast_experiment.src.semantic.rules.{name}"
+            f"knowledge_graph.builders.sv.semantic.rules.{name}"
         )
         for kind, _fn in mod.RULES:
             union.add(kind.name)
@@ -229,7 +229,7 @@ def test_no_kind_in_multiple_active_modules():
     duplicates: list[str] = []
     for name in _TARGET_ACTIVE_MODULES:
         mod = importlib.import_module(
-            f"research.ast_experiment.src.semantic.rules.{name}"
+            f"knowledge_graph.builders.sv.semantic.rules.{name}"
         )
         for kind, _fn in mod.RULES:
             if kind.name in seen:
@@ -243,7 +243,7 @@ def test_stub_modules_have_planned_kinds_docstring():
     """Every stub's docstring names at least one planned pyslang SyntaxKind."""
     for name, hints in _STUB_PLANNED_KIND_HINTS.items():
         mod = importlib.import_module(
-            f"research.ast_experiment.src.semantic.rules.{name}"
+            f"knowledge_graph.builders.sv.semantic.rules.{name}"
         )
         doc = mod.__doc__ or ""
         found = [h for h in hints if h in doc]
@@ -341,7 +341,7 @@ def test_bucket1_checklist_derives_from_registry():
     # RULE_TABLE.name set. We assert the first: the import line must exist.
     assert "RULE_TABLE" in src, (
         "build_bucket1_checklist.py must import RULE_TABLE from "
-        "research.ast_experiment.src.semantic.dispatch"
+        "knowledge_graph.builders.sv.semantic.dispatch"
     )
     # And the legacy "keep in sync with semantic.py" comment must be gone.
     assert "keep in sync with semantic.py" not in src, (

@@ -30,8 +30,8 @@ def bind_graph():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -236,8 +236,8 @@ def test_s40_roundtrip(bind_graph):
     """Byte-equal round-trip: emit(lift(corpus)) must reconstruct the source
     exactly — the default_clocking edge must not mutate any node structure."""
     from pathlib import Path
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.unlift import emit
     import pyslang
 
     corpus = Path(__file__).resolve().parent.parent.parent / "corpus" / "fifo_asserts.sv"

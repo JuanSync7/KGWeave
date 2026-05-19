@@ -37,8 +37,8 @@ def fixture_bundle():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -46,7 +46,7 @@ def fixture_bundle():
 
 
 def _by_role(graph, role):
-    from research.ast_experiment.src.semantic import queryable_nodes
+    from knowledge_graph.builders.sv.semantic import queryable_nodes
 
     return [n for n in queryable_nodes(graph)
             if n.get("semantic", {}).get("role") == role]
@@ -129,7 +129,7 @@ def test_s68_s67_members_still_emit(fixture_bundle):
     """S67's promotion of the concat-member PortReferences must not regress
     — both ``x`` and ``y`` still surface as role=port_reference at the
     documented sub-namespace path."""
-    from research.ast_experiment.src.semantic import queryable_nodes
+    from knowledge_graph.builders.sv.semantic import queryable_nodes
 
     _t, _c, graph = fixture_bundle
     refs = [n for n in queryable_nodes(graph)
@@ -157,5 +157,5 @@ def test_s68_does_not_duplicate_module_ports(fixture_bundle):
 def test_s68_roundtrip(fixture_bundle):
     """Promotion must not perturb the token stream — emit() reproduces source."""
     _t, _c, graph = fixture_bundle
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.unlift import emit
     assert emit(graph) == SRC.read_text()

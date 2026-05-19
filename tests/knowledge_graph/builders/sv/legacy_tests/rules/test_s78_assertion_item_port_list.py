@@ -40,8 +40,8 @@ def _graph_for(path: Path):
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -56,14 +56,14 @@ def asserts_graph():
 def test_s78_in_active_rule_ids():
     """S78 must be listed in ``_ACTIVE_RULE_IDS`` so the bucket1 checklist
     regenerator treats the stub as a live owner."""
-    from research.ast_experiment.src.semantic.dispatch import _ACTIVE_RULE_IDS
+    from knowledge_graph.builders.sv.semantic.dispatch import _ACTIVE_RULE_IDS
     assert "S78" in _ACTIVE_RULE_IDS
 
 
 def test_s78_stub_owns_assertion_item_port_list():
     """The metadata stub registered for ``SyntaxKind.AssertionItemPortList``
     must pin ``__rule_id__ == 'S78'``."""
-    from research.ast_experiment.src.semantic.rules import assertions
+    from knowledge_graph.builders.sv.semantic.rules import assertions
     matches = [
         fn for (kind, fn) in assertions.RULES
         if kind == pyslang.SyntaxKind.AssertionItemPortList

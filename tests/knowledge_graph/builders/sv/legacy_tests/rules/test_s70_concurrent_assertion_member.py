@@ -36,8 +36,8 @@ def bind_graph():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -52,7 +52,7 @@ def _assertions(graph):
 def test_s70_in_active_rule_ids():
     """S70 must be listed in ``_ACTIVE_RULE_IDS`` so the bucket1 checklist
     regenerator treats the stub as a live owner."""
-    from research.ast_experiment.src.semantic.dispatch import _ACTIVE_RULE_IDS
+    from knowledge_graph.builders.sv.semantic.dispatch import _ACTIVE_RULE_IDS
     assert "S70" in _ACTIVE_RULE_IDS
 
 
@@ -60,7 +60,7 @@ def test_s70_stub_owns_concurrent_assertion_member():
     """The metadata stub registered for
     ``SyntaxKind.ConcurrentAssertionMember`` must pin
     ``__rule_id__ == 'S70'``."""
-    from research.ast_experiment.src.semantic.rules import assertions
+    from knowledge_graph.builders.sv.semantic.rules import assertions
     matches = [
         fn for (kind, fn) in assertions.RULES
         if kind == pyslang.SyntaxKind.ConcurrentAssertionMember
@@ -89,7 +89,7 @@ def test_no_duplicate_node_for_module_scope_assert(bind_graph):
 def test_inner_kind_still_owned_by_s16():
     """``AssertPropertyStatement`` (the inner kind) must keep its S16
     owner — S70 only annotates the wrapper."""
-    from research.ast_experiment.src.semantic.rules import assertions
+    from knowledge_graph.builders.sv.semantic.rules import assertions
     matches = [
         fn for (kind, fn) in assertions.RULES
         if kind == pyslang.SyntaxKind.AssertPropertyStatement

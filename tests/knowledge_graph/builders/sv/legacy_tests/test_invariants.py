@@ -65,7 +65,7 @@ _OWNER_ROLES = {"module", "package", "interface"}
 
 @pytest.fixture(scope="module")
 def kg():
-    from research.ast_experiment.src.build import build_kg
+    from knowledge_graph.builders.sv.build import build_kg
 
     graph, trees, comp = build_kg([PKG, IFACE, FIFO, BIND, TOP, TB])
     return graph, trees, comp
@@ -77,7 +77,7 @@ def graph(kg):
 
 
 def _queryable(graph):
-    from research.ast_experiment.src.semantic import queryable_nodes
+    from knowledge_graph.builders.sv.semantic import queryable_nodes
 
     return list(queryable_nodes(graph))
 

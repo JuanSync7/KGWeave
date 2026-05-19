@@ -35,8 +35,8 @@ def ext_graph():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -220,8 +220,8 @@ def fifo_graph():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -301,11 +301,11 @@ def test_s44_roundtrip(fifo_graph):
     semantic layer only mutates ``node["semantic"]`` and appends edges — it
     never touches ``node["tokens"]`` or ``node["children"]``, so the emit
     pass must reproduce the original text unchanged."""
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.unlift import emit
     text = FIFO.read_text()
     tree = pyslang.SyntaxTree.fromText(text)
     graph_fresh = __import__(
-        "research.ast_experiment.src.lift", fromlist=["lift"]
+        "knowledge_graph.builders.sv.lift", fromlist=["lift"]
     ).lift(tree)
     reconstructed = emit(graph_fresh)
     assert reconstructed == text, (
@@ -415,11 +415,11 @@ def test_s45_roundtrip(fifo_graph):
     """Byte-equal round-trip after S45 corpus additions.  The semantic layer
     only mutates ``node["semantic"]`` and appends edges — the emit pass must
     reproduce the original fifo.sv bytes unchanged."""
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.unlift import emit
     text = FIFO.read_text()
     tree = pyslang.SyntaxTree.fromText(text)
     graph_fresh = __import__(
-        "research.ast_experiment.src.lift", fromlist=["lift"]
+        "knowledge_graph.builders.sv.lift", fromlist=["lift"]
     ).lift(tree)
     reconstructed = emit(graph_fresh)
     assert reconstructed == text, (
@@ -522,8 +522,8 @@ def test_s56_no_double_count_with_s44(fifo_graph):
 
 def test_s56_roundtrip():
     """Byte-equal round-trip on extern_corpus.sv after S56 additions."""
-    from research.ast_experiment.src.unlift import emit
-    from research.ast_experiment.src.lift import lift
+    from knowledge_graph.builders.sv.unlift import emit
+    from knowledge_graph.builders.sv.lift import lift
     text = EXT.read_text()
     tree = pyslang.SyntaxTree.fromText(text)
     graph_fresh = lift(tree)

@@ -49,8 +49,8 @@ def fifo_graph():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -63,8 +63,8 @@ def extern_graph():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -82,7 +82,7 @@ def _by_role(graph, role):
 
 def test_s74_ownership_stub_attributed():
     """``FunctionPort`` in the procedural RULES table carries ``S74``."""
-    from research.ast_experiment.src.semantic.rules.procedural import RULES
+    from knowledge_graph.builders.sv.semantic.rules.procedural import RULES
 
     matches = [(k, fn) for (k, fn) in RULES
                if k == pyslang.SyntaxKind.FunctionPort]
@@ -93,14 +93,14 @@ def test_s74_ownership_stub_attributed():
 
 def test_s74_active_rule_registered():
     """S74 is in ``_ACTIVE_RULE_IDS`` (bucket1 checklist counts it)."""
-    from research.ast_experiment.src.semantic.dispatch import _ACTIVE_RULE_IDS
+    from knowledge_graph.builders.sv.semantic.dispatch import _ACTIVE_RULE_IDS
 
     assert "S74" in _ACTIVE_RULE_IDS
 
 
 def test_s74_kind_in_rule_table():
     """Composed RULE_TABLE dispatches ``FunctionPort`` to the S74 stub."""
-    from research.ast_experiment.src.semantic.rules import RULE_TABLE
+    from knowledge_graph.builders.sv.semantic.rules import RULE_TABLE
 
     fn = RULE_TABLE.get(pyslang.SyntaxKind.FunctionPort)
     assert fn is not None
@@ -212,11 +212,11 @@ def test_s74_multiple_ports_keep_their_names(extern_graph):
 
 def test_s74_roundtrip_fifo(fifo_graph):
     """Promotion does not perturb the token stream — emit() == source."""
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.unlift import emit
     assert emit(fifo_graph) == FIFO.read_text()
 
 
 def test_s74_roundtrip_extern(extern_graph):
     """Same round-trip invariant for extern_corpus.sv."""
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.unlift import emit
     assert emit(extern_graph) == EXTERN.read_text()

@@ -22,8 +22,8 @@ def fixture_bundle():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -31,7 +31,7 @@ def fixture_bundle():
 
 
 def _by_role(graph, role):
-    from research.ast_experiment.src.semantic import queryable_nodes
+    from knowledge_graph.builders.sv.semantic import queryable_nodes
 
     return [n for n in queryable_nodes(graph)
             if n.get("semantic", {}).get("role") == role]
@@ -127,7 +127,7 @@ def test_s55_port_decl_declarators_not_promoted_as_net(fixture_bundle):
 def test_s55_roundtrip(fixture_bundle):
     """Promotion must not perturb token stream — round-trip stays byte-equal."""
     tree, _c, graph = fixture_bundle
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.unlift import emit
 
     emitted = emit(graph)
     reparsed = pyslang.SyntaxTree.fromText(emitted)

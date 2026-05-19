@@ -37,8 +37,8 @@ def chk_graph():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -245,8 +245,8 @@ def test_s62_checker_corpus_roundtrips():
     """checker_corpus.sv survives the lift → unlift byte-equal round-trip
     after the S62 corpus extension (logic/bit/rand decls added)."""
     text = CHK.read_text()
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.unlift import emit
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.unlift import emit
 
     tree = pyslang.SyntaxTree.fromText(text)
     graph = lift(tree)

@@ -33,8 +33,8 @@ def ext_graph():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -49,14 +49,14 @@ def _by_role(graph, role):
 def test_s80_in_active_rule_ids():
     """S80 must be listed in ``_ACTIVE_RULE_IDS`` so the bucket1 checklist
     regenerator treats the stub as a live owner."""
-    from research.ast_experiment.src.semantic.dispatch import _ACTIVE_RULE_IDS
+    from knowledge_graph.builders.sv.semantic.dispatch import _ACTIVE_RULE_IDS
     assert "S80" in _ACTIVE_RULE_IDS
 
 
 def test_s80_stub_owns_extern_interface_method():
     """The metadata stub registered for ``SyntaxKind.ExternInterfaceMethod``
     must pin ``__rule_id__ == 'S80'``."""
-    from research.ast_experiment.src.semantic.rules import extern
+    from knowledge_graph.builders.sv.semantic.rules import extern
     matches = [
         fn for (kind, fn) in extern.RULES
         if kind == pyslang.SyntaxKind.ExternInterfaceMethod

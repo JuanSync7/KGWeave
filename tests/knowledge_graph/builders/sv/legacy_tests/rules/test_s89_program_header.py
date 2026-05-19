@@ -57,8 +57,8 @@ def s89_bundle():
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -68,7 +68,7 @@ def s89_bundle():
 def test_s89_in_active_rule_ids():
     """S89 must be listed in ``_ACTIVE_RULE_IDS`` so the bucket1 checklist
     regenerator treats the stub as a live owner."""
-    from research.ast_experiment.src.semantic.dispatch import _ACTIVE_RULE_IDS
+    from knowledge_graph.builders.sv.semantic.dispatch import _ACTIVE_RULE_IDS
     assert "S89" in _ACTIVE_RULE_IDS
 
 
@@ -76,7 +76,7 @@ def test_s89_stub_owns_program_header():
     """The metadata stub registered for ``SyntaxKind.ProgramHeader`` must
     pin ``__rule_id__ == 'S89'`` and there must be exactly one
     registration for the kind."""
-    from research.ast_experiment.src.semantic.rules import structure
+    from knowledge_graph.builders.sv.semantic.rules import structure
     matches = [
         fn for (kind, fn) in structure.RULES
         if kind == pyslang.SyntaxKind.ProgramHeader
@@ -91,7 +91,7 @@ def test_s89_dispatches_through_rule_table():
     """``SyntaxKind.ProgramHeader`` must resolve through the composed
     ``RULE_TABLE`` (i.e. no duplicate-dispatch assertion fires when the
     rules package is imported, and the kind maps to the S89 stub)."""
-    from research.ast_experiment.src.semantic.rules import RULE_TABLE
+    from knowledge_graph.builders.sv.semantic.rules import RULE_TABLE
     fn = RULE_TABLE.get(pyslang.SyntaxKind.ProgramHeader)
     assert fn is not None, (
         "ProgramHeader missing from RULE_TABLE — structure.RULES did "

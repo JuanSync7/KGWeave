@@ -47,8 +47,8 @@ def _graph_for(path: Path):
     tree = pyslang.SyntaxTree.fromText(text)
     comp = pyslang.Compilation()
     comp.addSyntaxTree(tree)
-    from research.ast_experiment.src.lift import lift
-    from research.ast_experiment.src.semantic import promote
+    from knowledge_graph.builders.sv.lift import lift
+    from knowledge_graph.builders.sv.semantic import promote
 
     graph = lift(tree)
     promote(graph, tree, comp)
@@ -68,14 +68,14 @@ def extern_graph():
 def test_s76_in_active_rule_ids():
     """S76 must be listed in ``_ACTIVE_RULE_IDS`` so the bucket1 checklist
     regenerator treats the stub as a live owner."""
-    from research.ast_experiment.src.semantic.dispatch import _ACTIVE_RULE_IDS
+    from knowledge_graph.builders.sv.semantic.dispatch import _ACTIVE_RULE_IDS
     assert "S76" in _ACTIVE_RULE_IDS
 
 
 def test_s76_stub_owns_default_function_port():
     """The metadata stub registered for ``SyntaxKind.DefaultFunctionPort``
     must pin ``__rule_id__ == 'S76'``."""
-    from research.ast_experiment.src.semantic.rules import procedural
+    from knowledge_graph.builders.sv.semantic.rules import procedural
     matches = [
         fn for (kind, fn) in procedural.RULES
         if kind == pyslang.SyntaxKind.DefaultFunctionPort
