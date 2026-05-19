@@ -29,11 +29,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from knowledge_graph.builders.md import extract as _md_extract
 from knowledge_graph.builders.sv import (
     ExtractStats,
     extract as _sv_extract,
 )
-from knowledge_graph.connectors import SemanticSelfRefConnector
+from knowledge_graph.connectors import (
+    SemanticSelfRefConnector,
+    SvMarkdownReferenceConnector,
+)
 from knowledge_graph.connectors.protocol import Connector
 from knowledge_graph.query import (
     AmbiguousAnchor,
@@ -256,6 +260,8 @@ def _present_sources(store: KGStore) -> set[str]:
 
 # Built-in SV builder under the standard source name.
 register_builder("sv", _sv_extract)
+# Built-in MD builder (v1.2 — minimal lift: document/heading/code-fence/inline-code).
+register_builder("md", _md_extract)
 
 
 __all__ = [
@@ -289,6 +295,7 @@ __all__ = [
     "ExtractStats",
     "Connector",
     "SemanticSelfRefConnector",
+    "SvMarkdownReferenceConnector",
     # errors
     "ReadOnlyViolation",
     "AmbiguousAnchor",

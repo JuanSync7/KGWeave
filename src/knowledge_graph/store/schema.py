@@ -25,7 +25,7 @@ from typing import Iterable
 # equality. Equality is intentional: even patch-level drift means the
 # writer was a different code version and should be surfaced rather than
 # silently tolerated.
-KGWEAVE_SCHEMA_VERSION: str = "1.2.0"
+KGWEAVE_SCHEMA_VERSION: str = "1.3.0"
 
 
 class SchemaVersionMismatch(RuntimeError):
@@ -188,6 +188,14 @@ REL_TABLES: tuple[tuple[str, str], ...] = (
     ("TRIGGERS",           "CREATE REL TABLE IF NOT EXISTS TRIGGERS (FROM Node TO Node)"),
     ("HAS_GENVAR",         "CREATE REL TABLE IF NOT EXISTS HAS_GENVAR (FROM Node TO Node)"),
     ("HAS_TIMEUNITS",      "CREATE REL TABLE IF NOT EXISTS HAS_TIMEUNITS (FROM Node TO Node)"),
+
+    # ---- v1.2 cross-builder connector edge --------------------------------
+    # Generic typed reference from one builder's node to another's. The
+    # ``ref_text`` column carries the literal token that matched
+    # (e.g. the inline-code body for the SV-MD connector). The
+    # ``ordinal`` column lets repeat references between the same
+    # (src, dst) pair stay as distinct rows.
+    ("REFERENCES",         "CREATE REL TABLE IF NOT EXISTS REFERENCES (FROM Node TO Node, ref_text STRING, ordinal INT32)"),
 )
 
 

@@ -106,6 +106,12 @@ def test_open_store_facade_writes_meta(tmp_path: Path) -> None:
         s.close()
 
 
-def test_version_constant_is_one_two_oh() -> None:
-    """The current schema version is bumped to 1.2.0 as part of this change."""
-    assert _schema_mod.KGWEAVE_SCHEMA_VERSION == "1.2.0"
+def test_version_constant_is_current() -> None:
+    """The schema version follows ``<major>.<minor>.<patch>`` and is non-empty.
+
+    Bumped by v1.2-#2 to 1.2.0, then v1.2-#6 to 1.3.0 on adding the
+    REFERENCES rel table. Future bumps just update this assertion.
+    """
+    v = _schema_mod.KGWEAVE_SCHEMA_VERSION
+    assert isinstance(v, str) and v.count(".") == 2 and all(p.isdigit() for p in v.split("."))
+    assert v == "1.3.0"

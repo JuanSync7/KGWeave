@@ -92,6 +92,8 @@ EdgeType = Literal[
     "GROUPS_PORT_REF", "HAS_PRIMITIVE_INSTANCE", "HAS_PROCEDURAL_ASSIGN",
     "HAS_PROCEDURAL_FORCE", "HAS_EVENT_TRIGGER", "TRIGGERS", "HAS_GENVAR",
     "HAS_TIMEUNITS",
+    # v1.2 cross-builder connector edge.
+    "REFERENCES",
 ]
 
 
@@ -118,6 +120,7 @@ ALL_EDGE_TYPES: tuple[str, ...] = (
     "IN_ORIGIN",
     "HAS_PAYLOAD",
     *_PHASE_C5_EDGE_TYPES,
+    "REFERENCES",
 )
 
 
