@@ -8,6 +8,7 @@ def test_every_node_has_one_in_origin(sv_corpus_store) -> None:
     res = store.conn.execute(
         """
         MATCH (n:Node)-[r:IN_ORIGIN]->(o:Origin)
+        WHERE n.category <> 'unresolved'
         WITH n.id AS nid, count(o) AS k
         RETURN nid, k
         """
@@ -18,6 +19,9 @@ def test_every_node_has_one_in_origin(sv_corpus_store) -> None:
         counts[row[0]] = int(row[1])
 
     # Same set of ids as the dict, and every count is exactly 1.
+    # Phase C.5 ``category='unresolved'`` placeholder nodes are excluded
+    # via the WHERE filter — they're synthesized by the writer for
+    # dangling ``_unresolved.*`` edge endpoints.
     dict_ids = {n["id"] for n in graph["nodes"]}
     assert set(counts.keys()) == dict_ids
     bad = {nid: k for nid, k in counts.items() if k != 1}

@@ -12,9 +12,17 @@ from knowledge_graph.builders.sv.writer import EDGE_TABLE_MAP
 
 
 def test_node_count_matches_dict(sv_corpus_store) -> None:
-    """``MATCH (n:Node) RETURN count(*)`` equals ``len(graph['nodes'])``."""
+    """Non-placeholder ``:Node`` count equals ``len(graph['nodes'])``.
+
+    Phase C.5: ``category='unresolved'`` placeholder nodes are synthesized
+    by the writer for ``_unresolved.<name>`` edge endpoints not present in
+    ``graph['nodes']``. They are excluded from this dict-parity check; the
+    count is tracked separately in ``stats.placeholders_written``.
+    """
     store, graph, _origins, stats = sv_corpus_store
-    res = store.conn.execute("MATCH (n:Node) RETURN count(*)")
+    res = store.conn.execute(
+        "MATCH (n:Node) WHERE n.category <> 'unresolved' RETURN count(*)"
+    )
     kuzu_count = res.get_next()[0]
     assert kuzu_count == len(graph["nodes"])
     assert stats.nodes_written == len(graph["nodes"])

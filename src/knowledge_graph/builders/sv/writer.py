@@ -9,12 +9,17 @@ Two-layer category rule (per Phase C plan):
 * ``semantic``   — ``node.get("queryable")`` is True.
 * ``token``      — ``node.get("is_token")`` is True.
 * ``structural`` — anything else.
+* ``unresolved`` — Phase C.5 placeholder synthesized for ``_unresolved.*``
+  edge endpoints not present in the in-memory ``graph['nodes']``.
 
 Edge mapping mirrors the table set in ``store/schema.py``. Every node also
 gets an ``IN_ORIGIN`` edge to its origin row.
 
 Idempotency: every write uses ``MERGE`` on the primary key — re-running the
-writer against an unchanged graph produces zero row deltas.
+writer against an unchanged graph produces zero row deltas. For edge types
+where ``(src, dst)`` legitimately repeats with distinct payload (e.g.
+``imports``, ``imports_item``), the payload key columns participate in the
+MERGE pattern so each combination is a separate row.
 
 Origin mapping: SV node ids are namespaced by file-path stem (see
 ``build.py``). The writer requires a ``origins: dict[str, OriginRef]`` map
@@ -74,6 +79,98 @@ def _edge_payload_enum_value(e: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Phase C.5 payload extractors --------------------------------------------
+
+
+def _payload_extends(e: dict[str, Any]) -> dict[str, Any]:
+    p = e.get("payload", {}) or {}
+    params = p.get("params")
+    return {
+        "name": str(p.get("name", "") or ""),
+        "params": (
+            "" if params is None
+            else params if isinstance(params, str)
+            else json.dumps(params, ensure_ascii=False, sort_keys=True)
+        ),
+    }
+
+
+def _payload_name_only(e: dict[str, Any]) -> dict[str, Any]:
+    p = e.get("payload", {}) or {}
+    return {"name": str(p.get("name", "") or "")}
+
+
+def _payload_references_interface(e: dict[str, Any]) -> dict[str, Any]:
+    p = e.get("payload", {}) or {}
+    return {"modport": str(p.get("modport", "") or "")}
+
+
+def _payload_dpi_exports(e: dict[str, Any]) -> dict[str, Any]:
+    p = e.get("payload", {}) or {}
+    return {
+        "spec": str(p.get("spec", "") or ""),
+        "export_kind": str(p.get("export_kind", "") or ""),
+        "unresolved": bool(p.get("unresolved", False)),
+    }
+
+
+def _payload_imports(e: dict[str, Any]) -> dict[str, Any]:
+    p = e.get("payload", {}) or {}
+    return {
+        "package": str(p.get("package", "") or ""),
+        "item": str(p.get("item", "") or ""),
+        "unresolved": bool(p.get("unresolved", False)),
+    }
+
+
+def _payload_imports_item(e: dict[str, Any]) -> dict[str, Any]:
+    p = e.get("payload", {}) or {}
+    return {
+        "package": str(p.get("package", "") or ""),
+        "symbol": str(p.get("symbol", "") or ""),
+    }
+
+
+def _payload_exports_all(e: dict[str, Any]) -> dict[str, Any]:
+    p = e.get("payload", {}) or {}
+    return {"wildcard": bool(p.get("wildcard", False))}
+
+
+def _payload_declares(e: dict[str, Any]) -> dict[str, Any]:
+    p = e.get("payload", {}) or {}
+    return {
+        "name": str(p.get("name", "") or ""),
+        "kind": str(p.get("kind", "") or ""),
+    }
+
+
+def _payload_bind_target(e: dict[str, Any]) -> dict[str, Any]:
+    p = e.get("payload", {}) or {}
+    return {
+        "target": str(p.get("target", "") or ""),
+        "target_module": str(p.get("target_module", "") or ""),
+        "ordinal": int(p.get("index", 0) or 0),
+        "unresolved": bool(p.get("unresolved", False)),
+    }
+
+
+def _payload_bound_into(e: dict[str, Any]) -> dict[str, Any]:
+    p = e.get("payload", {}) or {}
+    return {
+        "instance_name": str(p.get("instance_name", "") or ""),
+        "scope": str(p.get("scope", "") or ""),
+    }
+
+
+def _payload_defparam_override(e: dict[str, Any]) -> dict[str, Any]:
+    p = e.get("payload", {}) or {}
+    return {
+        "hier_path": str(p.get("hier_path", "") or ""),
+        "value": str(p.get("value", "") or ""),
+        "unresolved": bool(p.get("unresolved", False)),
+    }
+
+
 EDGE_TABLE_MAP: dict[str, tuple[str, Any]] = {
     "child":           ("PARENT_OF",      _edge_payload_index),
     "drives":          ("DRIVES",         None),
@@ -93,6 +190,67 @@ EDGE_TABLE_MAP: dict[str, tuple[str, Any]] = {
     "has_generate":    ("HAS_GENERATE",   None),
     "contains_block":  ("CONTAINS_BLOCK", None),
     "calls":           ("CALLS",          None),
+
+    # ---- Phase C.5 additions (auto-derived from SV semantic emit) ----------
+    "extends":                  ("EXTENDS",             _payload_extends),
+    "implements":               ("IMPLEMENTS",          _payload_name_only),
+    "has_class":                ("HAS_CLASS",           None),
+    "has_class_property":       ("HAS_CLASS_PROPERTY",  None),
+    "has_method":               ("HAS_METHOD",          None),
+    "has_constraint":           ("HAS_CONSTRAINT",      None),
+    "has_inline_constraint":    ("HAS_INLINE_CONSTRAINT", None),
+    "has_type_param":           ("HAS_TYPE_PARAM",      None),
+    "has_local_var":            ("HAS_LOCAL_VAR",       None),
+    "has_function_port":        ("HAS_FUNCTION_PORT",   None),
+    "has_member":               ("HAS_MEMBER",          None),
+    "prototypes":               ("PROTOTYPES",          None),
+    "has_checker_instance":     ("HAS_CHECKER_INSTANCE", None),
+    "has_checker_data":         ("HAS_CHECKER_DATA",    None),
+    "of_checker":               ("OF_CHECKER",          _payload_name_only),
+    "has_assertion":            ("HAS_ASSERTION",       None),
+    "has_assertion_item_port":  ("HAS_ASSERTION_ITEM_PORT", None),
+    "has_property":             ("HAS_PROPERTY",        None),
+    "has_sequence":             ("HAS_SEQUENCE",        None),
+    "has_let":                  ("HAS_LET",             None),
+    "has_default_disable":      ("HAS_DEFAULT_DISABLE", None),
+    "has_clocking":             ("HAS_CLOCKING",        None),
+    "has_clocking_item":        ("HAS_CLOCKING_ITEM",   None),
+    "default_clocking":         ("DEFAULT_CLOCKING",    _payload_name_only),
+    "references_interface":     ("REFERENCES_INTERFACE", _payload_references_interface),
+    "has_covergroup":           ("HAS_COVERGROUP",      None),
+    "has_coverpoint":           ("HAS_COVERPOINT",      None),
+    "has_bins":                 ("HAS_BINS",            None),
+    "has_cross":                ("HAS_CROSS",           None),
+    "has_dpi_import":           ("HAS_DPI_IMPORT",      None),
+    "dpi_exports":              ("DPI_EXPORTS",         _payload_dpi_exports),
+    "imports":                  ("IMPORTS",             _payload_imports),
+    "imports_item":             ("IMPORTS_ITEM",        _payload_imports_item),
+    "exports_all":              ("EXPORTS_ALL",         _payload_exports_all),
+    "declares":                 ("DECLARES",            _payload_declares),
+    "bind_target":              ("BIND_TARGET",         _payload_bind_target),
+    "bound_into":               ("BOUND_INTO",          _payload_bound_into),
+    "defparam_override":        ("DEFPARAM_OVERRIDE",   _payload_defparam_override),
+    "has_net_decl":             ("HAS_NET_DECL",        None),
+    "has_nettype":              ("HAS_NETTYPE",         None),
+    "has_user_defined_net_decl": ("HAS_USER_DEFINED_NET_DECL", None),
+    "aliases":                  ("ALIASES",             None),
+    "groups_net":               ("GROUPS_NET",          None),
+    "groups_port_ref":          ("GROUPS_PORT_REF",     None),
+    "has_primitive_instance":   ("HAS_PRIMITIVE_INSTANCE", None),
+    "has_procedural_assign":    ("HAS_PROCEDURAL_ASSIGN", None),
+    "has_procedural_force":     ("HAS_PROCEDURAL_FORCE", None),
+    "has_event_trigger":        ("HAS_EVENT_TRIGGER",   None),
+    "triggers":                 ("TRIGGERS",            None),
+    "has_genvar":               ("HAS_GENVAR",          None),
+    "has_timeunits":            ("HAS_TIMEUNITS",       None),
+}
+
+
+# Edge types where (src,dst) can repeat with distinct payload — listed
+# columns become MERGE pattern keys to prevent collapse on re-write.
+_MERGE_KEY_OVERRIDES: dict[str, tuple[str, ...]] = {
+    "imports":      ("package", "item"),
+    "imports_item": ("package", "symbol"),
 }
 
 
@@ -101,10 +259,16 @@ class WriteStats:
     """Diagnostic counters returned by :func:`write_graph`."""
 
     nodes_written: int = 0
+    placeholders_written: int = 0
     in_origin_written: int = 0
     edges_written: dict[str, int] = field(default_factory=dict)
     edges_skipped_missing_endpoint: int = 0
     edges_skipped_unknown_type: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def unmapped_edge_type_counts(self) -> dict[str, int]:
+        """Phase C.5 API alias for :attr:`edges_skipped_unknown_type`."""
+        return self.edges_skipped_unknown_type
 
 
 def _category_for(node: dict[str, Any]) -> str:
@@ -202,12 +366,31 @@ MERGE (n)-[:IN_ORIGIN]->(o)
 """
 
 
-def _rel_cypher(table: str, extra_cols: Iterable[str]) -> str:
-    sets = ", ".join(f"r.{c} = ${c}" for c in extra_cols)
+def _rel_cypher(
+    table: str,
+    extra_cols: Iterable[str],
+    merge_keys: Iterable[str] = (),
+) -> str:
+    """Build a MERGE Cypher for a typed rel.
+
+    ``extra_cols`` are payload columns to SET. ``merge_keys`` is the
+    subset of those columns that must appear in the relationship pattern
+    so multiple distinct edges between the same ``(src, dst)`` pair don't
+    collapse on MERGE — e.g. ``IMPORTS`` where one module imports several
+    symbols from the same package.
+    """
+    extra_list = list(extra_cols)
+    merge_list = [k for k in merge_keys if k in extra_list]
+    rel_pattern = f"r:{table}"
+    if merge_list:
+        kvs = ", ".join(f"{k}: ${k}" for k in merge_list)
+        rel_pattern = f"{rel_pattern} {{{kvs}}}"
+    set_cols = [c for c in extra_list if c not in merge_list]
+    sets = ", ".join(f"r.{c} = ${c}" for c in set_cols)
     set_clause = f"\nON CREATE SET {sets}\nON MATCH SET {sets}" if sets else ""
     return (
         f"MATCH (a:Node {{id: $src}}), (b:Node {{id: $dst}})\n"
-        f"MERGE (a)-[r:{table}]->(b)"
+        f"MERGE (a)-[{rel_pattern}]->(b)"
         f"{set_clause}"
     )
 
@@ -320,6 +503,73 @@ def write_graph(
         stats.nodes_written += 1
         known_ids.add(nid)
 
+    # --- materialize ``_unresolved.*`` placeholder endpoints ---------------
+    # Phase C.5: semantic rules emit edges whose endpoint is a synthetic
+    # ``_unresolved.<name>`` id not present in ``graph['nodes']``. To keep
+    # the edge graph-traversable (the lossless mandate), we materialize
+    # those endpoints as ``category='unresolved'`` Node rows attached to
+    # the same origin as one referenced endpoint (or a fallback). They are
+    # excluded from the dict-parity test via the category filter.
+    fallback_origin: OriginRef | None = None
+    for root in order:
+        ref = origins.get(_prefix_of(root))
+        if ref is not None:
+            fallback_origin = ref
+            break
+    if fallback_origin is None and origins:
+        fallback_origin = next(iter(origins.values()))
+
+    placeholder_origins: dict[str, OriginRef] = {}
+    for edge in edges:
+        for endpoint in (edge.get("src"), edge.get("dst")):
+            if (
+                isinstance(endpoint, str)
+                and endpoint.startswith("_unresolved.")
+                and endpoint not in known_ids
+                and endpoint not in placeholder_origins
+            ):
+                src_id, dst_id = edge.get("src"), edge.get("dst")
+                other = dst_id if endpoint == src_id else src_id
+                inherit = (
+                    node_origin.get(other) if isinstance(other, str) else None
+                )
+                origin = inherit or fallback_origin
+                if origin is None:
+                    continue
+                placeholder_origins[endpoint] = origin
+
+    for placeholder_id, origin in placeholder_origins.items():
+        placeholder_name = placeholder_id[len("_unresolved."):]
+        conn.execute(
+            _NODE_MERGE_CYPHER,
+            {
+                "id": placeholder_id,
+                "kind": "Unresolved",
+                "category": "unresolved",
+                "name": placeholder_name,
+                "source": source,
+                "corpus": corpus,
+                "origin_id": origin.id,
+                "start_offset": -1,
+                "end_offset": -1,
+                "start_line": 0,
+                "end_line": 0,
+                "start_col": 0,
+                "end_col": 0,
+                "payload": json.dumps(
+                    {"type": "Unresolved", "placeholder": True},
+                    sort_keys=True,
+                ),
+            },
+        )
+        node_origin[placeholder_id] = origin
+        known_ids.add(placeholder_id)
+        conn.execute(
+            _IN_ORIGIN_MERGE_CYPHER, {"nid": placeholder_id, "oid": origin.id}
+        )
+        stats.placeholders_written += 1
+        stats.in_origin_written += 1
+
     # --- IN_ORIGIN edges ---------------------------------------------------
     for node in nodes:
         nid = node["id"]
@@ -348,7 +598,8 @@ def write_graph(
             extra = extractor(edge)
             params.update(extra)
             extra_cols = tuple(extra.keys())
-        conn.execute(_rel_cypher(table, extra_cols), params)
+        merge_keys = _MERGE_KEY_OVERRIDES.get(etype, ())
+        conn.execute(_rel_cypher(table, extra_cols, merge_keys), params)
         stats.edges_written[table] = stats.edges_written.get(table, 0) + 1
 
     return stats

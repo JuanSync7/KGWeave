@@ -145,6 +145,89 @@ REL TABLE IN_ORIGIN     (FROM Node TO Origin);
 REL TABLE HAS_PAYLOAD   (FROM Node TO BlobPayload);
 ```
 
+**Auto-derived from SV semantic emit (Phase C.5).** Discovered programmatically
+from the SV builder's emitted edge types on the full fixture corpus — these
+rel tables were added to close the lossless gap (originally ~184 edges of 7721
+were dropped into `edges_skipped_unknown_type`). The names are `UPPER_SNAKE` of
+the dict edge `type`; payload columns track the dict-edge payload keys whose
+values are meaningful. Edges with no semantic payload data are FROM Node TO
+Node only.
+
+```
+# class hierarchy + OOP
+REL TABLE EXTENDS                  (FROM Node TO Node, name STRING, params STRING);
+REL TABLE IMPLEMENTS               (FROM Node TO Node, name STRING);
+REL TABLE HAS_CLASS                (FROM Node TO Node);
+REL TABLE HAS_CLASS_PROPERTY       (FROM Node TO Node);
+REL TABLE HAS_METHOD               (FROM Node TO Node);
+REL TABLE HAS_CONSTRAINT           (FROM Node TO Node);
+REL TABLE HAS_INLINE_CONSTRAINT    (FROM Node TO Node);
+REL TABLE HAS_TYPE_PARAM           (FROM Node TO Node);
+REL TABLE HAS_LOCAL_VAR            (FROM Node TO Node);
+REL TABLE HAS_FUNCTION_PORT        (FROM Node TO Node);
+REL TABLE HAS_MEMBER               (FROM Node TO Node);
+REL TABLE PROTOTYPES               (FROM Node TO Node);
+
+# checker / assertion / property / sequence
+REL TABLE HAS_CHECKER_INSTANCE     (FROM Node TO Node);
+REL TABLE HAS_CHECKER_DATA         (FROM Node TO Node);
+REL TABLE OF_CHECKER               (FROM Node TO Node, name STRING);
+REL TABLE HAS_ASSERTION            (FROM Node TO Node);
+REL TABLE HAS_ASSERTION_ITEM_PORT  (FROM Node TO Node);
+REL TABLE HAS_PROPERTY             (FROM Node TO Node);
+REL TABLE HAS_SEQUENCE             (FROM Node TO Node);
+REL TABLE HAS_LET                  (FROM Node TO Node);
+REL TABLE HAS_DEFAULT_DISABLE      (FROM Node TO Node);
+
+# clocking + interface ref
+REL TABLE HAS_CLOCKING             (FROM Node TO Node);
+REL TABLE HAS_CLOCKING_ITEM        (FROM Node TO Node);
+REL TABLE DEFAULT_CLOCKING         (FROM Node TO Node, name STRING);
+REL TABLE REFERENCES_INTERFACE     (FROM Node TO Node, modport STRING);
+
+# coverage
+REL TABLE HAS_COVERGROUP           (FROM Node TO Node);
+REL TABLE HAS_COVERPOINT           (FROM Node TO Node);
+REL TABLE HAS_BINS                 (FROM Node TO Node);
+REL TABLE HAS_CROSS                (FROM Node TO Node);
+
+# DPI + package import/export
+REL TABLE HAS_DPI_IMPORT           (FROM Node TO Node);
+REL TABLE DPI_EXPORTS              (FROM Node TO Node, spec STRING, export_kind STRING, unresolved BOOLEAN);
+REL TABLE IMPORTS                  (FROM Node TO Node, package STRING, item STRING, unresolved BOOLEAN);
+REL TABLE IMPORTS_ITEM             (FROM Node TO Node, package STRING, symbol STRING);
+REL TABLE EXPORTS_ALL              (FROM Node TO Node, wildcard BOOLEAN);
+REL TABLE DECLARES                 (FROM Node TO Node, name STRING, kind STRING);
+
+# bind / defparam
+REL TABLE BIND_TARGET              (FROM Node TO Node, target STRING, target_module STRING, ordinal INT32, unresolved BOOLEAN);
+REL TABLE BOUND_INTO               (FROM Node TO Node, instance_name STRING, scope STRING);
+REL TABLE DEFPARAM_OVERRIDE        (FROM Node TO Node, hier_path STRING, value STRING, unresolved BOOLEAN);
+
+# net decl + nettype + aliases + primitive
+REL TABLE HAS_NET_DECL             (FROM Node TO Node);
+REL TABLE HAS_NETTYPE              (FROM Node TO Node);
+REL TABLE HAS_USER_DEFINED_NET_DECL (FROM Node TO Node);
+REL TABLE ALIASES                  (FROM Node TO Node);
+REL TABLE GROUPS_NET               (FROM Node TO Node);
+REL TABLE GROUPS_PORT_REF          (FROM Node TO Node);
+REL TABLE HAS_PRIMITIVE_INSTANCE   (FROM Node TO Node);
+
+# procedural / event / misc
+REL TABLE HAS_PROCEDURAL_ASSIGN    (FROM Node TO Node);
+REL TABLE HAS_PROCEDURAL_FORCE     (FROM Node TO Node);
+REL TABLE HAS_EVENT_TRIGGER        (FROM Node TO Node);
+REL TABLE TRIGGERS                 (FROM Node TO Node);
+REL TABLE HAS_GENVAR               (FROM Node TO Node);
+REL TABLE HAS_TIMEUNITS            (FROM Node TO Node);
+```
+
+Lossless gap closed in Phase C.5 — see test
+`tests/knowledge_graph/builders/sv/test_writer_full_edge_coverage.py`. The
+writer also materializes `_unresolved.<name>` placeholder Node rows
+(`category='unresolved'`) so edges with dangling endpoints stay
+graph-traversable.
+
 Indexes Kuzu auto-creates on PKs; we add secondary indexes (or rely on
 Kuzu's column-store scan + filter) on `(source, corpus)`, `(kind)`,
 `(name)`, `(origin_id, start_offset)`.
