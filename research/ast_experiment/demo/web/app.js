@@ -708,7 +708,10 @@ function wireFilters() {
         }
       }
       applyFilters();
-      runLayout();
+      // Intentionally no auto-relayout: with 4000+ nodes and child edges,
+      // cose takes minutes and blocks the main thread. Filter changes only
+      // toggle visibility on existing positions; the user can click the
+      // "re-layout" button to recompute when they actually want it.
     });
   }
   for (const cb of document.querySelectorAll('#filters input[data-edge]')) {
@@ -716,14 +719,16 @@ function wireFilters() {
       if (cb.dataset.edge === "child") state.filters.edgeChildVisible = cb.checked;
       if (cb.dataset.edge === "semantic") state.filters.edgeSemanticVisible = cb.checked;
       applyFilters();
-      runLayout();
+      // Intentionally no auto-relayout: with 4000+ nodes and child edges,
+      // cose takes minutes and blocks the main thread. Filter changes only
+      // toggle visibility on existing positions; the user can click the
+      // "re-layout" button to recompute when they actually want it.
     });
   }
   const hi = document.getElementById("hide-isolated");
   if (hi) hi.addEventListener("change", () => {
     state.filters.hideIsolated = hi.checked;
     applyFilters();
-    runLayout();
   });
   const ls = document.getElementById("layout-select");
   if (ls) ls.addEventListener("change", () => runLayout());
