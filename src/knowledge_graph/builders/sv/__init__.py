@@ -10,5 +10,15 @@ from .build import build_kg
 from .lift import lift
 from .semantic import promote
 from .unlift import emit, unlift
+from .writer import WriteStats, build_and_store, write_graph
 
-__all__ = ["build_kg", "lift", "unlift", "emit", "promote"]
+__all__ = [
+    "build_kg",
+    "lift",
+    "unlift",
+    "emit",
+    "promote",
+    "write_graph",
+    "build_and_store",
+    "WriteStats",
+]
