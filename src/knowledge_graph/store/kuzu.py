@@ -26,7 +26,10 @@ from typing import Self
 import kuzu
 
 from knowledge_graph.schemas import OriginRef
-from knowledge_graph.store.schema import init_schema
+from knowledge_graph.store.schema import (
+    init_schema,
+    verify_or_migrate_schema_version,
+)
 from knowledge_graph.store.snapshot import snapshot_file as _snapshot_file
 from knowledge_graph.store.spans import source_at as _source_at
 
@@ -53,6 +56,11 @@ class KGStore:
         db = kuzu.Database(str(p))
         conn = kuzu.Connection(db)
         init_schema(conn)
+        # Reconcile :Meta.schema_version BEFORE any caller-visible query
+        # runs. Raises SchemaVersionMismatch when the on-disk store was
+        # written by a different KGWeave version; silently migrates
+        # legacy stores (no :Meta row yet) up to the running version.
+        verify_or_migrate_schema_version(conn)
         return cls(db, conn, p)
 
     # ---------------------------------------------------------------- props

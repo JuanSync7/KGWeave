@@ -15,7 +15,52 @@ from __future__ import annotations
 
 from typing import Iterable
 
+# ---------------------------------------------------------------- schema version
+#
+# Single source of truth for the on-disk schema version. Bump this when the
+# DDL or any binary-incompatible invariant changes; ``open_store`` will
+# refuse to open a store whose ``:Meta.schema_version`` does not match.
+#
+# Format: ``"<major>.<minor>.<patch>"`` plain strings — no parsing, just
+# equality. Equality is intentional: even patch-level drift means the
+# writer was a different code version and should be surfaced rather than
+# silently tolerated.
+KGWEAVE_SCHEMA_VERSION: str = "1.2.0"
+
+
+class SchemaVersionMismatch(RuntimeError):
+    """Raised by :func:`verify_or_migrate_schema_version` when the on-disk
+    ``:Meta.schema_version`` does not match :data:`KGWEAVE_SCHEMA_VERSION`.
+
+    Attributes
+    ----------
+    stored:
+        The version string read from the store, or ``None`` when the
+        ``:Meta`` row was absent and migration was disabled.
+    expected:
+        The version this build of KGWeave expects (i.e. the running value
+        of :data:`KGWEAVE_SCHEMA_VERSION`).
+    """
+
+    def __init__(self, *, stored: str | None, expected: str) -> None:
+        self.stored = stored
+        self.expected = expected
+        super().__init__(
+            f"KGWeave schema version mismatch: stored={stored!r}, expected={expected!r}"
+        )
+
+
 NODE_TABLES: tuple[tuple[str, str], ...] = (
+    (
+        "Meta",
+        """
+        CREATE NODE TABLE IF NOT EXISTS Meta (
+            singleton_key STRING,
+            schema_version STRING,
+            PRIMARY KEY (singleton_key)
+        )
+        """,
+    ),
     (
         "Origin",
         """
@@ -154,9 +199,67 @@ def init_schema(conn) -> None:
         conn.execute(ddl)
 
 
+_META_SINGLETON_KEY: str = "kgweave"
+
+
+def verify_or_migrate_schema_version(conn) -> str:
+    """Reconcile the on-disk ``:Meta.schema_version`` with the running constant.
+
+    Behaviour:
+
+    * **Empty Meta** (fresh store *or* legacy pre-:Meta store): write the
+      current :data:`KGWEAVE_SCHEMA_VERSION`. This silently migrates
+      legacy stores up — KGWeave is pre-1.0 and forcing re-extracts is
+      wasteful.
+    * **Existing row, matching version**: no-op.
+    * **Existing row, mismatched version**: raise
+      :class:`SchemaVersionMismatch`.
+    * **Multiple rows** (defensive — should be impossible given the
+      singleton PK): take the lexicographically smallest version for the
+      comparison and surface mismatch if it doesn't match. Two writers
+      cannot both create the row because the primary key
+      ``singleton_key`` is fixed to a single value, so the second writer
+      will collide; we use ``MERGE`` to make first-open race-safe.
+
+    Returns the resolved on-disk version (always equal to
+    :data:`KGWEAVE_SCHEMA_VERSION` on a successful return).
+    """
+    res = conn.execute(
+        "MATCH (m:Meta) RETURN m.schema_version ORDER BY m.schema_version ASC"
+    )
+    rows: list[str] = []
+    while res.has_next():
+        rows.append(res.get_next()[0])
+
+    if not rows:
+        # Fresh or legacy store: write the current version. MERGE is
+        # idempotent against a race where a parallel writer created the
+        # same singleton row a moment ago.
+        conn.execute(
+            "MERGE (m:Meta {singleton_key: $k}) SET m.schema_version = $v",
+            {"k": _META_SINGLETON_KEY, "v": KGWEAVE_SCHEMA_VERSION},
+        )
+        return KGWEAVE_SCHEMA_VERSION
+
+    stored = rows[0]
+    if stored != KGWEAVE_SCHEMA_VERSION:
+        raise SchemaVersionMismatch(
+            stored=stored, expected=KGWEAVE_SCHEMA_VERSION
+        )
+    return stored
+
+
 def expected_table_names() -> Iterable[str]:
     yield from (n for n, _ in NODE_TABLES)
     yield from (n for n, _ in REL_TABLES)
 
 
-__all__ = ["init_schema", "NODE_TABLES", "REL_TABLES", "expected_table_names"]
+__all__ = [
+    "init_schema",
+    "verify_or_migrate_schema_version",
+    "KGWEAVE_SCHEMA_VERSION",
+    "SchemaVersionMismatch",
+    "NODE_TABLES",
+    "REL_TABLES",
+    "expected_table_names",
+]

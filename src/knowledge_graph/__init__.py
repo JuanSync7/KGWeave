@@ -51,6 +51,10 @@ from knowledge_graph.query import (
 from knowledge_graph.query.results import EdgeView, NodeView, PathView
 from knowledge_graph.schemas import NodeRef, OriginRef, Span
 from knowledge_graph.store import KGStore
+from knowledge_graph.store.schema import (
+    KGWEAVE_SCHEMA_VERSION,
+    SchemaVersionMismatch,
+)
 
 __version__ = "0.1.0a2"
 
@@ -275,4 +279,7 @@ __all__ = [
     "UnknownBuilder",
     "BuilderConflict",
     "ConnectorRequirementError",
+    "SchemaVersionMismatch",
+    # schema-version surface
+    "KGWEAVE_SCHEMA_VERSION",
 ]
