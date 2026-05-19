@@ -43,6 +43,8 @@ Graph shape::
 
 from __future__ import annotations
 
+import copy
+import hashlib
 from typing import Any
 
 # pyslang uses this sentinel for synthetic / null SourceLocations
@@ -323,3 +325,116 @@ def _backfill_empty_spans(
 
     fix(root_id, by_id[root_id]["span"]["start_offset"]
         if by_id[root_id].get("span") is not None else 0)
+
+
+# ---------------------------------------------------------------------------
+# v1.2-#1: per-file syntax-tree / lift output cache.
+#
+# The expensive part of an extract that touches only a few files is the
+# Python recursion in :class:`_Builder.visit` over every SyntaxNode/Token of
+# every file's tree — even the ones whose bytes haven't changed. ``build_kg``
+# still has to parse each file (pyslang requires every SyntaxTree to be
+# attached to the shared ``Compilation`` so semantic promote() can resolve
+# cross-file references), but it does NOT have to re-lift unchanged files.
+#
+# Soundness reasoning (per-file caching is safe HERE):
+#
+# * The lift output of a file is a pure function of that file's bytes plus
+#   the requested ``id_prefix`` — the ``_Builder`` only walks the SyntaxTree
+#   in isolation, with no cross-file references or compilation lookups.
+#   Therefore caching the lifted ``(nodes, edges, root_id)`` slice keyed on
+#   ``(uri, sha256, id_prefix)`` is sound.
+# * Cross-file semantics live in :mod:`.semantic` (``promote``), which runs
+#   AFTER lift in :func:`.build.build_kg` and re-runs on every invocation
+#   against the freshly assembled Compilation — so it always sees the
+#   current cross-file world. We do NOT cache promote output.
+# * ``id_prefix`` is part of the cache key because node ids embed it; reusing
+#   a cached slice under a different prefix would smuggle stale ids into the
+#   graph.
+#
+# The cache lives in-process. There is no on-disk persistence: that is out of
+# scope for v1.2-#1 (see JOURNAL).
+# ---------------------------------------------------------------------------
+
+
+_LIFT_CACHE: dict[tuple[str, str, str], dict[str, Any]] = {}
+_CACHE_STATS: dict[str, int] = {"hits": 0, "misses": 0}
+
+
+def clear_cache() -> None:
+    """Drop all cached lift slices and reset the hit/miss counters."""
+    _LIFT_CACHE.clear()
+    _CACHE_STATS["hits"] = 0
+    _CACHE_STATS["misses"] = 0
+
+
+def cache_stats() -> dict[str, int]:
+    """Return a copy of the in-process cache hit/miss counters."""
+    return dict(_CACHE_STATS)
+
+
+def _sha256_hex(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def lift_file_cached(
+    *,
+    file_bytes: bytes,
+    graph: dict[str, Any],
+    id_prefix: str,
+    uri: str,
+    sha: str | None = None,
+) -> tuple[Any, str]:
+    """Parse + lift a single SV file with per-file caching.
+
+    Parses ``file_bytes`` into a ``pyslang.SyntaxTree`` and lifts it into
+    ``graph``. The lifted slice (the nodes/edges/root_id contributed by this
+    file alone) is cached under ``(uri, sha256, id_prefix)``; subsequent
+    calls with the same key skip the lift recursion entirely and instead
+    deep-copy the cached slice into ``graph``.
+
+    The SyntaxTree object is always returned so the caller can attach it to
+    a ``pyslang.Compilation`` (cross-file semantic resolution depends on
+    every file's tree being present in the same Compilation, regardless of
+    whether this file is a cache hit).
+
+    Returns ``(tree, root_id)``.
+    """
+    import pyslang  # local import — pyslang costs ~50ms first-load
+
+    if sha is None:
+        sha = _sha256_hex(file_bytes)
+    key = (uri, sha, id_prefix)
+
+    # Always need a fresh tree to add to the (rebuilt) Compilation.
+    tree = pyslang.SyntaxTree.fromText(file_bytes.decode("utf-8"))
+
+    cached = _LIFT_CACHE.get(key)
+    if cached is not None:
+        _CACHE_STATS["hits"] += 1
+        # Deep-copy so caller mutations can't poison the cache.
+        graph["nodes"].extend(copy.deepcopy(cached["nodes"]))
+        graph["edges"].extend(copy.deepcopy(cached["edges"]))
+        graph.setdefault("order", []).append(cached["root_id"])
+        return tree, cached["root_id"]
+
+    _CACHE_STATS["misses"] += 1
+    # Lift into a private slice first so we can snapshot it cleanly.
+    slice_graph: dict[str, Any] = {"nodes": [], "edges": [], "order": []}
+    lift(tree, graph=slice_graph, id_prefix=id_prefix)
+    root_id = slice_graph["order"][-1] if slice_graph["order"] else ""
+
+    # Store an independent deep copy in the cache; emit another deep copy to
+    # the caller's graph so neither side can mutate the other.
+    _LIFT_CACHE[key] = {
+        "nodes": copy.deepcopy(slice_graph["nodes"]),
+        "edges": copy.deepcopy(slice_graph["edges"]),
+        "root_id": root_id,
+    }
+    graph["nodes"].extend(slice_graph["nodes"])
+    graph["edges"].extend(slice_graph["edges"])
+    graph.setdefault("order", []).append(root_id)
+    return tree, root_id
+
+
+__all__ = ["lift", "lift_file_cached", "clear_cache", "cache_stats"]

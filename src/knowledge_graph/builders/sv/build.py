@@ -18,7 +18,7 @@ from typing import Any
 
 import pyslang
 
-from .lift import lift
+from .lift import lift_file_cached
 from .semantic import promote
 
 
@@ -55,12 +55,23 @@ def build_kg(sv_paths: list[Path]) -> tuple[dict[str, Any], list[Any], Any]:
         # diverges from ``SyntaxTree.fromText(path.read_text())`` token
         # streams — keeping the two paths uniform preserves the byte-equal
         # round-trip invariant.
-        tree = pyslang.SyntaxTree.fromText(path_obj.read_text())
+        #
+        # v1.2-#1: per-file lift cache. ``lift_file_cached`` parses the
+        # SyntaxTree fresh every call (Compilation needs each tree present
+        # to resolve cross-file references) but skips the lift recursion
+        # for files whose ``(uri, sha256, id_prefix)`` match a prior call.
+        file_bytes = path_obj.read_bytes()
+        uri = str(path_obj.resolve())
+        offsets.append(len(graph["nodes"]))
+        tree, _root_id = lift_file_cached(
+            file_bytes=file_bytes,
+            graph=graph,
+            id_prefix=prefix,
+            uri=uri,
+        )
         compilation.addSyntaxTree(tree)
         trees.append(tree)
         prefixes.append(prefix)
-        offsets.append(len(graph["nodes"]))
-        lift(tree, graph=graph, id_prefix=prefix)
 
     # Phase 2: run S1 (pass1) across EVERY tree so the shared
     # semantic_name_index is fully populated before any tree's S6 looks up
