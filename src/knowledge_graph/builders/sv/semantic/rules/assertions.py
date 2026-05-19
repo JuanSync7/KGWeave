@@ -1,0 +1,211 @@
+"""SVA *use sites* — S16 (concurrent) + S17 (immediate) assertion statements
++ S39 (DefaultDisableDeclaration).
+
+S16 promotes the six concurrent-assertion SyntaxKinds carried by
+``ConcurrentAssertionStatementSyntax`` nodes. S17 promotes the three
+immediate-assertion SyntaxKinds (assert / assume / cover) that live inside
+procedural contexts (always / initial / final / function / task). The
+actual promotion runs in pass 1 of ``dispatch.promote`` (alongside
+S14/S15); the metadata entries below pin ``__rule_id__`` so the
+registry-derived Bucket-1 checklist counts each SyntaxKind as PROMOTE_NOW.
+
+A concurrent assertion at module top-level scope is parsed as a
+``ConcurrentAssertionMemberSyntax`` wrapping the inner
+``ConcurrentAssertionStatementSyntax``; similarly, ``ImmediateAssertionMember``
+wraps the inner immediate statement when written at module scope. We
+register only the **inner** kinds — the wrappers are left as CONTAINER
+(they carry no identity of their own beyond the wrapped statement) —
+which dedupes both forms naturally.
+
+S17 also recognises the ``DeferredAssertion`` child node (carrying the
+``#0`` delay or ``final`` keyword) attached to an immediate-assert
+statement to set ``attributes["deferred"] = True`` and lift
+``attributes["defer_mode"]`` ("zero" / "final") onto the promoted node.
+``DeferredAssertion`` itself stays CONTAINER (it is a modifier, not a
+queryable entity) — S72 owns the wrapper kind as an ownership /
+attribute-augmentation stub.
+
+S39 promotes ``default disable iff <expr>;`` — the implicit disable
+condition for all concurrent assertions in a scope. One per enclosing
+module / interface / checker / program. Path key:
+``<scope>.__default_disable__``. A ``has_default_disable`` edge is emitted
+from the enclosing scope. Identifier tokens in the disable expression get
+``reads`` edges so signal dependencies are queryable. Promotion lives in
+pass 1 of ``dispatch.promote`` where ``module_stack`` is maintained.
+
+S77 promotes ``AssertionItemPort`` — one entry in the formal port list
+of a parameterised ``property`` / ``sequence`` / ``let``. Each port
+surfaces as ``role="assertion_item_port"`` with direction / data_type /
+local / has_default / name attributes and a
+``has_assertion_item_port`` edge from the enclosing property /
+sequence / let scope (top of ``sva_decl_stack``, extended in S77 to
+also push for ``LetDeclaration``). Promotion lives in pass 1 of
+``dispatch.promote``.
+
+S78 owns the ``AssertionItemPortList`` wrapper — the parenthesised list
+holding the ``AssertionItemPort`` entries of a parameterised property /
+sequence / let. Per CLAUDE.md lesson 5 (wrapper-kind dedup), the
+wrapper carries no independent identity beyond its children; only the
+inner ports promote (via S77). S78 ships as an ownership-only stub —
+no dispatch branch, mirroring S75 (FunctionPortList).
+"""
+
+from __future__ import annotations
+
+import pyslang
+
+
+def _s16_assertion(*args, **kwargs):
+    """Concurrent assertion statements are promoted in pass 1 of dispatch.promote."""
+    return
+
+
+_s16_assertion.__rule_id__ = "S16"
+
+
+def _s17_assertion(*args, **kwargs):
+    """Immediate assertion statements are promoted in pass 1 of dispatch.promote."""
+    return
+
+
+_s17_assertion.__rule_id__ = "S17"
+
+
+def rule_s39(*args, **kwargs):
+    """DefaultDisableDeclaration is promoted in pass 1 of dispatch.promote."""
+    return
+
+
+rule_s39.__rule_id__ = "S39"
+
+
+def _s70_concurrent_assertion_member(*args, **kwargs):
+    """Wrapper-only ownership marker per CLAUDE.md lesson 5.
+
+    ``ConcurrentAssertionMember`` is the module-scope grammar wrapper
+    around a ``ConcurrentAssertionStatement`` (the inner kind, registered
+    by S16). Per lesson 5, registering both wrapper and inner would
+    double-promote at module scope. We therefore leave the wrapper as
+    CONTAINER at runtime (this stub is never invoked from dispatch) and
+    use the stub only so ``build_bucket1_checklist.py`` can attribute the
+    SyntaxKind to S70 via ``__rule_id__`` introspection. Runtime
+    promotion fires via the inner statement kind (S16). No dispatch
+    branch.
+    """
+    return
+
+
+_s70_concurrent_assertion_member.__rule_id__ = "S70"
+
+
+def _s71_immediate_assertion_member(*args, **kwargs):
+    """Wrapper-only ownership marker per CLAUDE.md lesson 5.
+
+    ``ImmediateAssertionMember`` is the module-scope grammar wrapper
+    around an ``ImmediateAssertionStatement`` (the inner kind, registered
+    by S17). Per lesson 5, registering both wrapper and inner would
+    double-promote at module scope. We therefore leave the wrapper as
+    CONTAINER at runtime (this stub is never invoked from dispatch) and
+    use the stub only so ``build_bucket1_checklist.py`` can attribute the
+    SyntaxKind to S71 via ``__rule_id__`` introspection. Runtime
+    promotion fires via the inner statement kind (S17). No dispatch
+    branch.
+    """
+    return
+
+
+_s71_immediate_assertion_member.__rule_id__ = "S71"
+
+
+def _s72_deferred_assertion(*args, **kwargs):
+    """Wrapper-with-lifted-attribute ownership marker per CLAUDE.md lesson 5.
+
+    ``DeferredAssertion`` is the ``#0`` / ``final`` modifier wrapper that
+    appears as a direct CHILD of an immediate-assertion statement
+    (``ImmediateAssertStatement`` / ``ImmediateAssumeStatement`` /
+    ``ImmediateCoverStatement``, registered by S17). It is **not** a
+    queryable entity on its own — it carries no identity beyond the
+    deferral mode it tags onto the surrounding assert.
+
+    Per lesson 5 we leave the wrapper as CONTAINER (no semantic
+    promotion of a separate ``DeferredAssertion`` node — that would
+    double-count one user-level assertion). The discriminating
+    attribute (``#0`` vs ``final``) is lifted onto the inner immediate
+    assertion's ``semantic.attributes`` as ``defer_mode`` ("zero" /
+    "final") by the S17 branch in ``dispatch.promote``. Detection is
+    structural: ``DeferredAssertionSyntax`` exposes ``finalKeyword`` /
+    ``zero`` / ``hash`` data descriptors — we check ``finalKeyword`` to
+    discriminate, no token-text scan needed.
+
+    This stub exists only so ``build_bucket1_checklist.py`` can attribute
+    the SyntaxKind to S72 via ``__rule_id__`` introspection — no
+    dispatch branch on the wrapper itself. Pattern mirrors S63
+    (``ForwardTypeRestriction``): wrapper kind owns an ownership stub;
+    runtime augments the inner node it modifies (attribute-augmentation
+    rather than pure ownership stub).
+    """
+    return
+
+
+_s72_deferred_assertion.__rule_id__ = "S72"
+
+
+def _s77_assertion_item_port(*args, **kwargs):
+    """AssertionItemPort is promoted in pass 1 of dispatch.promote."""
+    return
+
+
+_s77_assertion_item_port.__rule_id__ = "S77"
+
+
+def _s78_stub(*args, **kwargs):
+    """AssertionItemPortList — wrapper ownership marker only.
+
+    ``AssertionItemPortListSyntax`` is the parenthesised wrapper holding
+    one or more ``AssertionItemPortSyntax`` entries inside a
+    parameterised property / sequence / let signature
+    (``property p(logic sig, int n); ...`` — the
+    ``(logic sig, int n)`` is the AssertionItemPortList).
+
+    Per ``CLAUDE.md`` lesson 5 (wrapper-kind dedup), the wrapper carries
+    no independent identity — its only role is to group the inner
+    ``AssertionItemPort`` children. We therefore leave it as CONTAINER
+    for structural traversal and only register an ownership stub here
+    so the Bucket-1 checklist regenerator attributes
+    ``AssertionItemPortList`` to S78 via ``__rule_id__`` introspection.
+    Runtime promotion fires per child via the inner ``AssertionItemPort``
+    kind (S77). No dispatch branch. Pattern mirrors S75
+    (``FunctionPortList``).
+    """
+    return
+
+
+_s78_stub.__rule_id__ = "S78"
+
+
+RULES: list[tuple] = [
+    (pyslang.SyntaxKind.AssertPropertyStatement, _s16_assertion),
+    (pyslang.SyntaxKind.AssumePropertyStatement, _s16_assertion),
+    (pyslang.SyntaxKind.CoverPropertyStatement, _s16_assertion),
+    (pyslang.SyntaxKind.CoverSequenceStatement, _s16_assertion),
+    (pyslang.SyntaxKind.RestrictPropertyStatement, _s16_assertion),
+    (pyslang.SyntaxKind.ExpectPropertyStatement, _s16_assertion),
+    (pyslang.SyntaxKind.ImmediateAssertStatement, _s17_assertion),
+    (pyslang.SyntaxKind.ImmediateAssumeStatement, _s17_assertion),
+    (pyslang.SyntaxKind.ImmediateCoverStatement, _s17_assertion),
+    (pyslang.SyntaxKind.DefaultDisableDeclaration, rule_s39),
+    # S70: wrapper-only ownership stub (no dispatch branch — see lesson 5).
+    (pyslang.SyntaxKind.ConcurrentAssertionMember, _s70_concurrent_assertion_member),
+    # S71: wrapper-only ownership stub (no dispatch branch — see lesson 5).
+    (pyslang.SyntaxKind.ImmediateAssertionMember, _s71_immediate_assertion_member),
+    # S72: wrapper with lifted ``defer_mode`` attribute (see lesson 5).
+    # Wrapper itself stays CONTAINER; runtime augmentation of the inner
+    # ImmediateAssert* node happens in the S17 dispatch branch.
+    (pyslang.SyntaxKind.DeferredAssertion, _s72_deferred_assertion),
+    # S77: AssertionItemPort — port-formal of property/sequence/let.
+    # Runtime promotion lives in pass 1 of dispatch.promote.
+    (pyslang.SyntaxKind.AssertionItemPort, _s77_assertion_item_port),
+    # S78: Wrapper ownership marker per lesson 5; children promote via S77.
+    # No dispatch branch.
+    (pyslang.SyntaxKind.AssertionItemPortList, _s78_stub),
+]
