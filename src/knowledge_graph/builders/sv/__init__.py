@@ -1,2 +1,14 @@
-"""Source package for the AST experiment — semantic projection over
-pyslang-lifted syntax trees, plus the lift/unlift/build pipeline."""
+"""SV builder package — lift/unlift/promote and build_kg facade.
+
+Re-exports the stable surface used by Phase C (the Kuzu writer) and by
+external callers.
+"""
+
+from __future__ import annotations
+
+from .build import build_kg
+from .lift import lift
+from .semantic import promote
+from .unlift import emit, unlift
+
+__all__ = ["build_kg", "lift", "unlift", "emit", "promote"]
