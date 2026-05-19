@@ -91,6 +91,64 @@ class KGStore:
         """Return ``content[start_offset:end_offset]`` for the named origin."""
         return _source_at(self._conn, origin_id, start_offset, end_offset)
 
+    # ----------------------------------------------------- incremental merge
+
+    def find_current_origin(
+        self, uri: str, source: str, corpus: str
+    ) -> OriginRef | None:
+        """Return the current ``:Origin`` row keyed by ``(uri, source, corpus)``.
+
+        The replacement model maintains a single live origin per
+        ``(uri, source, corpus)`` triple. If multiple rows exist (e.g. due
+        to a pre-extract write that hand-built origins), the lexicographically
+        smallest ``id`` wins — deterministic but arbitrary; the
+        :func:`extract` path guarantees at most one in practice.
+        """
+        res = self._conn.execute(
+            """
+            MATCH (o:Origin)
+            WHERE o.uri = $uri AND o.source = $source AND o.corpus = $corpus
+            RETURN o.id, o.uri, o.sha256, o.source, o.corpus
+            ORDER BY o.id ASC
+            """,
+            {"uri": uri, "source": source, "corpus": corpus},
+        )
+        if not res.has_next():
+            return None
+        row = res.get_next()
+        return OriginRef(
+            id=row[0], uri=row[1], sha256=row[2], source=row[3], corpus=row[4]
+        )
+
+    def delete_origin_subtree(self, origin_id: str) -> None:
+        """Delete ``:Origin {id: origin_id}`` AND every ``:Node`` it owns.
+
+        Sweeps every rel-table edge touching those nodes first (Kuzu's
+        ``DETACH DELETE`` handles this), then drops the nodes, then drops
+        the origin itself. The order is required because Kuzu refuses to
+        delete a node that still has rel edges if ``DETACH`` is omitted —
+        but ``DETACH DELETE`` covers both cases.
+
+        Untouched origins, their nodes, and any rels between them survive.
+        """
+        # Collect node ids whose origin_id matches BEFORE deleting them.
+        ids_res = self._conn.execute(
+            "MATCH (n:Node) WHERE n.origin_id = $oid RETURN n.id",
+            {"oid": origin_id},
+        )
+        # DETACH DELETE: drops the node + all rel-table rows touching it.
+        self._conn.execute(
+            "MATCH (n:Node) WHERE n.origin_id = $oid DETACH DELETE n",
+            {"oid": origin_id},
+        )
+        # Now drop the Origin itself (no Node refs remain).
+        self._conn.execute(
+            "MATCH (o:Origin {id: $oid}) DETACH DELETE o",
+            {"oid": origin_id},
+        )
+        # Silence the unused result.
+        del ids_res
+
     # --------------------------------------------------------------- close
 
     def close(self) -> None:

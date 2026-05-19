@@ -10,7 +10,7 @@ from .build import build_kg
 from .lift import lift
 from .semantic import promote
 from .unlift import emit, unlift
-from .writer import WriteStats, build_and_store, write_graph
+from .writer import ExtractStats, WriteStats, build_and_store, extract, write_graph
 
 __all__ = [
     "build_kg",
@@ -20,5 +20,7 @@ __all__ = [
     "promote",
     "write_graph",
     "build_and_store",
+    "extract",
     "WriteStats",
+    "ExtractStats",
 ]

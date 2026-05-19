@@ -402,4 +402,162 @@ def build_and_store(
     return graph, origins_by_prefix, stats
 
 
-__all__ = ["write_graph", "build_and_store", "WriteStats", "EDGE_TABLE_MAP"]
+# --------------------------------------------------------------------------
+# Phase E: incremental extract with scoped replacement.
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class ExtractStats:
+    """Diagnostic summary of an :func:`extract` call.
+
+    ``touched_paths`` = files whose content changed (or are new) — their
+    origin subtree was deleted (if present) and re-written.
+    ``unchanged_paths`` = files whose sha256 already matched a live origin
+    — skipped entirely on the write side.
+    ``deleted_paths`` = files swept under ``prune=True`` (origin existed for
+    ``(source, corpus)`` but path was not in this call).
+    """
+
+    touched_paths: list[str] = field(default_factory=list)
+    unchanged_paths: list[str] = field(default_factory=list)
+    deleted_paths: list[str] = field(default_factory=list)
+    write_stats: WriteStats | None = None
+
+
+def _sha_of(path: Path) -> str:
+    from knowledge_graph.shared.ids import sha256_bytes
+    return sha256_bytes(path.read_bytes())
+
+
+def extract(
+    store: Any,
+    sv_paths: list[Path] | list[str],
+    *,
+    source: str = "sv",
+    corpus: str,
+    lang: str = "systemverilog",
+    prune: bool = False,
+) -> tuple[dict[str, Any] | None, dict[str, OriginRef], ExtractStats]:
+    """Incremental SV extract with replacement semantics.
+
+    For each input path:
+
+    * If a current ``:Origin`` exists for ``(uri, source, corpus)`` with a
+      DIFFERENT sha256 — that origin's subtree (origin + nodes + all rels
+      touching those nodes) is **deleted**; the new content is snapshotted.
+    * If no current origin exists — the file is snapshotted fresh.
+    * If a current origin exists with a MATCHING sha — the file is marked
+      unchanged and skipped on the write side.
+
+    If ``prune=True``, any current origin for ``(source, corpus)`` whose
+    ``uri`` is not in the input set is swept the same way (use for "this is
+    now the complete corpus" semantics).
+
+    The Cypher write step only pushes nodes whose origin is in the
+    ``touched_paths`` set. Untouched origins, their nodes, and rels between
+    them are unaffected.
+
+    Returns ``(graph, origins_by_prefix, ExtractStats)``. ``graph`` is
+    ``None`` when nothing changed (no work done).
+    """
+    from .build import build_kg
+
+    paths = [Path(p) for p in sv_paths]
+
+    stats_e = ExtractStats(write_stats=None)
+    seen: dict[str, int] = {}
+    new_uris: set[str] = set()
+    touched_paths: list[Path] = []
+    origins_by_prefix: dict[str, OriginRef] = {}
+    touched_origin_ids: set[str] = set()
+    prefix_for_path: dict[str, str] = {}
+
+    for p in paths:
+        prefix = _prefix_for_path(p, seen)
+        prefix_for_path[str(p)] = prefix
+        uri = str(p.resolve())
+        new_uris.add(uri)
+        new_sha = _sha_of(p)
+        existing = store.find_current_origin(uri=uri, source=source, corpus=corpus)
+        if existing is not None and existing.sha256 == new_sha:
+            origins_by_prefix[prefix] = existing
+            stats_e.unchanged_paths.append(uri)
+            continue
+        if existing is not None and existing.sha256 != new_sha:
+            store.delete_origin_subtree(existing.id)
+        touched_paths.append(p)
+        stats_e.touched_paths.append(uri)
+
+    if prune:
+        res = store.conn.execute(
+            """
+            MATCH (o:Origin)
+            WHERE o.source = $source AND o.corpus = $corpus
+            RETURN o.id, o.uri
+            """,
+            {"source": source, "corpus": corpus},
+        )
+        while res.has_next():
+            row = res.get_next()
+            oid, uri = row[0], row[1]
+            if uri not in new_uris:
+                store.delete_origin_subtree(oid)
+                stats_e.deleted_paths.append(uri)
+
+    if not touched_paths:
+        return None, origins_by_prefix, stats_e
+
+    for p in touched_paths:
+        prefix = prefix_for_path[str(p)]
+        ref = store.snapshot_file(p, source=source, corpus=corpus, lang=lang)
+        origins_by_prefix[prefix] = ref
+        touched_origin_ids.add(ref.id)
+
+    # Whole-corpus build — SV semantic resolution is cross-file.
+    graph, _trees, _comp = build_kg(paths)
+    filtered = _filter_graph_to_origins(
+        graph, origins_by_prefix, touched_origin_ids
+    )
+    write_stats = write_graph(
+        store, filtered, source=source, corpus=corpus, origins=origins_by_prefix
+    )
+    stats_e.write_stats = write_stats
+    return graph, origins_by_prefix, stats_e
+
+
+def _filter_graph_to_origins(
+    graph: dict[str, Any],
+    origins_by_prefix: dict[str, OriginRef],
+    touched_origin_ids: set[str],
+) -> dict[str, Any]:
+    """Subset ``graph`` to nodes whose resolved origin is in ``touched_origin_ids``.
+
+    Uses :func:`_resolve_origins_for_nodes` to determine each node's origin
+    (same logic the writer would apply), then drops nodes outside the
+    touched set and edges whose endpoints fall outside it.
+    """
+    nodes: list[dict[str, Any]] = graph.get("nodes", [])
+    edges: list[dict[str, Any]] = graph.get("edges", [])
+    order: list[str] = graph.get("order", []) or []
+
+    node_origin = _resolve_origins_for_nodes(nodes, edges, origins_by_prefix, order)
+    keep_ids = {
+        n["id"] for n in nodes if node_origin[n["id"]].id in touched_origin_ids
+    }
+    kept_nodes = [n for n in nodes if n["id"] in keep_ids]
+    kept_edges = [
+        e for e in edges if e.get("src") in keep_ids and e.get("dst") in keep_ids
+    ]
+    kept_order = [oid for oid in order if oid in keep_ids]
+    return {"nodes": kept_nodes, "edges": kept_edges, "order": kept_order}
+
+
+__all__ = [
+    "write_graph",
+    "build_and_store",
+    "extract",
+    "WriteStats",
+    "ExtractStats",
+    "EDGE_TABLE_MAP",
+]
