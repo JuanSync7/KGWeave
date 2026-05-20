@@ -21,6 +21,7 @@ import pytest
 
 from knowledge_graph import open_store, prune_orphaned_origins
 from knowledge_graph.builders.sv import extract
+from knowledge_graph.builders.sv.writer import ExtractStats
 from knowledge_graph.store import KGStore
 
 
@@ -65,17 +66,29 @@ def _origin_ids(store, *, source: str | None = None, corpus: str | None = None) 
 
 
 def _insert_bare_origin(
-    store, *, oid: str, source: str = "sv", corpus: str = "c", uri: str = "/no/file"
+    store,
+    *,
+    oid: str,
+    source: str = "sv",
+    corpus: str = "c",
+    uri: str = "/no/file",
+    sha256: str = "deadbeef",
 ) -> str:
     """Create an Origin row with no child Nodes — a synthetic orphan."""
     store.conn.execute(
         """
         CREATE (o:Origin {
-            id: $id, uri: $uri, sha256: 'deadbeef', content: '',
+            id: $id, uri: $uri, sha256: $sha, content: '',
             byte_length: 0, source: $source, corpus: $corpus, lang: ''
         })
         """,
-        {"id": oid, "uri": uri, "source": source, "corpus": corpus},
+        {
+            "id": oid,
+            "uri": uri,
+            "source": source,
+            "corpus": corpus,
+            "sha": sha256,
+        },
     )
     return oid
 
@@ -229,5 +242,172 @@ def test_extract_gc_idempotent_on_clean_corpus(tmp_path, small_corpus):
         assert ids_after == ids_before
         assert stats.touched_paths == []
         assert stats.deleted_paths == []
+    finally:
+        store.close()
+
+
+# --------------------------------------------------------------------------
+# v1.3-#4: ExtractStats.gc_pruned exposes Origin-sweep count.
+# --------------------------------------------------------------------------
+
+
+def test_extract_stats_gc_pruned_default_zero():
+    """``ExtractStats.gc_pruned`` defaults to 0 and is an ``int``."""
+    s = ExtractStats()
+    assert s.gc_pruned == 0
+    assert isinstance(s.gc_pruned, int)
+
+
+def test_extract_stats_gc_pruned_field_assignable():
+    """``ExtractStats(gc_pruned=5).gc_pruned == 5`` (explicit construction)."""
+    s = ExtractStats(gc_pruned=5)
+    assert s.gc_pruned == 5
+    assert isinstance(s.gc_pruned, int)
+
+
+def test_extract_gc_false_leaves_gc_pruned_zero(tmp_path, small_corpus):
+    """When ``gc=False`` the prune call is skipped — ``gc_pruned`` stays 0."""
+    store = KGStore.open(tmp_path / "kg.kuzu")
+    try:
+        # Seed an orphan that WOULD be swept if gc were on.
+        _insert_bare_origin(
+            store, oid="orphan-skip", source="sv", corpus="gc-corpus"
+        )
+        _g, _o, stats = extract(store, small_corpus, corpus="gc-corpus")
+        assert stats.gc_pruned == 0
+        # And the orphan is still there because no sweep ran.
+        assert "orphan-skip" in _origin_ids(store)
+    finally:
+        store.close()
+
+
+def test_extract_gc_true_no_orphans_reports_zero(tmp_path, small_corpus):
+    """``gc=True`` on a corpus with no orphans reports ``gc_pruned == 0``."""
+    store = KGStore.open(tmp_path / "kg.kuzu")
+    try:
+        _g, _o, stats = extract(store, small_corpus, corpus="gc-corpus", gc=True)
+        assert stats.gc_pruned == 0
+        # Re-run: still nothing to sweep.
+        _g2, _o2, stats2 = extract(
+            store, small_corpus, corpus="gc-corpus", gc=True
+        )
+        assert stats2.gc_pruned == 0
+    finally:
+        store.close()
+
+
+def _seed_in_scope_orphan(store, corpus_paths, *, oid: str, corpus: str) -> None:
+    """Insert an orphan that survives ``effective_prune`` so the GC sweep counts it.
+
+    The replacement-merge path inside ``extract`` deletes any Origin in
+    ``(source, corpus)`` whose ``uri`` is not part of the new input set
+    BEFORE the orphan sweep runs. To stage an orphan that reaches the
+    sweep, we must (a) use a uri that *is* in the input set, and (b) use
+    the real file's sha256 so the orphan is treated as ``unchanged`` and
+    not its subtree-deleted (we also pick an id lexicographically larger
+    than any real origin id so ``find_current_origin`` still resolves to
+    the real one).
+    """
+    from knowledge_graph.shared.ids import sha256_bytes
+
+    p = corpus_paths[0]
+    _insert_bare_origin(
+        store,
+        oid=oid,
+        source="sv",
+        corpus=corpus,
+        uri=str(p.resolve()),
+        sha256=sha256_bytes(p.read_bytes()),
+    )
+
+
+def test_extract_gc_true_reports_single_orphan_swept(tmp_path, small_corpus):
+    """A pre-existing orphan in ``(source, corpus)`` shows up in ``gc_pruned``."""
+    store = KGStore.open(tmp_path / "kg.kuzu")
+    try:
+        extract(store, small_corpus, corpus="gc-corpus")
+        _seed_in_scope_orphan(
+            store, small_corpus, oid="zzzz-orphan-a", corpus="gc-corpus"
+        )
+        _g, _o, stats = extract(
+            store, small_corpus, corpus="gc-corpus", gc=True
+        )
+        assert stats.gc_pruned == 1
+        assert "zzzz-orphan-a" not in _origin_ids(store)
+    finally:
+        store.close()
+
+
+def test_extract_gc_true_reports_three_orphans_swept(tmp_path, small_corpus):
+    """``gc_pruned`` is the exact number of Origins the sweep deleted (n=3)."""
+    store = KGStore.open(tmp_path / "kg.kuzu")
+    try:
+        extract(store, small_corpus, corpus="gc-corpus")
+        for oid in ("zzzz-orphan-1", "zzzz-orphan-2", "zzzz-orphan-3"):
+            _seed_in_scope_orphan(
+                store, small_corpus, oid=oid, corpus="gc-corpus"
+            )
+        _g, _o, stats = extract(
+            store, small_corpus, corpus="gc-corpus", gc=True
+        )
+        assert stats.gc_pruned == 3
+        ids_after = _origin_ids(store)
+        for oid in ("zzzz-orphan-1", "zzzz-orphan-2", "zzzz-orphan-3"):
+            assert oid not in ids_after
+    finally:
+        store.close()
+
+
+def test_extract_gc_pruned_scoped_to_source_corpus(tmp_path, small_corpus):
+    """The prune call is scoped — orphans outside ``(source, corpus)`` don't count."""
+    store = KGStore.open(tmp_path / "kg.kuzu")
+    try:
+        extract(store, small_corpus, corpus="gc-corpus")
+        # In-scope orphan: counted.
+        _seed_in_scope_orphan(
+            store, small_corpus, oid="zzzz-in-scope", corpus="gc-corpus"
+        )
+        # Out-of-scope orphans: NOT counted, NOT swept. These can use the
+        # default uri because they're outside the (source, corpus) the
+        # effective_prune sweep iterates.
+        _insert_bare_origin(
+            store, oid="other-source", source="md", corpus="gc-corpus"
+        )
+        _insert_bare_origin(
+            store, oid="other-corpus", source="sv", corpus="elsewhere"
+        )
+        _g, _o, stats = extract(
+            store, small_corpus, corpus="gc-corpus", gc=True
+        )
+        assert stats.gc_pruned == 1
+        remaining = _origin_ids(store)
+        assert "zzzz-in-scope" not in remaining
+        assert "other-source" in remaining
+        assert "other-corpus" in remaining
+    finally:
+        store.close()
+
+
+def test_extract_gc_pruned_via_no_touched_paths_branch(tmp_path, small_corpus):
+    """The early-return branch (no touched paths) also populates ``gc_pruned``.
+
+    Covers the second sweep call-site inside ``extract`` — when the input
+    set is unchanged AND ``gc=True``, the function bails before writes but
+    must still surface the prune count.
+    """
+    store = KGStore.open(tmp_path / "kg.kuzu")
+    try:
+        extract(store, small_corpus, corpus="gc-corpus")
+        _seed_in_scope_orphan(
+            store, small_corpus, oid="zzzz-early-1", corpus="gc-corpus"
+        )
+        _seed_in_scope_orphan(
+            store, small_corpus, oid="zzzz-early-2", corpus="gc-corpus"
+        )
+        _g, _o, stats = extract(
+            store, small_corpus, corpus="gc-corpus", gc=True
+        )
+        assert stats.touched_paths == []
+        assert stats.gc_pruned == 2
     finally:
         store.close()

@@ -674,6 +674,7 @@ class ExtractStats:
     unchanged_paths: list[str] = field(default_factory=list)
     deleted_paths: list[str] = field(default_factory=list)
     write_stats: WriteStats | None = None
+    gc_pruned: int = 0
 
 
 def _sha_of(path: Path) -> str:
@@ -769,7 +770,9 @@ def extract(
 
     if not touched_paths:
         if gc:
-            store.prune_orphaned_origins(source=source, corpus=corpus)
+            stats_e.gc_pruned = store.prune_orphaned_origins(
+                source=source, corpus=corpus
+            )
         return None, origins_by_prefix, stats_e
 
     for p in touched_paths:
@@ -788,7 +791,9 @@ def extract(
     )
     stats_e.write_stats = write_stats
     if gc:
-        store.prune_orphaned_origins(source=source, corpus=corpus)
+        stats_e.gc_pruned = store.prune_orphaned_origins(
+            source=source, corpus=corpus
+        )
     return graph, origins_by_prefix, stats_e
 
 
