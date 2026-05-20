@@ -21,16 +21,55 @@ from typing import Iterable
 # DDL or any binary-incompatible invariant changes; ``open_store`` will
 # refuse to open a store whose ``:Meta.schema_version`` does not match.
 #
-# Format: ``"<major>.<minor>.<patch>"`` plain strings — no parsing, just
-# equality. Equality is intentional: even patch-level drift means the
-# writer was a different code version and should be surfaced rather than
-# silently tolerated.
+# Format: ``"<major>.<minor>.<patch>"`` plain strings — three integer
+# components. Compatibility is **major-pinned, minor/patch
+# forward-compatible** (see :func:`_is_compatible`): a newer running
+# build can open a store written with an older minor/patch in the same
+# major. Different majors, or a downgrade attempt (older expected vs
+# newer stored), are incompatible and raise
+# :class:`SchemaVersionMismatch`.
 KGWEAVE_SCHEMA_VERSION: str = "1.3.0"
+
+
+def _parse_version(v: str) -> tuple[int, int, int]:
+    """Parse ``"<major>.<minor>.<patch>"`` into a 3-tuple of ints.
+
+    Raises ``ValueError`` on any other shape — callers should rely on the
+    shape invariant being enforced at constant-definition time and the
+    write path (``:Meta`` rows only ever hold values that originated from
+    :data:`KGWEAVE_SCHEMA_VERSION`).
+    """
+    parts = v.split(".")
+    if len(parts) != 3:
+        raise ValueError(f"expected '<major>.<minor>.<patch>', got {v!r}")
+    return (int(parts[0]), int(parts[1]), int(parts[2]))
+
+
+def _is_compatible(stored: str, expected: str) -> bool:
+    """Return True iff a build at ``expected`` may open a store at ``stored``.
+
+    Policy:
+
+    * **Same major**: compatible iff ``(expected.minor, expected.patch) >=
+      (stored.minor, stored.patch)`` — the running build is at least as
+      new as the on-disk writer within the major series. We own the
+      migration table, so same-major guarantees structural compatibility.
+    * **Different major**: always incompatible.
+    """
+    try:
+        s_maj, s_min, s_pat = _parse_version(stored)
+        e_maj, e_min, e_pat = _parse_version(expected)
+    except ValueError:
+        return False
+    if s_maj != e_maj:
+        return False
+    return (e_min, e_pat) >= (s_min, s_pat)
 
 
 class SchemaVersionMismatch(RuntimeError):
     """Raised by :func:`verify_or_migrate_schema_version` when the on-disk
-    ``:Meta.schema_version`` does not match :data:`KGWEAVE_SCHEMA_VERSION`.
+    ``:Meta.schema_version`` is incompatible with :data:`KGWEAVE_SCHEMA_VERSION`
+    under the semver-major compatibility policy (see :func:`_is_compatible`).
 
     Attributes
     ----------
@@ -40,13 +79,25 @@ class SchemaVersionMismatch(RuntimeError):
     expected:
         The version this build of KGWeave expects (i.e. the running value
         of :data:`KGWEAVE_SCHEMA_VERSION`).
+    compat_policy:
+        Identifier for the compatibility policy that rejected this pair.
+        Currently always ``"semver-major"``; reserved for future
+        per-store-type policies.
     """
 
-    def __init__(self, *, stored: str | None, expected: str) -> None:
+    def __init__(
+        self,
+        *,
+        stored: str | None,
+        expected: str,
+        compat_policy: str = "semver-major",
+    ) -> None:
         self.stored = stored
         self.expected = expected
+        self.compat_policy = compat_policy
         super().__init__(
-            f"KGWeave schema version mismatch: stored={stored!r}, expected={expected!r}"
+            f"KGWeave schema version mismatch: stored={stored!r}, "
+            f"expected={expected!r} (policy={compat_policy})"
         )
 
 
@@ -219,18 +270,23 @@ def verify_or_migrate_schema_version(conn) -> str:
       current :data:`KGWEAVE_SCHEMA_VERSION`. This silently migrates
       legacy stores up — KGWeave is pre-1.0 and forcing re-extracts is
       wasteful.
-    * **Existing row, matching version**: no-op.
-    * **Existing row, mismatched version**: raise
+    * **Existing row, compatible version** (per :func:`_is_compatible` —
+      same major, expected minor/patch >= stored): no-op. The on-disk
+      string is left at the writer's value; we do **not** rewrite it,
+      because doing so would silently lose the provenance of what version
+      actually populated the rows.
+    * **Existing row, incompatible version**: raise
       :class:`SchemaVersionMismatch`.
     * **Multiple rows** (defensive — should be impossible given the
       singleton PK): take the lexicographically smallest version for the
-      comparison and surface mismatch if it doesn't match. Two writers
-      cannot both create the row because the primary key
-      ``singleton_key`` is fixed to a single value, so the second writer
-      will collide; we use ``MERGE`` to make first-open race-safe.
+      comparison. Two writers cannot both create the row because the
+      primary key ``singleton_key`` is fixed to a single value, so the
+      second writer will collide; we use ``MERGE`` to make first-open
+      race-safe.
 
-    Returns the resolved on-disk version (always equal to
-    :data:`KGWEAVE_SCHEMA_VERSION` on a successful return).
+    Returns the resolved on-disk version (equal to the value found in
+    ``:Meta`` on the compatible-existing path, and equal to
+    :data:`KGWEAVE_SCHEMA_VERSION` on the freshly-migrated path).
     """
     res = conn.execute(
         "MATCH (m:Meta) RETURN m.schema_version ORDER BY m.schema_version ASC"
@@ -250,7 +306,7 @@ def verify_or_migrate_schema_version(conn) -> str:
         return KGWEAVE_SCHEMA_VERSION
 
     stored = rows[0]
-    if stored != KGWEAVE_SCHEMA_VERSION:
+    if not _is_compatible(stored, KGWEAVE_SCHEMA_VERSION):
         raise SchemaVersionMismatch(
             stored=stored, expected=KGWEAVE_SCHEMA_VERSION
         )
@@ -270,4 +326,5 @@ __all__ = [
     "NODE_TABLES",
     "REL_TABLES",
     "expected_table_names",
+    "_is_compatible",
 ]
