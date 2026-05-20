@@ -39,7 +39,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import re
 import shutil
 import sys
 import tempfile
@@ -56,6 +55,12 @@ _SRC_DIR = _REPO_ROOT / "src"
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
+from scripts._demo_common import (  # noqa: E402
+    RULE_FAMILIES,
+    attribute_to_family as _attribute_to_family,
+    category_for_kind,
+    parse_bucket1_categories,
+)
 from knowledge_graph import cypher, extract, open_store, source_at  # noqa: E402
 
 # The writer's edge-table map is the inverse of what we need; importing it
@@ -77,38 +82,11 @@ EXPORTER_TAG = "export_demo_graph_kuzu.py"
 
 
 # --------------------------------------------------------------------------- #
-# Bucket-1 categorisation (shared logic — copied verbatim from the legacy     #
-# exporter to keep the two scripts independently runnable; promote to a       #
-# shared module the moment the legacy script is deleted).                     #
+# Bucket-1 categorisation (table + resolver live in ``_demo_common``)         #
 # --------------------------------------------------------------------------- #
 
 
-def _parse_bucket1_categories() -> dict[str, str]:
-    """Parse ``BUCKET_1_CHECKLIST.md`` into ``{SyntaxKindName: category}``."""
-    text = BUCKET1_PATH.read_text()
-    out: dict[str, str] = {}
-    section: str | None = None
-    section_map = {
-        "PROMOTE": "semantic",
-        "CONTAINER": "structural",
-        "BLOB": "blob",
-        "DIRECTIVE": "structural",
-        "OUT-OF-SCOPE": "structural",
-    }
-    for line in text.splitlines():
-        m = re.match(r"^## ([A-Z\-]+)\s*\(", line)
-        if m and m.group(1) in section_map:
-            section = section_map[m.group(1)]
-            continue
-        if section is None:
-            continue
-        m2 = re.match(r"^\|\s*`([A-Za-z0-9_]+)`", line)
-        if m2:
-            out[m2.group(1)] = section
-    return out
-
-
-_BUCKET1 = _parse_bucket1_categories()
+_BUCKET1 = parse_bucket1_categories(BUCKET1_PATH)
 
 
 def _resolve_category(
@@ -121,15 +99,12 @@ def _resolve_category(
     ``BUCKET_1_CHECKLIST.md``. We never demote the writer's ``semantic`` /
     ``token`` labels.
     """
-    if is_token:
-        return "token"
-    if has_semantic or kuzu_category == "semantic":
-        return "semantic"
-    short = kind.split(".")[-1] if isinstance(kind, str) else ""
-    cat = _BUCKET1.get(short)
-    if cat is not None:
-        return cat
-    return "structural"
+    return category_for_kind(
+        _BUCKET1,
+        kind=kind,
+        is_token=is_token,
+        is_semantic=has_semantic or kuzu_category == "semantic",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -211,85 +186,8 @@ def _build_kind_to_rule_id() -> dict[str, str]:
     return out
 
 
-# Family ids and rule rosters per SPEC §4 — duplicated from the legacy
-# exporter (kept in lock-step intentionally; the legacy file stays for the
-# transition period and the diff test asserts equivalence).
-RULE_FAMILIES: list[dict[str, Any]] = [
-    {
-        "id": "structure",
-        "title": "Module / Interface / Package / Program structure",
-        "ruleIds": ["S1", "S11a", "S11b", "S12b", "S12c", "S30"],
-        "blurb": "Top-level scopes (module, interface, package, program) and their nested generate / modport children.",
-    },
-    {
-        "id": "ports_params",
-        "title": "Ports & parameters",
-        "ruleIds": ["S1", "S2", "S3", "S7", "S64", "S65", "S74", "S75", "S76", "S77", "S78"],
-        "blurb": "ANSI / non-ANSI port lists, parameter declarations, and parameter overrides on instances.",
-    },
-    {
-        "id": "nets_vars",
-        "title": "Nets & variables",
-        "ruleIds": ["S4"],
-        "blurb": "Net and variable declarations, including identifier references that resolve back to declarators.",
-    },
-    {
-        "id": "continuous_assign_dataflow",
-        "title": "Continuous assigns + dataflow",
-        "ruleIds": ["S5", "S33", "S34", "S35", "S36", "S37", "S38", "S39"],
-        "blurb": "Continuous assigns, their LHS / RHS dataflow edges, and always-block flavours that drive nets.",
-    },
-    {
-        "id": "procedural_blocks",
-        "title": "Procedural blocks",
-        "ruleIds": ["S7", "S8", "S9", "S9c", "S19", "S20", "S21"],
-        "blurb": "always_comb / always_ff / initial / final blocks and the procedural statements inside them.",
-    },
-    {
-        "id": "instances_hierarchy",
-        "title": "Instances & hierarchy",
-        "ruleIds": ["S6", "S28", "S79"],
-        "blurb": "Hierarchical module instantiations and checker instantiations forming the design hierarchy.",
-    },
-    {
-        "id": "assertions_clocking",
-        "title": "Assertions & clocking",
-        "ruleIds": ["S14", "S15", "S16", "S17", "S18", "S40", "S59", "S70", "S71", "S72"],
-        "blurb": "Concurrent / immediate assertions, properties, sequences, and the clocking blocks they synchronise with.",
-    },
-    {
-        "id": "covergroups",
-        "title": "Covergroups",
-        "ruleIds": ["S22", "S23", "S41"],
-        "blurb": "Covergroup declarations, coverpoints, cross coverage, and the bins that drive them.",
-    },
-    {
-        "id": "classes_constraints",
-        "title": "Classes & constraints",
-        "ruleIds": ["S24", "S25", "S26", "S27", "S82", "S83"],
-        "blurb": "Class declarations with inheritance, methods, properties, and constraint blocks.",
-    },
-    {
-        "id": "packages_types_externs",
-        "title": "Packages, types & externs",
-        "ruleIds": ["S29", "S31", "S32", "S40", "S44", "S45", "S56", "S57", "S80", "S81"]
-                   + [f"S{n}" for n in range(40, 58)],
-        "blurb": "Package imports/exports, typedefs, DPI imports/exports, and extern declarations bridging compilation units.",
-    },
-]
-
-
-def _attribute_to_family(
-    node: dict[str, Any], kind_to_rule: dict[str, str]
-) -> tuple[str | None, str | None]:
-    sem = node.get("semantic") or {}
-    rid = sem.get("ruleId") or kind_to_rule.get(str(node.get("kind", "")))
-    if rid is None:
-        return None, None
-    for fam in RULE_FAMILIES:
-        if rid in fam["ruleIds"]:
-            return rid, fam["id"]
-    return rid, None
+# Family ids and rule rosters per SPEC §4 live in :mod:`_demo_common`; both
+# exporters import the same list so they cannot drift.
 
 
 # --------------------------------------------------------------------------- #
