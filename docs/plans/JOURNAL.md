@@ -24,6 +24,150 @@ Entry skeleton:
 
 ---
 
+## 2026-05-21 — v1.3 slate (#1–#7) — performance + compat + housekeeping
+**Branch / commit:** `kgweave/kuzu-port` @ `1504d4e` (6 commits on top of v1.2, unpushed; PR #1 still open)
+
+### What we did
+- **#1 `promote()` per-file cache** (`80f1520`) — keyed on
+  `(uri, sha256, corpus_fp, ruleset_fp)` with deepcopy on store + serve.
+  Implementation lives in `builders/sv/semantic/promote_cache.py`; `build.py`
+  rewired to call `_run_and_capture` / `_replay`. 11 new tests in
+  `test_promote_cache.py` covering hit/miss/lossless, ruleset-fp invalidation,
+  corpus isolation, mutation-poisoning resistance, warm-vs-cold timing budget,
+  and a `extract()` end-to-end identity check.
+- **#2 Semver-aware `:Meta` compat** (`4ecb844`) — replaced literal equality
+  with `_is_compatible(stored, expected)`: same major + `(expected.minor,
+  expected.patch) >= (stored.minor, stored.patch)` opens; anything else raises
+  `SchemaVersionMismatch(compat_policy="semver-major")`. Deliberately does NOT
+  rewrite the on-disk `:Meta` row on forward-compat open (preserves writer
+  provenance). 11 new tests in `test_schema_version_compat.py`.
+- **#3 Shared `_demo_common.py`** (`2bdab42`) — moved `parse_bucket1_categories`,
+  `category_for_kind`, `RULE_FAMILIES`, `attribute_to_family` into
+  `research/ast_experiment/scripts/_demo_common.py`. Both exporters import
+  from it; `is`-identity asserted in the test (`test_demo_common.py`, 8 tests).
+  Also fixed a latent gap: `test_scripts_directory_only_has_entry_points` had
+  never been updated to allowlist `export_demo_graph_kuzu.py` after v1.2-#3
+  landed it — fixed in the same commit.
+- **#4 `ExtractStats.gc_pruned`** (`b5a547c`) — captures the return value of
+  `prune_orphaned_origins` into the stats dataclass so callers of
+  `extract(gc=True)` can observe what got swept. Default 0; both
+  touched-paths-empty and touched-paths-nonempty code paths populated. New
+  tests in `test_origin_gc.py` (extended).
+- **#5 Generalised SV↔MD connector** (`23f5e5a`) — `SvMarkdownReferenceConnector`
+  now indexes 8 SV kinds (module / package / typedef / forward-typedef /
+  4× port-decl flavours), corpus-scoped via `{corpus: {name: [ids]}}`, with
+  collision-aware multi-edge emission when a name resolves to multiple kinds.
+  9 new tests in `test_sv_md_reference_connector_generalised.py`. quickstart_md
+  REFERENCES count went 3 → 7 (added `clk`, `rst_n`, `fifo_pkg`).
+- **#6+7 Housekeeping** (`1504d4e`) — deleted
+  `tests/knowledge_graph/builders/sv/legacy_tests/demo/` (6 files, ~1.5k
+  lines) and `legacy_tests/test_structure.py` — both anchored to
+  pre-port `research/ast_experiment/`-relative paths that no longer exist
+  in the v1 layout, with live equivalents at
+  `research/ast_experiment/tests/test_structure.py` and
+  `test_export_demo_graph_kuzu.py`. Added `legacy_tests/__init__.py` to avoid
+  basename collisions with the live tree. `.gitignore`d
+  `tests/knowledge_graph/builders/sv/covered_classes.json`. After the
+  deletions the suite runs with NO `--ignore` flag.
+- Per-component test verification (each ran in isolation, all green):
+  promote_cache 11/11; schema_version_compat 11/11 + existing 7/7;
+  `_demo_common` 8/8 + Kuzu-exporter diff harness 13/13; origin_gc 16/16
+  (post-#4); generalised connector 9/9; legacy_tests post-purge 599/0.
+  Aggregated estimate: ~2530 tests / 0 fail. Full no-ignore regression in
+  one shot could not be verified — see lesson on tmpfs / concurrent pytest
+  contention below.
+
+### Lessons learnt
+- **Subagent "tests green" ≠ "commits in `git log`" is now a fully-confirmed
+  pattern, not a coincidence.** — v1.2 had two (#2, #6); v1.3 had two
+  (#4, #6+7); plus one (#1) that mid-way disk-cleanup desync'd into a "54
+  failures" false alarm. **Why:** subagents treat the unit-test pass as the
+  finish line and report-out without staging or running the regression
+  themselves. **How to apply:** the dispatch prompt's "your move is only
+  complete when `git log` shows your commits" line clearly isn't enough on
+  its own — the main agent should run `git log --oneline -1` and
+  `git status --short` IMMEDIATELY after a subagent returns and assume
+  staging is missing until proven otherwise.
+- **`/tmp` is a 16G tmpfs on this box — full pytest suites accumulate
+  per-test Kuzu DBs that can fill it during one run.** — When tmpfs fills,
+  `df` succeeds but the harness's per-call cwd-marker write fails silently;
+  every `Bash` invocation returns exit 1 with no output and you cannot tell
+  it apart from a shell crash. **How to apply:** always pass
+  `--basetemp=/home/kok-shew-juan/.pytest-tmp` (root-FS path) for any
+  multi-file regression; `rm -rf` it between runs; never trust raw
+  `pytest tests/` on this box.
+- **Concurrent pytest from another worktree puts the SV suite into kernel
+  `D` state for tens of minutes.** — During v1.3-#6+7 verification a
+  RagWeave pytest started simultaneously and the SV pytest deadlocked at
+  ~28% progress on disk I/O. **Why:** pyslang + Kuzu's mmap'd page cache
+  + a competing big-disk pytest = priority-inversion-like contention.
+  **How to apply:** if `ps` shows the python pid in `Dl` state for more
+  than the expected wall-time of the suite, kill it; don't wait further.
+  Aggregate per-component verification (each subtree green) is acceptable
+  evidence when end-to-end is environmentally blocked.
+- **A subagent's "regression failure" report must be re-run before
+  triage.** — v1.3-#1's "54 failed / 1781 passed" claim was unreproducible
+  on the SAME uncommitted tree once we cleaned `kgweave-store/` + stale
+  intermediates: a clean replay returned `1163 passed / 0 failed`.
+  **Why:** subagents run during disk-pressure windows can capture transient
+  Kuzu / pyc corruption as if it were a code regression. **How to apply:**
+  when a subagent reports `N failed` BUT their newly-added tests all pass
+  in isolation, the main agent's first move is a clean replay, not a
+  diagnostic deep-dive.
+- **#6's scope creep was inevitable in hindsight.** — Charter said
+  "delete `legacy_tests/demo/`"; reality was that `legacy_tests/test_structure.py`
+  carried the SAME orphaned-pre-port-path pattern and had to go too.
+  **Why:** both files were written before the v1 port relocated source.
+  **How to apply:** when housekeeping a "post-migration orphan", grep for
+  the moved path prefix across the WHOLE candidate directory, not just the
+  named subdir — one search saves a second commit.
+- **A symbol-identity (`is`) assertion is stronger than a structural-equality
+  assertion for cross-module dedup.** — v1.3-#3's
+  `test_both_exporters_import_shared_module` asserts
+  `kuzu_exporter.RULE_FAMILIES is shared.RULE_FAMILIES` rather than `==`,
+  catching the future case where someone copy-pastes the table back
+  inline. **Why:** equal-by-value lets the fork hide; same-id makes it
+  structurally impossible. **How to apply:** in dedup PRs, prefer `is`
+  over `==` whenever the contract is "literally the same object".
+- **`compat_policy` field on a typed exception didn't break the facade
+  re-export.** — Adding kwargs to a Pydantic-style typed exception is
+  cheap when defaults are sensible. **Why:** `test_exception_reexported_from_facade`
+  constructs `SchemaVersionMismatch(stored=..., expected=...)` positionally;
+  the kwarg-only new field stayed invisible. **How to apply:** when
+  extending typed exceptions, add fields as kwarg-only with defaults — and
+  always re-run the facade test even when "obviously safe".
+
+### Next moves
+1. **Push `kgweave/kuzu-port` and update PR #1 with the 6 new v1.3 commits**
+   — externalize for review. *Size:* S.
+2. **Hard-cap full pytest runs at 15 min** (pytest-timeout?), or route the
+   full suite through a Makefile target that auto-`--basetemp=` and
+   refuses to run if another pytest from a sibling worktree is alive.
+   *Why now:* every v1.3 commit cost a ~10-min full-run, half of which
+   hung. *Size:* S.
+3. **Cache `promote()`'s pass-2 drained edges separately from pass-1
+   appends.** v1.3-#1 captures both into the per-file delta but the
+   replay is per-file FIFO; pass-2's drain semantics could yield
+   different results if the corpus shrinks mid-run. Add a stress test.
+   *Size:* M.
+4. **Wire `gc_pruned` into the demo exporter's stats line** so the
+   quickstart prints `gc_pruned=N` when run with `gc=True`. *Size:* XS.
+5. **Generalise the connector beyond SV/MD: builder #3** — Python (libcst)
+   or Bazel/Make. The 8-kind name index from v1.3-#5 should drop into a
+   generic `name_resolver` helper at `connectors/_name_index.py` rather
+   than living inline. *Size:* L.
+6. **`semver` policy: make `_is_compatible` configurable** — add a
+   `compat: Literal["semver-major", "exact", "any"]` parameter to
+   `verify_or_migrate_schema_version` so test/dev setups can opt into
+   strict-exact while prod uses semver-major. *Size:* S.
+7. **Make the `register_connector` test fixture session-scoped** to stop
+   the `BuilderConflict` collisions across connector test modules — noted
+   by v1.3-#5's subagent as a paper cut. *Size:* S.
+- ~~Persistent on-disk promote cache~~ — defer alongside the lift cache
+  until LSP integration.
+
+---
+
 ## 2026-05-20 — v1.2 slate (#1–#6) — Kuzu port follow-ups
 **Branch / commit:** `kgweave/kuzu-port` @ `d895214` (7 commits on top of v1, pushed; PR #1 open)
 
