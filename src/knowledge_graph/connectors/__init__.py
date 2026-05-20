@@ -52,20 +52,39 @@ class SemanticSelfRefConnector:
 
 
 class SvMarkdownReferenceConnector:
-    """Link MD inline-code / code-fence tokens to SV module declarations.
+    """Link MD inline-code / code-fence tokens to SV declarations.
 
     For every ``Node {source: 'md', kind in ('MdInlineCode','MdCodeFence')}``
-    whose lifted ``name`` matches the name of some
-    ``Node {source: 'sv', kind: 'SyntaxKind.ModuleDeclaration'}``, emit a
-    ``REFERENCES`` edge from the MD node to the SV module node.
+    whose lifted ``name`` (inline-code) or contained tokens (code-fence)
+    match the lifted ``name`` of an SV declaration node, emit a
+    ``REFERENCES`` edge from the MD node to each matching SV node.
 
-    For code-fence content (multi-line), every backtick-free identifier
-    token that matches a known module name produces a separate edge —
-    but v1 keeps it simple: we match the *entire* fence body via
-    substring scan against known module names, emitting at most one edge
-    per (md_node, sv_module) pair. Repeat occurrences across distinct MD
-    inline-code nodes naturally produce distinct edges (they have
-    distinct source ids).
+    Indexed SV kinds (v1.3-#5):
+
+    * ``SyntaxKind.ModuleDeclaration`` — module names (v1.2-#6 baseline)
+    * ``SyntaxKind.PackageDeclaration`` — package names
+    * ``SyntaxKind.TypedefDeclaration`` — typedef names
+    * ``SyntaxKind.ForwardTypedefDeclaration`` — forward typedef names
+    * ``SyntaxKind.ImplicitAnsiPort`` / ``SyntaxKind.ExplicitAnsiPort`` —
+      ANSI-list port names
+    * ``SyntaxKind.ImplicitNonAnsiPort`` /
+      ``SyntaxKind.ExplicitNonAnsiPort`` — non-ANSI-list port names
+
+    **Corpus scoping.** SV ↔ MD matching is restricted to nodes that
+    share the same ``corpus`` string. An MD node in corpus ``A`` will
+    not match an SV node in corpus ``B`` even if their names coincide.
+
+    **Disambiguation.** When the same identifier appears as multiple SV
+    kinds in the same corpus (e.g. a module and a typedef both named
+    ``bus``), the connector emits a separate ``REFERENCES`` edge to each
+    matching SV node. The edge's ``ref_text`` column carries the matched
+    name so downstream consumers can group by token. Edges are tagged
+    only with the matched name — kind disambiguation comes from the
+    target node's ``kind`` column.
+
+    **Whole-token matching.** Token boundaries follow the SV identifier
+    rule (alphanumeric + underscore). ``bus`` inside ``my_bus`` does not
+    match.
 
     Idempotent: ``MERGE`` on ``(src,dst,ref_text)`` collapses duplicate
     writes from re-runs.
@@ -74,27 +93,43 @@ class SvMarkdownReferenceConnector:
     name: str = "sv-md-reference"
     requires: list[str] = ["sv", "md"]
 
-    # Stable kind string used by the SV builder for module declarations.
-    _SV_MODULE_KIND: str = "SyntaxKind.ModuleDeclaration"
+    # SV kind strings indexed by this connector. Order is informational
+    # only — collisions produce edges to ALL matching kinds.
+    _SV_INDEXED_KINDS: tuple[str, ...] = (
+        "SyntaxKind.ModuleDeclaration",
+        "SyntaxKind.PackageDeclaration",
+        "SyntaxKind.TypedefDeclaration",
+        "SyntaxKind.ForwardTypedefDeclaration",
+        "SyntaxKind.ImplicitAnsiPort",
+        "SyntaxKind.ExplicitAnsiPort",
+        "SyntaxKind.ImplicitNonAnsiPort",
+        "SyntaxKind.ExplicitNonAnsiPort",
+    )
 
     def synthesize(self, store) -> int:
         conn = store.conn
 
-        # 1. Index every SV module's (name -> [node_id]).
+        # 1. Index every SV declaration of interest, keyed by corpus and name.
+        #    Shape: {corpus: {name: [sv_node_id, ...]}}.
         res = conn.execute(
             """
             MATCH (s:Node)
-            WHERE s.source = 'sv' AND s.kind = $kind AND s.name IS NOT NULL
-            RETURN s.id, s.name
+            WHERE s.source = 'sv'
+              AND s.kind IN $kinds
+              AND s.name IS NOT NULL
+            RETURN s.id, s.name, s.corpus
             """,
-            {"kind": self._SV_MODULE_KIND},
+            {"kinds": list(self._SV_INDEXED_KINDS)},
         )
-        sv_by_name: dict[str, list[str]] = {}
+        sv_by_corpus: dict[str, dict[str, list[str]]] = {}
         while res.has_next():
-            sid, name = res.get_next()
-            if name:
-                sv_by_name.setdefault(name, []).append(sid)
-        if not sv_by_name:
+            sid, name, corpus = res.get_next()
+            if not name:
+                continue
+            sv_by_corpus.setdefault(corpus or "", {}).setdefault(
+                name, []
+            ).append(sid)
+        if not sv_by_corpus:
             return 0
 
         # 2. Walk every MD inline-code and fence node; emit edges for hits.
@@ -103,26 +138,32 @@ class SvMarkdownReferenceConnector:
             MATCH (m:Node)
             WHERE m.source = 'md'
               AND m.kind IN ['MdInlineCode', 'MdCodeFence']
-            RETURN m.id, m.kind, m.name
+            RETURN m.id, m.kind, m.name, m.corpus
             """
         )
-        md_rows: list[tuple[str, str, str]] = []
+        md_rows: list[tuple[str, str, str, str]] = []
         while res.has_next():
             row = res.get_next()
-            md_rows.append((row[0], row[1], row[2] or ""))
+            md_rows.append((row[0], row[1], row[2] or "", row[3] or ""))
 
         edges = 0
-        for mid, kind, text in md_rows:
+        for mid, kind, text, md_corpus in md_rows:
+            sv_by_name = sv_by_corpus.get(md_corpus)
+            if not sv_by_name:
+                continue
             if kind == "MdInlineCode":
                 # Exact match: the whole inline-code body is the candidate.
+                # Tolerate trailing whitespace; require a clean identifier.
                 name = text.strip()
                 if name in sv_by_name:
                     for sid in sv_by_name[name]:
                         edges += self._merge_ref(conn, mid, sid, name)
             else:
-                # Fence: substring scan for every known module name.
-                # Token-boundary check is a simple non-alnum/_ guard so we
-                # don't match `fifo` inside `myfifo_top`.
+                # Fence: scan tokens. We iterate every known name and
+                # whole-token-match it against the fence body. This is
+                # O(N_names * len(fence)) per fence which is fine for
+                # the corpora we target. If this becomes a hotspot,
+                # tokenise the fence once and dict-lookup instead.
                 for name in sv_by_name:
                     if self._token_in(text, name):
                         for sid in sv_by_name[name]:
@@ -151,8 +192,8 @@ class SvMarkdownReferenceConnector:
     @staticmethod
     def _merge_ref(conn, mid: str, sid: str, ref_text: str) -> int:
         # MERGE pattern: ref_text becomes a key column so distinct names
-        # in the same (md_node, sv_module) pair don't collapse — though
-        # for this connector each MD node maps to at most one name.
+        # in the same (md_node, sv_node) pair don't collapse. Each
+        # matched name produces exactly one edge per (md, sv) pair.
         conn.execute(
             """
             MATCH (a:Node {id: $src}), (b:Node {id: $dst})
