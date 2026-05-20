@@ -41,3 +41,6 @@ logs/*.log
 research/ast_experiment/demo/e2e/node_modules/
 research/ast_experiment/demo/e2e/playwright-report/
 research/ast_experiment/demo/e2e/test-results/
+
+# SV builder test artifact — written by tests, regenerated each run
+tests/knowledge_graph/builders/sv/covered_classes.json
