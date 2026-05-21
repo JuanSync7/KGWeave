@@ -24,6 +24,93 @@ Entry skeleton:
 
 ---
 
+## 2026-05-21 — v1.4 slate (#1–#2) — pytest infra: stop chewing memory
+**Branch / commit:** `kgweave/kuzu-port` @ `ae610d0` (3 commits on top of v1.3, unpushed; PR #1 still open)
+
+### What we did
+- **#1 Cheap pytest memory wins** (`40677c9`) — four config-level guards in one commit:
+  - `pytest_configure` redirects `basetemp` to `~/.pytest-tmp` (root FS) when no
+    `--basetemp` was passed. Single biggest win: moves the bottleneck off the 16 GB
+    `/tmp` tmpfs that filled twice during v1.3.
+  - `pytest-timeout` pinned at 60 s with `timeout_method = thread` in
+    `pyproject.toml`; Kuzu-heavy `tests/knowledge_graph/store/` and
+    `tests/knowledge_graph/connectors/` bump to 300 s via local
+    `pytest_collection_modifyitems`.
+  - Autouse function-scoped fixture rmtree's `*.kuzu` dirs and `catalog.kz`-marker
+    dirs under each test's `tmp_path` on teardown, strictly scoped inside
+    `tmp_path` (cannot escape via symlinks).
+  - Sibling-pytest lockfile at `~/.kgweave-pytest.lock` — `pytest_sessionstart`
+    refuses to launch if a live sibling pid still holds the lock; cleared on
+    `sessionfinish` only if the lock still points at us.
+  - 17 meta tests + 1 by-design skip in new `tests/_meta/`. `tests/README.md`
+    documents the rule "never run `pytest tests/` raw on this box".
+- **#2a `shared_kuzu_store` prototype** (`134d794`) — session-scoped Kuzu DB
+  with per-test corpus = `f"t-{sha1(nodeid)[:12]}"`. Teardown DETACH-DELETEs the
+  test's corpus. Coexists with the existing `tmp_store` fixture (opt-in only;
+  schema-version / `:Meta` tests stay on tmp_path). 6 tests in `test_origin_gc.py`
+  migrated; 8 new fixture-coverage tests in `test_shared_kuzu_fixture.py`.
+- **#2b Measurement doc** (`ae610d0`) — `docs/plans/v1.4-shared-db-prototype.md`
+  with baseline vs prototype numbers and an explicit HOLD recommendation on
+  rollout.
+
+### Lessons learnt
+- **basetemp is the cheap win.** A single `pytest_configure` hook redirecting
+  `basetemp` to root FS does ~80 % of what we wanted from the shared-DB rewrite,
+  with ~5 % of the engineering effort. *When it kicks in:* whenever pytest's
+  `tmp_path` discipline is reasonable but the underlying FS has the wrong
+  capacity — measure the FS first, not the test code.
+- **Set a measurement bar BEFORE prototyping, and respect it.** We set "2× disk
+  improvement or recommend HOLD" up front. The shared-DB prototype delivered
+  −40 % disk, +3.8 % wall, +95 % RSS — real disk savings but below the bar.
+  Following the rule meant we didn't sink another week into rollout for a fixed
+  problem. *When it kicks in:* any "should we rewrite X for performance?"
+  question — the success criterion has to be quantitative and set before the
+  experiment runs.
+- **Coexistence regresses peak RSS during partial migration.** Session DB +
+  per-test DBs both resident = +434 MB RSS bump. Measuring a half-migrated
+  state systematically misleads. *When it kicks in:* any large fixture
+  migration — either commit fully or measure only after rollback.
+- **The "subagent leaves work uncommitted" pattern is now confirmed across
+  v1.2, v1.3, AND v1.4-#1.** Two subagents in a row did v1.4-#1 correctly but
+  exited without `git commit`. v1.4-#2's subagent finally committed both
+  pieces. Charter wording matters: "COMMIT your work before exiting. (Prior
+  subagents have left work uncommitted — this is the #1 failure mode. Use
+  `git log -1` to confirm your commit landed before declaring done.)" is the
+  exact phrasing that worked. *When it kicks in:* every multi-step subagent
+  dispatch — the parent must always verify with `git log` before trusting the
+  summary.
+- **Kuzu mmap RSS grows non-trivially with session length.** Even with a single
+  session-scoped DB, the prototype showed +434 MB RSS after ~5 minutes of test
+  activity. Pages aren't being released on DETACH DELETE. *When it kicks in:*
+  any future long-lived Kuzu process (REPL, daemon mode, batch ingest) —
+  budget for retained pages, not just disk.
+
+### Next moves
+1. **Push `kgweave/kuzu-port` and update PR #1** with the 10 commits beyond
+   v1.2 (7 from v1.3 + 3 from v1.4). Size: **S**. Awaiting explicit
+   authorisation.
+2. **Ship the v1.3 next-moves slate** — the seven items logged in the v1.3
+   retro are still queued: gc_pruned in demo exporter (XS), promote() pass-2
+   cache (M), builder #3 / Python via libcst (L), configurable compat policy
+   (S), session-scoped `register_connector` fixture (S), pytest hard-cap
+   Makefile target (S, partially landed via v1.4-#1).
+3. **Document `shared_kuzu_store` in `tests/README.md`** as opt-in
+   infrastructure for future test authors — currently only mentioned in the
+   conftest docstring and the prototype doc. Size: **XS**.
+4. ~~v1.4-#3 full shared-DB rollout~~ — HOLD per v1.4-#2b measurement;
+   basetemp redirect already mitigated the tmpfs pressure.
+5. **Investigate Kuzu mmap page-retention.** Set up a 5-min repro that opens
+   a store, inserts 100k rows, DETACH-DELETEs them all, and measures RSS
+   before/after. If confirmed, file an upstream Kuzu issue. Size: **M**.
+6. **CI guard: fail if `~/.pytest-tmp/` exceeds N GB after a full run.** Once
+   we have a green full-suite run, derive N and wire it in. Blocked on first
+   green full run. Size: **S** (post-blocker).
+7. ~~Audit every store test for empty-DB-semantics assumptions~~ — only worth
+   doing if we revisit shared-DB rollout. Deferred to whenever item 5
+   surfaces a fix.
+
+---
+
 ## 2026-05-21 — v1.3 slate (#1–#7) — performance + compat + housekeeping
 **Branch / commit:** `kgweave/kuzu-port` @ `1504d4e` (6 commits on top of v1.2, unpushed; PR #1 still open)
 
