@@ -110,34 +110,39 @@ def test_prune_clean_store_returns_zero(tmp_path):
         store.close()
 
 
-def test_prune_single_orphan(tmp_path):
-    """A lone Origin with no child Node is deleted; the count is 1."""
-    store = KGStore.open(tmp_path / "kg.kuzu")
-    try:
-        _insert_bare_origin(store, oid="orphan-1")
-        assert "orphan-1" in _origin_ids(store)
-        n = store.prune_orphaned_origins()
-        assert n == 1
-        assert "orphan-1" not in _origin_ids(store)
-        # Idempotent re-call.
-        assert store.prune_orphaned_origins() == 0
-    finally:
-        store.close()
+def test_prune_single_orphan(shared_kuzu_store):
+    """A lone Origin with no child Node is deleted; the count is 1.
+
+    Migrated to shared_kuzu_store (v1.4-#2 prototype). Uses corpus-scoped
+    prune so the call only sweeps THIS test's synthetic orphan.
+    """
+    store, corpus = shared_kuzu_store
+    oid = f"orphan-1-{corpus}"
+    _insert_bare_origin(store, oid=oid, corpus=corpus)
+    assert oid in _origin_ids(store, corpus=corpus)
+    n = store.prune_orphaned_origins(corpus=corpus)
+    assert n == 1
+    assert oid not in _origin_ids(store, corpus=corpus)
+    # Idempotent re-call within our corpus scope.
+    assert store.prune_orphaned_origins(corpus=corpus) == 0
 
 
-def test_prune_keeps_live_origins(tmp_path, small_corpus):
-    """Origins that still own Nodes survive; only orphans are dropped."""
-    store = KGStore.open(tmp_path / "kg.kuzu")
-    try:
-        extract(store, small_corpus, corpus="c")
-        live_ids = _origin_ids(store)
-        assert live_ids, "expected at least one live origin"
-        _insert_bare_origin(store, oid="orphan-x", corpus="c")
-        n = store.prune_orphaned_origins()
-        assert n == 1
-        assert _origin_ids(store) == live_ids
-    finally:
-        store.close()
+def test_prune_keeps_live_origins(shared_kuzu_store, small_corpus):
+    """Origins that still own Nodes survive; only orphans are dropped.
+
+    Migrated to shared_kuzu_store. All extract/insert calls tag rows with
+    this test's corpus; prune is corpus-scoped so sibling test data is
+    untouched.
+    """
+    store, corpus = shared_kuzu_store
+    extract(store, small_corpus, corpus=corpus)
+    live_ids = _origin_ids(store, corpus=corpus)
+    assert live_ids, "expected at least one live origin"
+    orphan_id = f"orphan-x-{corpus}"
+    _insert_bare_origin(store, oid=orphan_id, corpus=corpus)
+    n = store.prune_orphaned_origins(corpus=corpus)
+    assert n == 1
+    assert _origin_ids(store, corpus=corpus) == live_ids
 
 
 def test_prune_scopes_by_source_and_corpus(tmp_path):
@@ -165,16 +170,18 @@ def test_prune_scopes_by_source_and_corpus(tmp_path):
         store.close()
 
 
-def test_prune_facade_export(tmp_path):
-    """``prune_orphaned_origins`` is reachable through the package facade."""
-    store = open_store(tmp_path / "kg.kuzu")
-    try:
-        _insert_bare_origin(store, oid="orphan-facade")
-        n = prune_orphaned_origins(store)
-        assert n == 1
-        assert prune_orphaned_origins(store) == 0
-    finally:
-        store.close()
+def test_prune_facade_export(shared_kuzu_store):
+    """``prune_orphaned_origins`` is reachable through the package facade.
+
+    Migrated to shared_kuzu_store; corpus-scoped to avoid colliding with
+    sibling tests' orphans.
+    """
+    store, corpus = shared_kuzu_store
+    oid = f"orphan-facade-{corpus}"
+    _insert_bare_origin(store, oid=oid, corpus=corpus)
+    n = prune_orphaned_origins(store, corpus=corpus)
+    assert n == 1
+    assert prune_orphaned_origins(store, corpus=corpus) == 0
 
 
 # --------------------------------------------------------------------------
@@ -231,19 +238,20 @@ def test_extract_gc_removes_dropped_file_subtree(tmp_path, small_corpus):
         store.close()
 
 
-def test_extract_gc_idempotent_on_clean_corpus(tmp_path, small_corpus):
-    """``extract(gc=True)`` on an unchanged corpus is still a no-op."""
-    store = KGStore.open(tmp_path / "kg.kuzu")
-    try:
-        extract(store, small_corpus, corpus="gc-corpus", gc=True)
-        ids_before = _origin_ids(store)
-        _g, _o, stats = extract(store, small_corpus, corpus="gc-corpus", gc=True)
-        ids_after = _origin_ids(store)
-        assert ids_after == ids_before
-        assert stats.touched_paths == []
-        assert stats.deleted_paths == []
-    finally:
-        store.close()
+def test_extract_gc_idempotent_on_clean_corpus(shared_kuzu_store, small_corpus):
+    """``extract(gc=True)`` on an unchanged corpus is still a no-op.
+
+    Migrated to shared_kuzu_store; uses the per-test corpus tag so other
+    tests' rows are out of scope.
+    """
+    store, corpus = shared_kuzu_store
+    extract(store, small_corpus, corpus=corpus, gc=True)
+    ids_before = _origin_ids(store, corpus=corpus)
+    _g, _o, stats = extract(store, small_corpus, corpus=corpus, gc=True)
+    ids_after = _origin_ids(store, corpus=corpus)
+    assert ids_after == ids_before
+    assert stats.touched_paths == []
+    assert stats.deleted_paths == []
 
 
 # --------------------------------------------------------------------------
@@ -281,19 +289,17 @@ def test_extract_gc_false_leaves_gc_pruned_zero(tmp_path, small_corpus):
         store.close()
 
 
-def test_extract_gc_true_no_orphans_reports_zero(tmp_path, small_corpus):
-    """``gc=True`` on a corpus with no orphans reports ``gc_pruned == 0``."""
-    store = KGStore.open(tmp_path / "kg.kuzu")
-    try:
-        _g, _o, stats = extract(store, small_corpus, corpus="gc-corpus", gc=True)
-        assert stats.gc_pruned == 0
-        # Re-run: still nothing to sweep.
-        _g2, _o2, stats2 = extract(
-            store, small_corpus, corpus="gc-corpus", gc=True
-        )
-        assert stats2.gc_pruned == 0
-    finally:
-        store.close()
+def test_extract_gc_true_no_orphans_reports_zero(shared_kuzu_store, small_corpus):
+    """``gc=True`` on a corpus with no orphans reports ``gc_pruned == 0``.
+
+    Migrated to shared_kuzu_store.
+    """
+    store, corpus = shared_kuzu_store
+    _g, _o, stats = extract(store, small_corpus, corpus=corpus, gc=True)
+    assert stats.gc_pruned == 0
+    # Re-run: still nothing to sweep.
+    _g2, _o2, stats2 = extract(store, small_corpus, corpus=corpus, gc=True)
+    assert stats2.gc_pruned == 0
 
 
 def _seed_in_scope_orphan(store, corpus_paths, *, oid: str, corpus: str) -> None:
@@ -388,26 +394,25 @@ def test_extract_gc_pruned_scoped_to_source_corpus(tmp_path, small_corpus):
         store.close()
 
 
-def test_extract_gc_pruned_via_no_touched_paths_branch(tmp_path, small_corpus):
+def test_extract_gc_pruned_via_no_touched_paths_branch(
+    shared_kuzu_store, small_corpus
+):
     """The early-return branch (no touched paths) also populates ``gc_pruned``.
 
     Covers the second sweep call-site inside ``extract`` — when the input
     set is unchanged AND ``gc=True``, the function bails before writes but
     must still surface the prune count.
+
+    Migrated to shared_kuzu_store.
     """
-    store = KGStore.open(tmp_path / "kg.kuzu")
-    try:
-        extract(store, small_corpus, corpus="gc-corpus")
-        _seed_in_scope_orphan(
-            store, small_corpus, oid="zzzz-early-1", corpus="gc-corpus"
-        )
-        _seed_in_scope_orphan(
-            store, small_corpus, oid="zzzz-early-2", corpus="gc-corpus"
-        )
-        _g, _o, stats = extract(
-            store, small_corpus, corpus="gc-corpus", gc=True
-        )
-        assert stats.touched_paths == []
-        assert stats.gc_pruned == 2
-    finally:
-        store.close()
+    store, corpus = shared_kuzu_store
+    extract(store, small_corpus, corpus=corpus)
+    _seed_in_scope_orphan(
+        store, small_corpus, oid=f"zzzz-early-1-{corpus}", corpus=corpus
+    )
+    _seed_in_scope_orphan(
+        store, small_corpus, oid=f"zzzz-early-2-{corpus}", corpus=corpus
+    )
+    _g, _o, stats = extract(store, small_corpus, corpus=corpus, gc=True)
+    assert stats.touched_paths == []
+    assert stats.gc_pruned == 2
