@@ -35,7 +35,9 @@ def _repo_root() -> Path:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     store_path = (
-        Path(argv[0]) if argv else Path("./kgweave-store/quickstart_md.kuzu")
+        Path(argv[0])
+        if argv
+        else Path("~/.kgweave-tmp/quickstart_md.kuzu").expanduser()
     )
 
     repo = _repo_root()

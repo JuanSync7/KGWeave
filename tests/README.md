@@ -20,3 +20,21 @@ mitigate this, four pytest-infra guards are wired up:
 
 Run targeted subsets only (e.g. `pytest tests/knowledge_graph/store/ -v`). The
 meta tests that guard this infrastructure live under `tests/_meta/`.
+
+## When disk gets tight
+
+The four paths that grow without bound:
+
+- `~/.pytest-tmp/` -- pytest basetemp (Kuzu DBs cleaned per-test by the autouse
+  fixture, but the test-name dirs themselves persist).
+- `~/.kgweave-tmp/` -- new default for `quickstart.py` / `quickstart_md.py`
+  no-arg runs (replaces the legacy `./kgweave-store/` repo-root default that
+  caused two disk-full events in v1.3).
+- `~/.cache/uv/` -- wheel cache, ~7-8 GB after a few `uv add` cycles.
+- `~/.cache/huggingface/hub/` -- model weights, ~3-4 GB if any builder ever
+  loads an embedder.
+
+`make disk-report` prints all five. `make clean-cache` runs `uv cache prune`
+and removes HF dirs older than 30 days. `make clean-all` nukes every scratch
+dir KGWeave controls -- safe to run any time, just costs a re-download on
+next use.

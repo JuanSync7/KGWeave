@@ -4,9 +4,12 @@ Run with::
 
     python -m knowledge_graph.examples.quickstart [store_dir] [fixture_dir]
 
-Both arguments are optional. Defaults: ``./kgweave-store/quickstart.kuzu``
+Both arguments are optional. Defaults: ``~/.kgweave-tmp/quickstart.kuzu``
 for the store path, and ``tests/knowledge_graph/fixtures/sv`` for the
-fixture corpus (resolved relative to the repository root).
+fixture corpus (resolved relative to the repository root). The default
+store path lives outside the repo so a no-arg run does not pollute the
+working tree (the repo-root ``./kgweave-store/`` blew up disk during
+v1.3 development -- see ``docs/plans/JOURNAL.md``).
 """
 
 from __future__ import annotations
@@ -35,7 +38,11 @@ def _default_fixture_dir() -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    store_path = Path(argv[0]) if argv else Path("./kgweave-store/quickstart.kuzu")
+    store_path = (
+        Path(argv[0])
+        if argv
+        else Path("~/.kgweave-tmp/quickstart.kuzu").expanduser()
+    )
     fixture_dir = Path(argv[1]) if len(argv) > 1 else _default_fixture_dir()
 
     paths = [fixture_dir / "fifo.sv", fixture_dir / "fifo_pkg.sv"]
