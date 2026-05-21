@@ -24,8 +24,8 @@ Entry skeleton:
 
 ---
 
-## 2026-05-21 — v1.4 slate (#1–#2) — pytest infra: stop chewing memory
-**Branch / commit:** `kgweave/kuzu-port` @ `ae610d0` (3 commits on top of v1.3, unpushed; PR #1 still open)
+## 2026-05-21 — v1.4 slate (#1–#3) — pytest infra: stop chewing memory
+**Branch / commit:** `kgweave/kuzu-port` @ `ec27b68` (5 commits on top of v1.3, unpushed; PR #1 still open)
 
 ### What we did
 - **#1 Cheap pytest memory wins** (`40677c9`) — four config-level guards in one commit:
@@ -52,6 +52,16 @@ Entry skeleton:
 - **#2b Measurement doc** (`ae610d0`) — `docs/plans/v1.4-shared-db-prototype.md`
   with baseline vs prototype numbers and an explicit HOLD recommendation on
   rollout.
+- **#3 Defensive disk hygiene** (`ec27b68`) — root-cause follow-up after a
+  grep audit confirmed the v1.3 disk crises were NOT from tests but from the
+  `quickstart.py` / `quickstart_md.py` no-arg defaults writing to
+  `./kgweave-store/` (repo working tree, never auto-cleaned). Moved both
+  defaults to `~/.kgweave-tmp/`. Also added Makefile targets
+  `disk-report` / `clean-cache` / `clean-all` and a 4-bullet "growth
+  surfaces" section to `tests/README.md`. The biggest single surface turns
+  out to be `~/.cache/uv` (7.7 GB) — addressed via `uv cache prune`
+  invoked by `make clean-cache`. 2 new AST-based meta tests pin both
+  quickstart defaults against regression.
 
 ### Lessons learnt
 - **basetemp is the cheap win.** A single `pytest_configure` hook redirecting
@@ -86,8 +96,8 @@ Entry skeleton:
   budget for retained pages, not just disk.
 
 ### Next moves
-1. **Push `kgweave/kuzu-port` and update PR #1** with the 10 commits beyond
-   v1.2 (7 from v1.3 + 3 from v1.4). Size: **S**. Awaiting explicit
+1. **Push `kgweave/kuzu-port` and update PR #1** with the 12 commits beyond
+   v1.2 (7 from v1.3 + 5 from v1.4). Size: **S**. Awaiting explicit
    authorisation.
 2. **Ship the v1.3 next-moves slate** — the seven items logged in the v1.3
    retro are still queued: gc_pruned in demo exporter (XS), promote() pass-2
