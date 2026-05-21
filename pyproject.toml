@@ -54,6 +54,9 @@ asyncio_mode = "auto"
 # tests/README.md for the full infra story.
 timeout = 60
 timeout_method = "thread"
+markers = [
+    "perf: wall-clock perf regression floors (slow; deselect with -m 'not perf')",
+]
 
 [dependency-groups]
 dev = [

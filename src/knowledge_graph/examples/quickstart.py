@@ -14,10 +14,15 @@ v1.3 development -- see ``docs/plans/JOURNAL.md``).
 
 from __future__ import annotations
 
+import os
 import sys
+import time
 from pathlib import Path
 
-from knowledge_graph import (
+_QS_T0 = time.perf_counter()
+_PROFILE = os.environ.get("KGWEAVE_QS_PROFILE") == "1"
+
+from knowledge_graph import (  # noqa: E402
     AnchorRef,
     FilterIntent,
     TraverseIntent,
@@ -47,9 +52,17 @@ def main(argv: list[str] | None = None) -> int:
 
     paths = [fixture_dir / "fifo.sv", fixture_dir / "fifo_pkg.sv"]
 
+    if _PROFILE:
+        print(f"[qs-profile] import+startup: {time.perf_counter() - _QS_T0:.2f}s", flush=True)
+    t = time.perf_counter()
     store = open_store(store_path)
+    if _PROFILE:
+        print(f"[qs-profile] open_store: {time.perf_counter() - t:.2f}s", flush=True)
 
+    t = time.perf_counter()
     stats = extract(store, source="sv", corpus="fifo", paths=paths)
+    if _PROFILE:
+        print(f"[qs-profile] extract: {time.perf_counter() - t:.2f}s", flush=True)
     print(
         f"extract: touched={len(stats.touched_paths)} "
         f"unchanged={len(stats.unchanged_paths)} "
@@ -90,13 +103,18 @@ def main(argv: list[str] | None = None) -> int:
         for p in ports.paths[:5]:
             print("  path:", [(n.name, n.kind) for n in p.nodes])
 
+    t = time.perf_counter()
     raw = cypher(
         store,
         "MATCH (n:Node) WHERE n.category = $cat RETURN count(*) AS c",
         {"cat": "semantic"},
     )
+    if _PROFILE:
+        print(f"[qs-profile] cypher+query+traverse: {time.perf_counter() - t:.2f}s", flush=True)
     print(f"raw cypher rows: {raw.rows}")
     store.close()
+    if _PROFILE:
+        print(f"[qs-profile] TOTAL: {time.perf_counter() - _QS_T0:.2f}s", flush=True)
     return 0
 
 
