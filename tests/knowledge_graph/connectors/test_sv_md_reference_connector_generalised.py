@@ -19,23 +19,20 @@ from pathlib import Path
 import pytest
 
 from knowledge_graph import (
-    BuilderConflict,
-    SvMarkdownReferenceConnector,
     cypher,
     extract,
     open_store,
-    register_connector,
     run_connectors,
 )
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _register_connector() -> None:
-    try:
-        register_connector(SvMarkdownReferenceConnector())
-    except BuilderConflict:
-        # Already registered by another module in this test session.
-        pass
+def _register_connector(sv_md_connector_registered) -> None:
+    """Module-scope wrapper -- delegates to the session-scoped fixture in
+    conftest.py. The legacy try/except BuilderConflict pattern is no
+    longer needed: the registry is same-class idempotent and the
+    session fixture runs at most once (v1.5-#5)."""
+    return None
 
 
 def _write(path: Path, body: str) -> Path:

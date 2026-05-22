@@ -8,11 +8,9 @@ import pytest
 
 from knowledge_graph import (
     ConnectorRequirementError,
-    SvMarkdownReferenceConnector,
     cypher,
     extract,
     open_store,
-    register_connector,
     run_connectors,
 )
 
@@ -26,8 +24,11 @@ MD_FIXTURE_DIR = (
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _register_connector() -> None:
-    register_connector(SvMarkdownReferenceConnector())
+def _register_connector(sv_md_connector_registered) -> None:
+    """Module-scope wrapper -- delegates to the session-scoped fixture in
+    conftest.py so the connector is registered exactly once per session
+    (v1.5-#5)."""
+    return None
 
 
 def _setup_store(path: Path) -> object:

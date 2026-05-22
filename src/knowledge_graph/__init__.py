@@ -108,14 +108,24 @@ def register_builder(name: str, extract_fn: Callable[..., Any]) -> None:
 def register_connector(connector: Connector) -> None:
     """Register a :class:`Connector` under its ``name`` attribute.
 
-    Re-registering an identical instance is a no-op; a different
-    connector under the same name raises :class:`BuilderConflict`.
+    Re-registering an identical instance, or any other instance of the
+    **same connector class** under the same name, is a no-op (v1.5-#5).
+    Connectors are pure dispatch objects with no per-instance state in
+    practice, so same-class equivalence is the right granularity. A
+    *different* connector class under the same name still raises
+    :class:`BuilderConflict` -- distinct implementations under one name
+    is a real conflict the caller must resolve.
     """
     existing = _CONNECTORS.get(connector.name)
     if existing is None:
         _CONNECTORS[connector.name] = connector
         return
     if existing is connector:
+        return
+    if type(existing) is type(connector):
+        # Same-class re-registration from a fresh fixture/instance is a
+        # no-op. Keep the originally-registered object so identity-based
+        # downstream caches stay stable.
         return
     raise BuilderConflict(
         f"connector {connector.name!r} already registered to a different object"

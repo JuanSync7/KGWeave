@@ -15,6 +15,24 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(scope="session")
+def sv_md_connector_registered() -> None:
+    """Register :class:`SvMarkdownReferenceConnector` exactly once per session.
+
+    Per v1.5-#5: per-module fixtures previously each constructed a fresh
+    instance, tripping ``BuilderConflict`` cross-module. The registry is
+    now same-class idempotent, but the session-scope fixture is still
+    the right shape: one registration site, one cache entry, no per-test
+    re-binding churn.
+    """
+    from knowledge_graph import (
+        SvMarkdownReferenceConnector,
+        register_connector,
+    )
+
+    register_connector(SvMarkdownReferenceConnector())
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Apply a 300 s timeout to every test collected from this directory."""
     here = Path(__file__).resolve().parent
