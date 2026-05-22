@@ -24,7 +24,66 @@ Entry skeleton:
 
 ---
 
-## 2026-05-22 — v1.5-#1 — Kuzu `max_db_size` cap for test stores
+## 2026-05-22 — v1.5-#6 + #4 + #5 — three cheap charter items
+**Branch / commit:** `kgweave/kuzu-port` @ `88ce061` (6 commits on top of v1.5-#1, push pending at journal-write time)
+
+### What we did
+- **#6 `gc_pruned` in demo exporter stats** (`e95d4d9` red + `99b2670` green).
+  Both `research/ast_experiment/scripts/export_demo_graph*.py` now emit
+  `stats.gc_pruned`: the Kuzu exporter sources it from `ExtractStats.gc_pruned`
+  (returned by `knowledge_graph.extract()`); the legacy in-memory exporter
+  has no GC concept so emits `0` for shape parity. Test lives at
+  `tests/research/test_demo_exporter_stats.py` (under `testpaths=["tests"]`).
+- **#4 Configurable compat policy** (`f290c0b` red + `25816b1` green).
+  `verify_or_migrate_schema_version` gains `compat: Literal["semver-major",
+  "exact", "any"] = "semver-major"`. Default unchanged; `"exact"` rejects
+  any patch difference; `"any"` accepts any parseable 3-tuple semver
+  string. Raised `SchemaVersionMismatch` carries the requested
+  `compat_policy` so callers see which mode rejected the open. Dispatch
+  in new `_check_compat` helper; `_is_compatible` stays the canonical
+  predicate for the default. 24 schema-version tests pass (18 pre + 6 new).
+- **#5 Session-scoped `register_connector` fixture** (`0de6048` red +
+  `88ce061` green). Two changes:
+  * Registry: `register_connector` now treats same-name + same-class as
+    no-op (was identity-only). Different-class still raises.
+  * Fixture: new session-scoped `sv_md_connector_registered` in
+    `tests/knowledge_graph/connectors/conftest.py`. Both existing
+    connector test modules now depend on it via a thin module-scope
+    wrapper; legacy `try/except BuilderConflict` workaround removed.
+  16 connector tests green.
+
+### Lessons learnt
+- **Charter said "registry should already be idempotent" -- it wasn't,
+  not by the spec the fixtures needed.** The identity-only check made
+  the *registry* technically idempotent for the same object but not for
+  the equivalence class the fixtures were exercising. Same-class
+  equivalence is the natural unit because connectors are pure dispatch
+  objects with no per-instance state. Tightened the docstring to say
+  so out loud.
+- **`testpaths=["tests"]` silently drops `research/` tests.** The first
+  red attempt landed under `research/ast_experiment/tests/` and pytest
+  didn't pick it up. Putting it under `tests/research/` is the right
+  call -- the test exercises a research-package exporter but its
+  *purpose* is gate-keeping a public-contract field, so it belongs in
+  the gated test tree.
+- **The compat-policy enum is small enough that a Literal+if-chain beats
+  a registry dict.** Three policies, no plug-in expectation. Resisted
+  the urge to over-engineer.
+- **Connector tests cost ~9 min wall on this box.** The session-scoped
+  fixture didn't move that needle (the per-test extract is what costs);
+  the win is correctness, not perf. Recorded so v1.5-#2 measurements
+  can subtract this baseline.
+
+### Next moves
+1. **v1.5-#2 bulk-COPY writer** -- still the only remaining lever for
+   the charter perf targets (per the v1.5-#1 retro, `extract()`
+   dominates, cap doesn't help wall). *Size:* L.
+2. **v1.5-#3 Python builder (libcst)** -- new builder + reuse the
+   generalised SV-MD connector against Python identifier kinds. *Size:* L.
+3. **Push and continue on top of HEAD** -- this slate is shippable
+   independently; #2/#3 each open their own commit range.
+
+
 **Branch / commit:** `kgweave/kuzu-port` @ `59de966` (8 commits on top of v1.4 + v1.5 charter, unpushed at journal-write time)
 
 ### What we did
