@@ -356,6 +356,9 @@ def export(corpus_files: list[Path], out_path: Path) -> dict[str, Any]:
             "edgeCount": len(projected_edges),
             "semanticNodeCount": semantic_node_count,
             "semanticEdgeCount": semantic_edge_count,
+            # Legacy in-memory exporter has no GC concept; emit 0 for shape
+            # parity with the Kuzu-port exporter (v1.5-#6).
+            "gc_pruned": 0,
         },
     }
 

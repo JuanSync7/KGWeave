@@ -388,7 +388,9 @@ def export(
     try:
         store = open_store(store_path)
         try:
-            extract(store, source="sv", corpus=corpus, paths=corpus_files)
+            extract_stats = extract(
+                store, source="sv", corpus=corpus, paths=corpus_files
+            )
 
             # ----- read back origins -> build files[] --------------------
             origins = _read_origins(store, corpus)
@@ -552,6 +554,9 @@ def export(
                     "edgeCount": len(projected_edges),
                     "semanticNodeCount": semantic_node_count,
                     "semanticEdgeCount": semantic_edge_count,
+                    # GC pruning count surfaced from ExtractStats so demo
+                    # consumers can see orphan-origin sweeps (v1.5-#6).
+                    "gc_pruned": int(getattr(extract_stats, "gc_pruned", 0) or 0),
                 },
             }
 
