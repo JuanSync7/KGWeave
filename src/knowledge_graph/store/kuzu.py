@@ -49,11 +49,35 @@ class KGStore:
     # ----------------------------------------------------------------- ctor
 
     @classmethod
-    def open(cls, path: str | Path) -> Self:
-        """Open (or create) a Kuzu database at ``path`` and init the schema."""
+    def open(
+        cls,
+        path: str | Path,
+        *,
+        max_db_size_bytes: int | None = None,
+    ) -> Self:
+        """Open (or create) a Kuzu database at ``path`` and init the schema.
+
+        Parameters
+        ----------
+        path
+            Directory path for the Kuzu database (Kuzu stores are
+            directories, not single files, despite the ``.kuzu`` suffix).
+        max_db_size_bytes
+            Optional cap on Kuzu's mmap address space, forwarded as the
+            ``max_db_size`` kwarg of :class:`kuzu.Database`. When omitted
+            (the default), Kuzu's own default applies (1 << 43 == 8 TB
+            on 64-bit, 1 GB on 32-bit). Test fixtures pin this to
+            256 MB to avoid the ext4 sparse-allocation cost surfaced by
+            v1.4-#1 -- per-test wall-clock dropped from ~130-150 s back
+            toward the tmpfs baseline of ~30 s. See v1.5-#1 for the
+            full investigation.
+        """
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        db = kuzu.Database(str(p))
+        db_kwargs: dict[str, object] = {}
+        if max_db_size_bytes is not None:
+            db_kwargs["max_db_size"] = max_db_size_bytes
+        db = kuzu.Database(str(p), **db_kwargs)
         conn = kuzu.Connection(db)
         init_schema(conn)
         # Reconcile :Meta.schema_version BEFORE any caller-visible query

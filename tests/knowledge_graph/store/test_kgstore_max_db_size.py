@@ -4,8 +4,9 @@ v1.5-#1: Kuzu's default ``max_db_size = 8 TB`` is sparse-allocated. That is
 free on tmpfs but expensive (metadata + fsync) on ext4. When the pytest
 basetemp redirect (v1.4-#1) moved test stores from tmpfs to
 ``~/.pytest-tmp`` on ext4, per-test wall-clock blew up ~4x. The fix is to
-let callers (and the test fixtures) pin a small cap (256 MB by default for
-tests) by passing ``max_db_size_bytes`` through to Kuzu's ``Database``
+let callers (and the test fixtures) pin a small cap (256 MiB by default
+for tests -- 2**28 bytes == 268_435_456; Kuzu enforces power-of-2 caps)
+by passing ``max_db_size_bytes`` through to Kuzu's ``Database``
 constructor (which takes the cap as ``max_db_size``).
 
 The tests below cover:
@@ -51,7 +52,7 @@ def test_kgstore_open_accepts_max_db_size_bytes_kwarg(tmp_path: Path) -> None:
         "KGStore.open should expose a max_db_size_bytes kwarg "
         f"(v1.5-#1); current signature: {sig}"
     )
-    store = KGStore.open(tmp_path / "kg.kuzu", max_db_size_bytes=256_000_000)
+    store = KGStore.open(tmp_path / "kg.kuzu", max_db_size_bytes=268_435_456)
     try:
         # Basic sanity: the store should be usable.
         assert store.path.exists()
@@ -88,11 +89,12 @@ def test_max_db_size_bytes_is_forwarded_to_kuzu_database(
 
     monkeypatch.setattr(kuzu_store_mod.kuzu, "Database", spy)
 
-    store = KGStore.open(tmp_path / "kg.kuzu", max_db_size_bytes=256_000_000)
+    store = KGStore.open(tmp_path / "kg.kuzu", max_db_size_bytes=268_435_456)
     try:
         assert seen, "kuzu.Database spy was never called"
-        assert seen["kwargs"].get("max_db_size") == 256_000_000, (
-            "expected max_db_size=256_000_000 forwarded to kuzu.Database, "
+        assert seen["kwargs"].get("max_db_size") == 268_435_456, (
+            "expected max_db_size=268_435_456 (256 MiB, power of 2) "
+            "forwarded to kuzu.Database, "
             f"got kwargs={seen['kwargs']}"
         )
     finally:

@@ -125,9 +125,15 @@ def register_connector(connector: Connector) -> None:
 # --------------------------------------------------------------- entry points
 
 
-def open_store(path: str | Path) -> KGStore:
-    """Open (or create) a Kuzu-backed store at ``path``."""
-    return KGStore.open(path)
+def open_store(
+    path: str | Path, *, max_db_size_bytes: int | None = None
+) -> KGStore:
+    """Open (or create) a Kuzu-backed store at ``path``.
+
+    ``max_db_size_bytes`` forwards to :meth:`KGStore.open`; see that
+    method for the rationale (v1.5-#1, ext4 sparse-allocation cap).
+    """
+    return KGStore.open(path, max_db_size_bytes=max_db_size_bytes)
 
 
 def extract(
