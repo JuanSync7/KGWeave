@@ -24,6 +24,110 @@ Entry skeleton:
 
 ---
 
+## 2026-05-22 — v1.5-#1 — Kuzu `max_db_size` cap for test stores
+**Branch / commit:** `kgweave/kuzu-port` @ `59de966` (8 commits on top of v1.4 + v1.5 charter, unpushed at journal-write time)
+
+### What we did
+- **G1** (`cfb2ee5` red + `0494f08` green) — Added `max_db_size_bytes:
+  int | None = None` kwarg to `KGStore.open`; forwarded to
+  `kuzu.Database(..., max_db_size=...)` only when caller opts in
+  (omitted kwarg preserves Kuzu's 8 TB default for production). Spy
+  test pins the forwarding contract.
+- **G2** (`f08fb48`) — Behavioural test `tests/knowledge_graph/store/
+  test_kgstore_max_db_size_behaviour.py`: opens a store with
+  `max_db_size_bytes=268_435_456` (256 MiB; Kuzu requires power-of-2),
+  writes 200 `:Origin` rows, checkpoints, asserts on-disk footprint
+  stays under the cap. Discovery result: cap is honoured -- on-disk
+  size for the 200-row store is well under 256 MiB.
+- **G3** (`512a9c5` red + `3a032d7` green) — `tmp_store` and
+  `shared_kuzu_store` fixtures + the quickstart subprocess now route
+  the 256 MiB cap through. Quickstart honours
+  `KGWEAVE_MAX_DB_SIZE_BYTES` env var so the perf test can opt in.
+- **G4** (`4ad14eb`) — Re-measured quickstart with cap forwarded into
+  the subprocess. Three runs: 125.58 s / 126.91 s / 124.69 s.
+  **The cap did not move wall-clock.** Profile: `extract` is ~125 s,
+  `open_store` is ~0.6 s. Cap correctly bounds on-disk to ~127 MB,
+  but the v1.5-#1 hypothesis (sparse-allocation on ext4 = the
+  bottleneck) was wrong on this box. Tightened the perf floor only
+  modestly: 230 s -> 200 s, leaving ~70 s headroom over the new
+  worst-of-3.
+- **G5** (`c79f65f`) — Per the v1.5-#1 rule
+  `max(perf_floor + 60, 2 * perf_floor) = max(260, 400)`, set the
+  quickstart smoke subprocess timeout to 400 s (was 240 s). Larger
+  than before because the cap did not reduce wall-clock and the smoke
+  must not be tighter than the perf-floor allows.
+- **G6** — All four targeted dirs green at this commit:
+  - `tests/_meta/`: 19 passed, 1 skipped (the v1.4 regression net is intact).
+  - `tests/knowledge_graph/store/`: 82 passed in 796 s.
+  - `tests/knowledge_graph/connectors/`: 14 passed in 526 s.
+  - `tests/knowledge_graph/facade/`: 15 passed in 1177 s **after**
+    fixing a latent v1.4 issue: facade/conftest had no per-test
+    timeout bump, so every fixture-using test (`facade_store` runs a
+    ~125 s extract) tripped the 60 s global. Mirror of the store/
+    pattern, pinned at 450 s to sit above the v1.5-#1 G5 400 s
+    subprocess timeout. Committed separately as the G6 fix.
+
+### Lessons learnt
+- **A perf-hypothesis is just a hypothesis until you re-measure.** —
+  v1.4-#4 concluded Kuzu's 8 TB sparse allocation was the ext4 cost.
+  Re-running the quickstart with `max_db_size=256 MiB` forwarded ALL
+  the way through (fixtures + subprocess) moved wall-clock by < 2 s
+  on three runs. The fix doesn't fix anything user-visible -- it's
+  hygiene only. Lesson: before building a tightening-budget loop on
+  top of a perf fix, profile first to confirm the fix actually moves
+  the metric the budget cares about.
+- **Profile narrows the search before you spend the day.** — A
+  ten-second `KGWEAVE_QS_PROFILE=1` run showed `extract: 125 s`,
+  `open_store: 0.6 s`. That single line of profile output would have
+  reframed the entire v1.5-#1 plan (target `extract`, not the store
+  open path) if it had been added to the v1.4-#4 retro. The
+  charter's "target ≤ 60 s / stretch ≤ 30 s" was unreachable from
+  this lever; the next attack surface is the writer's per-row INSERT
+  loop (v1.5-#2 was already on the slate for that).
+- **Kuzu's `max_db_size` is reservation, not write throughput.** —
+  The cap bounds the mmap address space; it does not affect the
+  per-INSERT fsync rate. Once mmap address space isn't the bottleneck
+  (which it never was on this box), the cap is a no-op for wall-clock.
+  Keep the cap for the hygiene reason (bounded on-disk footprint, no
+  surprise sparse files), but stop expecting wall-clock from it.
+- **A "green slate" claim needs every targeted dir actually run, not
+  just the ones you touched.** — v1.4 landed with `tests/knowledge_
+  graph/facade/` silently broken on ext4 (60 s global timeout vs the
+  fixture's ~125 s extract). The v1.4 slate's #4 only ran the
+  `test_quickstart_perf` test (which carries its own decorator);
+  the fixture-using tests in the same dir were never re-run after
+  the basetemp move. v1.5-#1 G6 surfaced it because the plan called
+  for the whole dir green. Lesson: when an infra change moves the
+  perf characteristics, re-run *every* dir in the impact radius,
+  not just the one whose name matches the change.
+- **TDD discipline for "did it move the metric?" goals.** —
+  G4 originally tried a 45 s budget (`ceil(15-20 * 1.5)` from the
+  hypothesised post-cap measurement). The subprocess timed out at
+  75 s, which was the "red" that surfaced the hypothesis was wrong.
+  Lesson: write the ambitious budget commit first; the failing test
+  is the cheapest way to discover the hypothesis was wrong.
+
+### Next moves
+1. **#2 bulk-COPY writer** — now confirmed as the only lever left for
+   quickstart wall-clock. `extract` dominates at 125 s, `open_store`
+   is 0.6 s. Replace the per-row `conn.execute(INSERT)` loop in
+   `src/knowledge_graph/builders/sv/writer.py:602` with Kuzu
+   `COPY FROM`. Target 10x writer speedup; that drops quickstart
+   under 30 s and makes the v1.5-#1 charter targets retroactively
+   achievable via the OTHER lever. *Size:* L. *Why now:* it's the
+   only remaining bottleneck.
+2. **#6 gc_pruned in demo exporter stats** (one-line) — ship cold. *Size:* XS.
+3. **#4 compat policy kwarg** on `verify_or_migrate_schema_version`.
+   *Size:* S.
+4. **#5 session-scoped `register_connector` fixture** — fixes the
+   `BuilderConflict` flake. *Size:* S.
+5. **#3 builder #3 (Python via libcst)** — orthogonal to perf. *Size:* L.
+- ~~Tighten v1.5-#1 budget further (45 s / 30 s stretch)~~ — blocked
+  on #2 landing; extract dominates current wall-clock.
+- ~~Kuzu mmap RSS investigation~~ — confirmed irrelevant by G4 measurement.
+
+---
+
 ## 2026-05-21 — v1.4 slate (#1–#3) — pytest infra: stop chewing memory
 **Branch / commit:** `kgweave/kuzu-port` @ `ec27b68` (5 commits on top of v1.3, unpushed; PR #1 still open)
 
