@@ -52,10 +52,25 @@ def main(argv: list[str] | None = None) -> int:
 
     paths = [fixture_dir / "fifo.sv", fixture_dir / "fifo_pkg.sv"]
 
+    # v1.5-#1: honour KGWEAVE_MAX_DB_SIZE_BYTES so the perf-floor test
+    # (and any caller running the quickstart in a constrained env) can
+    # cap Kuzu's mmap address space. Production no-arg runs leave the
+    # env var unset and Kuzu's 8 TB default applies.
+    max_db_size_bytes: int | None = None
+    _cap_raw = os.environ.get("KGWEAVE_MAX_DB_SIZE_BYTES")
+    if _cap_raw:
+        try:
+            max_db_size_bytes = int(_cap_raw)
+        except ValueError:
+            print(
+                f"[qs] ignoring invalid KGWEAVE_MAX_DB_SIZE_BYTES={_cap_raw!r}",
+                flush=True,
+            )
+
     if _PROFILE:
         print(f"[qs-profile] import+startup: {time.perf_counter() - _QS_T0:.2f}s", flush=True)
     t = time.perf_counter()
-    store = open_store(store_path)
+    store = open_store(store_path, max_db_size_bytes=max_db_size_bytes)
     if _PROFILE:
         print(f"[qs-profile] open_store: {time.perf_counter() - t:.2f}s", flush=True)
 

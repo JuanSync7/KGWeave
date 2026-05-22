@@ -47,6 +47,16 @@ from knowledge_graph.store import KGStore
 _log = logging.getLogger(__name__)
 
 
+# v1.5-#1: Cap Kuzu's on-disk mmap address space for test stores at
+# 256 MiB (2**28 bytes -- Kuzu requires a power-of-2 max_db_size).
+# Kuzu's default is 8 TB sparse-allocated which is free on tmpfs but
+# blows up to ~130-150 s per quickstart on ext4 (where basetemp lives
+# after v1.4-#1). 256 MiB is plenty for every fixture in this repo
+# (the SV fixture corpus + Origins fit in < 5 MB), and brings wall-
+# clock back near the tmpfs baseline.
+_TEST_MAX_DB_SIZE_BYTES = 268_435_456
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Apply a 300 s timeout to every test collected from this directory."""
     here = Path(__file__).resolve().parent
@@ -74,7 +84,9 @@ def pytest_configure(config: pytest.Config) -> None:
 @pytest.fixture()
 def tmp_store(tmp_path: Path) -> Iterator[KGStore]:
     """Open a fresh KGStore backed by a tmp_path Kuzu directory."""
-    store = KGStore.open(tmp_path / "kg.kuzu")
+    store = KGStore.open(
+        tmp_path / "kg.kuzu", max_db_size_bytes=_TEST_MAX_DB_SIZE_BYTES
+    )
     try:
         yield store
     finally:
@@ -103,7 +115,7 @@ def _shared_kuzu_session_store(
     """
     session_root = tmp_path_factory.mktemp("kgweave-session")
     db_path = session_root / "shared.kuzu"
-    store = KGStore.open(db_path)
+    store = KGStore.open(db_path, max_db_size_bytes=_TEST_MAX_DB_SIZE_BYTES)
     _SESSION_STORE["store"] = store
     _SESSION_STORE["db_path"] = db_path
     try:

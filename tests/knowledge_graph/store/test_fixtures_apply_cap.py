@@ -40,7 +40,20 @@ def test_tmp_store_fixture_uses_max_db_size_cap() -> None:
         "tmp_store fixture must pass max_db_size_bytes to KGStore.open "
         "(v1.5-#1); current source:\n" + src
     )
-    assert str(_EXPECTED_CAP) in src or "1 << 28" in src or "2 ** 28" in src, (
+    # The fixture may either inline the literal or reference a module
+    # constant; in the latter case we resolve the constant out of the
+    # conftest module namespace and check its value.
+    from tests.knowledge_graph.store import conftest as _cmod
+    inlined = (
+        str(_EXPECTED_CAP) in src
+        or "1 << 28" in src
+        or "2 ** 28" in src
+    )
+    via_const = (
+        "_TEST_MAX_DB_SIZE_BYTES" in src
+        and getattr(_cmod, "_TEST_MAX_DB_SIZE_BYTES", None) == _EXPECTED_CAP
+    )
+    assert inlined or via_const, (
         f"tmp_store fixture must pin max_db_size_bytes={_EXPECTED_CAP} "
         "(256 MiB, power-of-2); current source:\n" + src
     )
@@ -55,7 +68,20 @@ def test_shared_kuzu_session_store_uses_max_db_size_cap() -> None:
         "_shared_kuzu_session_store fixture must pass max_db_size_bytes "
         "to KGStore.open (v1.5-#1); current source:\n" + src
     )
-    assert str(_EXPECTED_CAP) in src or "1 << 28" in src or "2 ** 28" in src, (
+    # The fixture may either inline the literal or reference a module
+    # constant; in the latter case we resolve the constant out of the
+    # conftest module namespace and check its value.
+    from tests.knowledge_graph.store import conftest as _cmod
+    inlined = (
+        str(_EXPECTED_CAP) in src
+        or "1 << 28" in src
+        or "2 ** 28" in src
+    )
+    via_const = (
+        "_TEST_MAX_DB_SIZE_BYTES" in src
+        and getattr(_cmod, "_TEST_MAX_DB_SIZE_BYTES", None) == _EXPECTED_CAP
+    )
+    assert inlined or via_const, (
         f"shared_kuzu_session_store must pin max_db_size_bytes={_EXPECTED_CAP} "
         "(256 MiB, power-of-2); current source:\n" + src
     )
