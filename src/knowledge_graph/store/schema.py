@@ -13,7 +13,9 @@ aligned with the plan and document the encoding contract instead.
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, Literal
+
+CompatPolicy = Literal["semver-major", "exact", "any"]
 
 # ---------------------------------------------------------------- schema version
 #
@@ -64,6 +66,29 @@ def _is_compatible(stored: str, expected: str) -> bool:
     if s_maj != e_maj:
         return False
     return (e_min, e_pat) >= (s_min, s_pat)
+
+
+def _check_compat(stored: str, expected: str, policy: CompatPolicy) -> bool:
+    """Dispatch the compatibility predicate by policy (v1.5-#4).
+
+    * ``"semver-major"`` -- delegates to :func:`_is_compatible`.
+    * ``"exact"`` -- accept iff stored == expected verbatim.
+    * ``"any"`` -- accept any stored value that parses as a 3-tuple
+      semver; unparseable strings still fail so we never silently
+      ingest garbage. The "any" mode is intended for forensics / read
+      tooling, not for write-path callers.
+    """
+    if policy == "exact":
+        return stored == expected
+    if policy == "any":
+        try:
+            _parse_version(stored)
+        except ValueError:
+            return False
+        return True
+    if policy == "semver-major":
+        return _is_compatible(stored, expected)
+    raise ValueError(f"unknown compat policy: {policy!r}")
 
 
 class SchemaVersionMismatch(RuntimeError):
@@ -261,7 +286,9 @@ def init_schema(conn) -> None:
 _META_SINGLETON_KEY: str = "kgweave"
 
 
-def verify_or_migrate_schema_version(conn) -> str:
+def verify_or_migrate_schema_version(
+    conn, *, compat: CompatPolicy = "semver-major"
+) -> str:
     """Reconcile the on-disk ``:Meta.schema_version`` with the running constant.
 
     Behaviour:
@@ -306,9 +333,9 @@ def verify_or_migrate_schema_version(conn) -> str:
         return KGWEAVE_SCHEMA_VERSION
 
     stored = rows[0]
-    if not _is_compatible(stored, KGWEAVE_SCHEMA_VERSION):
+    if not _check_compat(stored, KGWEAVE_SCHEMA_VERSION, compat):
         raise SchemaVersionMismatch(
-            stored=stored, expected=KGWEAVE_SCHEMA_VERSION
+            stored=stored, expected=KGWEAVE_SCHEMA_VERSION, compat_policy=compat
         )
     return stored
 
