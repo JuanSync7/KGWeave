@@ -12,21 +12,18 @@ margin.
 
 How the budget was chosen
 -------------------------
-v1.5-#1 introduced ``KGWEAVE_MAX_DB_SIZE_BYTES`` so the quickstart
-subprocess can cap Kuzu's mmap reservation at 256 MiB, on the hypothesis
-that Kuzu's 8 TB default was sparse-allocating on ext4 and inflating
-wall-clock. Re-measurement on this box with the cap forwarded *did not*
-move the needle: three runs measured 125.58 s, 126.91 s, 124.69 s
-(with cap) -- effectively identical to the v1.4-#4 baseline of
-~124-152 s without cap. Profile shows the time is spent inside
-``extract`` (~125 s), not in ``open_store`` (~0.6 s). The cap is still
-forwarded (it correctly bounds the on-disk footprint to ~127 MB, which
-is hygienic) but it does not buy back wall-clock. See JOURNAL v1.5-#1.
+v1.5-#2 replaced the per-row Cypher MERGE loop in the SV writer with
+a Kuzu ``COPY FROM`` bulk path for any batch of >=100 rows. The
+quickstart wall-clock fell from ~125 s to ~1.4 s (worst-of-3 was
+1.452 s) -- a ~90x speedup. The cap had to be raised from 256 MiB to
+1 GiB because COPY needs more buffer-manager frame groups than the
+prior cap allowed (Kuzu raised "No more frame groups can be added to
+the allocator" otherwise).
 
-Worst-of-3 was 126.91 s; ``ceil(127 * 1.5)`` rounded up to nearest 5
-is 195. The budget below is 200 s -- a modest tightening from the prior
-230 s floor, still leaving ~70 s of headroom for jitter without
-flapping on a noisy box.
+Worst-of-3 was 1.452 s; 1.452 * 1.5 ~= 2.2 s, but subprocess startup
++ cold imports add ~1 s of jitter on this box. The budget below is
+10 s -- still a 20x tightening from the prior 200 s floor, with
+~7 s of headroom so the test doesn't flap under load.
 
 If the test flakes
 ------------------
@@ -54,14 +51,17 @@ from pathlib import Path
 
 import pytest
 
-# v1.5-#1: With the 256 MiB Kuzu max_db_size cap forwarded into the
-# quickstart subprocess (via KGWEAVE_MAX_DB_SIZE_BYTES below) the cap
-# did NOT move wall-clock on this box (3-run worst-case 126.91 s, vs
-# ~124-152 s without cap; extract dominates at ~125 s, open_store is
-# ~0.6 s). Budget: ceil(127 * 1.5) rounded up to nearest 5 == 195;
-# we set 200 s -- a modest tightening from the prior v1.4-#4 floor of
-# 230 s. See module docstring + JOURNAL v1.5-#1 for the full retro.
-_BUDGET_SECONDS = 200.0
+# v1.5-#2: bulk-COPY writer path now dominates -- quickstart wall fell
+# from ~125 s to ~1.4 s (3-run worst 1.452 s on this box, ~90x speedup
+# vs the v1.5-#1 baseline). The cap was raised from 256 MiB to 1 GiB
+# in the env block below because the COPY path needs more buffer-
+# manager frame groups than 256 MiB allowed.
+#
+# Budget: 1.45 * 1.5 ~= 2.2 s, but subprocess startup + cold imports
+# add ~1 s of jitter on a noisy box. Floor set to 10 s -- still a
+# 20x tightening from the prior 200 s floor, with ~7 s of headroom so
+# the test doesn't flap on CI under load. See JOURNAL v1.5-#2.
+_BUDGET_SECONDS = 10.0
 
 
 @pytest.mark.perf
@@ -73,7 +73,11 @@ def test_quickstart_wall_clock_under_budget(tmp_path: Path) -> None:
     # the same way the in-process test fixtures do. Without this env
     # var the quickstart uses Kuzu's 8 TB default and the ext4 sparse-
     # allocation cost (~125 s) eats the entire margin.
-    env = {**os.environ, "KGWEAVE_MAX_DB_SIZE_BYTES": "268435456"}
+    # v1.5-#2: bulk-COPY needs a larger buffer-manager allocation than the
+    # 256 MiB cap allowed (COPY raised "No more frame groups can be added
+    # to the allocator"). Raised to 1 GiB -- still bounds the footprint
+    # well below Kuzu's 8 TB default, and the COPY path completes.
+    env = {**os.environ, "KGWEAVE_MAX_DB_SIZE_BYTES": "1073741824"}
     start = time.perf_counter()
     proc = subprocess.run(
         [sys.executable, "-m", "knowledge_graph.examples.quickstart", str(store_path)],

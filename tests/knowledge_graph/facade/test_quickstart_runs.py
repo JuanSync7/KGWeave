@@ -8,25 +8,23 @@ from pathlib import Path
 
 
 def test_quickstart_script_runs_end_to_end(tmp_path: Path) -> None:
-    # Subprocess timeout: 400 s.
+    # Subprocess timeout: 70 s.
     #
     # The conftest pins ``basetemp`` to ``~/.pytest-tmp`` on the root ext4
-    # filesystem (v1.4-#1, to prevent /tmp tmpfs blowups). v1.5-#1 added
-    # the ``KGWEAVE_MAX_DB_SIZE_BYTES`` env var so the quickstart can cap
-    # Kuzu's mmap reservation (256 MiB for tests); re-measurement showed
-    # the cap correctly bounds on-disk size but does NOT move wall-clock
-    # (extract dominates at ~125 s; see test_quickstart_perf.py and
-    # JOURNAL v1.5-#1). Three runs on this box measured 124-127 s; the
+    # filesystem (v1.4-#1, to prevent /tmp tmpfs blowups). v1.5-#2 swapped
+    # the SV writer onto a Kuzu ``COPY FROM`` bulk path for batches of
+    # >=100 rows; quickstart wall-clock fell from ~125 s to ~1.4 s. The
     # perf-floor test in ``test_quickstart_perf.py`` is now pinned at
-    # 200 s. This smoke-test timeout is set per the v1.5-#1 rule
-    # ``max(perf_floor + 60, 2 * perf_floor) = max(260, 400) = 400`` so
-    # the smoke covers any case the perf-floor would still let through.
+    # 10 s. This smoke-test timeout is set per the v1.5-#1 rule
+    # ``max(perf_floor + 60, 2 * perf_floor) = max(70, 20) = 70`` so the
+    # smoke covers any case the perf-floor would still let through (and
+    # leaves ~60 s of head-room above the floor for cold-import jitter).
     store_path = tmp_path / "qs.kuzu"
     proc = subprocess.run(
         [sys.executable, "-m", "knowledge_graph.examples.quickstart", str(store_path)],
         capture_output=True,
         text=True,
-        timeout=400,
+        timeout=70,
     )
     assert proc.returncode == 0, (
         f"quickstart exited {proc.returncode}\n--- stdout ---\n{proc.stdout}"
