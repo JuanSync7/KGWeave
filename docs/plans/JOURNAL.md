@@ -612,3 +612,118 @@ Entry skeleton:
   there's nothing to connect SV nodes *to*.
 - ~~Query result streaming, Cypher autocomplete, blob compression~~ — none
   block real use at current corpus size.
+
+---
+
+## 2026-05-23 — v1.5 slate — closing summary
+**Branch / commit:** `kgweave/kuzu-port` @ `fe683cc` (27 commits on top of `3fd3a09`, push pending at journal-write time)
+
+### What landed across the v1.5 slate
+- **#1 — `max_db_size_bytes` kwarg** plumbed through `KGStore.open` and applied
+  to `tmp_store` + `shared_kuzu_store` + quickstart fixtures at 256 MiB (later
+  bumped to 1 GiB by #2 for BM frame-group headroom).
+- **#6 — `gc_pruned` field** emitted by demo exporters in their stats payload
+  so the integration story has a visible signal for sweep activity.
+- **#4 — configurable compat policy** on `verify_or_migrate_schema_version`
+  (kwarg `compat=` accepting `semver_major` / `exact` / `any`); default
+  preserved at `semver_major`.
+- **#5 — session-scoped `register_connector`** idempotent on equal instances
+  so suite-level registration no longer fights itself; different-class
+  conflicts still raise.
+- **#2 — bulk-COPY writer** for SV (≥ 100 rows batches go through CSV + Kuzu
+  `COPY ... FROM` with pre-COPY `DETACH DELETE` for replacement-merge).
+  **Quickstart wall-clock: 125 s → 1.45 s (~90× faster).** Writer N=1000:
+  10.3 s → 1.0 s (~10×). BM cap raised 256 MiB → 1 GiB to unblock COPY.
+- **#3 — Python builder via libcst + Py↔MD reference connector.** Walker
+  emits `PyModule` / `PyFunction` / `PyClass` / `PyImport`; connector resolves
+  inline-code spans in MD to py-symbol nodes within the same corpus.
+  Shared `_name_index` module extracted so SV-MD and Py-MD connectors share
+  the same corpus-scoped indexer.
+
+### Pre-existing items NOT addressed (deferred — see individual entries)
+- 3 cross-file SV-imports test failures from md/sv fixture pollution
+  (`builders/md/test_isolation_i7.py` and `builders/sv/legacy_tests/rules/test_types.py::test_s32_*`,
+  `test_s50_does_not_disturb_s32_imports_edges`). Pre-existing on `1edddb4`;
+  documented as cache-key bug in `lift_file_cached` / `promote_file_cached`.
+- Kuzu C++ teardown segfault on `tests/knowledge_graph/store/test_origin_gc.py`
+  under high-coverage runs. Suite still passes in isolation; documented.
+
+### Commit count
+- `git log --oneline 3fd3a09..HEAD | wc -l` = **27** commits.
+
+### Headline win
+**90× quickstart speedup** from #2 (bulk-COPY), enabling the next-builder
+slate (#3) to land on a dev-grade feedback loop instead of multi-minute
+fixture builds.
+
+---
+
+## 2026-05-23 — v1.5-#3 — Python builder via libcst + Py↔MD connector
+**Branch / commit:** `kgweave/kuzu-port` @ `fe683cc` (6 commits on top of v1.5-#2 head `f7790ab`, push pending at journal-write time)
+
+### What we did
+- **G1 — shared name-index module.** Extracted corpus-scoped name-index logic
+  from the SV-MD connector into `src/knowledge_graph/connectors/_name_index.py`
+  with `build_name_index(...)`. SV-MD connector now imports from this module;
+  back-compat re-exports preserve the public surface verified by
+  `tests/knowledge_graph/connectors/test_name_index_module.py::test_public_connector_surface_unchanged`.
+- **G2/G3/G4 — Python builder.** New `src/knowledge_graph/builders/py/`
+  package: `walker.py` (libcst-based, emits `PyModule`, `PyFunction`,
+  `PyClass`, `PyImport` with span ranges + payload), `writer.py` (Kuzu
+  replacement-merge analogous to the SV writer, idempotent on unchanged
+  content, subtree-replacing on edit), `build.py` (thin facade).
+  Fixtures + tests under `tests/knowledge_graph/builders/py/`: `test_walker.py`
+  (6), `test_writer.py` (5), `test_multi_file.py` (3). **14 py-builder tests
+  green; 24 connector tests green; 655 sv-builder tests green; 72 store tests
+  green; 15 facade tests green; 19 meta tests green.**
+- **G5 — Py↔MD reference connector.** `src/knowledge_graph/connectors/py_md.py`
+  built on `_name_index` from G1. Resolves inline-code spans (`` `foo` ``) in
+  Markdown to `PyFunction` / `PyClass` nodes; corpus-scoped, idempotent on
+  rerun, silent on unknown symbols. 5 dedicated tests in
+  `tests/knowledge_graph/connectors/test_py_md.py`.
+
+### Lessons learnt
+- **libcst's metadata wrapper is the right entry point for byte-accurate
+  spans** — *the position-provider gives line/col, but converting to byte
+  offsets needs an explicit pass over the source. The walker now precomputes
+  a line-start table once per module instead of recomputing per node. When we
+  wire async/decorators/comprehension scopes later, reuse this table.*
+- **The corpus-scoped name index is the right shared abstraction** — *both
+  SV-MD and Py-MD connectors collapsed to the same code path once
+  `_name_index` was extracted. Future Java/Rust builders should plug into the
+  same indexer rather than reinventing per-language resolution.*
+- **Builder-writer parity is cheaper than expected** — *the SV writer's
+  replacement-merge contract (per-origin `DETACH DELETE` then re-write) ported
+  verbatim to py with no behaviour changes. The structural abstraction
+  (Node id = `(corpus, source, kind, name, span)`) holds across languages.*
+
+### Not covered yet (queued)
+- **Decorators** — currently dropped on the floor; needs a `PyDecorator` node
+  or payload field on `PyFunction` / `PyClass`.
+- **Async functions** — `async def` walked as `PyFunction` with no async flag.
+- **Walrus (`:=`)** and **match-case** statements — not enumerated by walker;
+  irrelevant for v1 (kind-level granularity) but will matter for any future
+  per-statement queryability.
+- **Comprehension scopes** — list/dict/set comprehensions create lexical
+  scopes in Python ≥3 but walker treats them as expressions; OK for v1 since
+  we don't emit per-variable nodes.
+- **Type-alias statements** (`type X = ...` in 3.12+) — walker silently
+  ignores.
+- **Star imports** — `from x import *` captured as `PyImport` with empty
+  symbol list; downstream connector treats as no resolvable names.
+
+### Next moves
+- **Decorators + async flags on PyFunction / PyClass** — *cheap payload-level
+  addition; unblocks "find all @pytest.fixture" queries.* Size: S.
+- **Py builder bulk-COPY parity with SV** — *the per-row MERGE path is fine
+  for hand-written Python (small N), but a real repo lift will want the same
+  ≥ 100 threshold + CSV-COPY path as SV. Reuse `_BULK_COPY_MIN_ROWS` and the
+  helper extraction.* Size: M.
+- **Cross-builder connector: Py imports → Py modules** — *the import payload
+  already records the imported module name; resolving to the module's
+  `PyModule` node within the same corpus gives the first real intra-language
+  graph traversal.* Size: S.
+- **Pre-existing items still deferred** — 3 cross-file SV-imports test
+  failures (md/sv fixture pollution, see v1.5-#2 entry) and the Kuzu
+  shared-store teardown segfault on `test_origin_gc.py`. Neither caused by
+  v1.5-#3; both should be picked up before the next slate.
