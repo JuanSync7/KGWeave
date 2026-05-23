@@ -24,6 +24,39 @@ Entry skeleton:
 
 ---
 
+## 2026-05-23 — v1.5-#2 — bulk-COPY writer
+**Branch / commit:** `kgweave/kuzu-port` @ `e6b7281` (4 commits on top of v1.5-#6+#4+#5 head `2c90d29`, push pending at journal-write time)
+
+### What we did
+- **Threshold:** `_BULK_COPY_MIN_ROWS = 100` in `src/knowledge_graph/builders/sv/writer.py:443`. Above-threshold batches (len(nodes)+len(edges) >= 100) dispatch to `_write_graph_bulk`; below-threshold stays on the per-row Cypher MERGE loop.
+- **Format:** CSV via `tempfile.mkstemp` + Kuzu `COPY <table> FROM '<path>' (header=true)`. Picked over Parquet/Arrow because stdlib `csv` round-trips JSON-in-payload through RFC-4180 quoting cleanly with no extra deps; the bottleneck is Kuzu's index update on COPY, not parse cost (Parquet would shave ~100 ms at most).
+- **Replacement-merge:** preserved via a pre-COPY `DETACH DELETE` of every Node id about to be written -- wipes stale rows AND every incident REL row, so the follow-up REL COPYs land into a clean slice for the batch. `_unresolved.<name>` placeholder synthesis mirrored from the per-row branch.
+- **Buffer cap raised twice:** `KGWEAVE_MAX_DB_SIZE_BYTES` in the quickstart perf test went `256 MiB -> 1 GiB`, and `_TEST_MAX_DB_SIZE_BYTES` in `tests/knowledge_graph/store/conftest.py` likewise. The 256 MiB cap from v1.5-#1 couldn't hold the COPY path's frame-group allocation (`RuntimeError: No more frame groups can be added to the allocator`). 1 GiB is still far below Kuzu's 8 TB default.
+- **Budgets tightened in lockstep:**
+  * `tests/knowledge_graph/facade/test_quickstart_perf.py` floor: `200 s -> 10 s` (20x).
+  * `tests/knowledge_graph/facade/test_quickstart_runs.py` subprocess timeout: `400 s -> 70 s` (per the v1.5-#1 rule `max(floor + 60, 2 * floor)`).
+- **Tests landed:** G2 replacement-merge through COPY, G3 unresolved-placeholder through COPY, G4 perf micro-bench (N=1000 < 3 s, N=10 < 1.5 s) -- 716 sv-builder + 88 store + 15 facade all green at HEAD.
+
+### Lessons learnt
+- **Bulk COPY is ~10x at the writer, ~90x at the quickstart wall** -- *the quickstart bench was over-stating per-row INSERT cost relative to whole-pipeline cost. Writer N=1000 went 10.3 s -> 1.0 s (10x), but the quickstart wall went 125 s -> 1.4 s (~90x). Most of the prior 125 s was index work and lock churn on the per-row loop, not pure INSERT time.* Worth re-measuring before assuming the next perf lever (libcst Python builder) is even necessary.
+- **Buffer-manager frame-group count scales with `max_db_size`, not just on-disk usage** -- *Kuzu's BM partitions its address-space mmap into frame groups at open time; a 256 MiB cap simply doesn't have enough of them for COPY's bulk allocation, regardless of how empty the DB is. Means any future cap bump has to be done in lockstep across every test-fixture file that opens Kuzu -- conftest + perf test + cap-guard test all moved together this round.*
+- **Two test stores share a cap regime** -- *quickstart subprocess perf store and the in-process store-test session fixture both pin `max_db_size_bytes`. A perf hack that needs more BM has to bump BOTH and update the cap-guard literal in `test_fixtures_apply_cap.py` or the suite reports a regression that's actually intentional.*
+- **Pre-existing test-isolation failures surfaced (not caused) by this round** -- *3 SV `imports` tests (`test_types.py::test_s32_*`, `test_s50_does_not_disturb_s32_imports_edges`) fail when `tests/knowledge_graph/builders/` runs the md/ tests first. Repros on `1edddb4` (before the bulk-COPY landed) so this is not a v1.5-#2 regression; it's a lift/promote per-file cache pollution issue surfacing when the same `fifo.sv` fixture is built in two contexts. Documented + deferred to a dedicated investigation.*
+
+### Numbers (this box, this session)
+- Writer N=1000 wall: `~10.3 s` (per-row MERGE) -> `~1.0 s` (COPY) -- **~10x**.
+- Writer N=10 wall: per-row path unchanged (<150 ms), bulk path not engaged below threshold.
+- Quickstart wall (3-run worst, with `KGWEAVE_MAX_DB_SIZE_BYTES=1 GiB`): `1.452 s` vs the v1.5-#1 floor of `~125 s` -- **~90x**.
+- On-disk store size: unchanged after raising the cap -- the cap is an address-space ceiling, not a pre-allocation. Verified by inspecting `du -sh` of fixture stores.
+
+### Next moves
+- **v1.5-#3 -- Python builder via libcst** is the next outstanding charter item. May no longer be perf-critical now that the SV builder's writer is bulk-COPY; revisit the rationale before committing. Size: M.
+- **Investigate the 3 cross-file SV-imports test failures** (cache pollution between md/ and sv/legacy_tests/). Pre-existing on `1edddb4`; not blocking v1.5-#2 but should be fixed before they mask a real regression. Size: S (likely a one-line cache-key fix in `lift_file_cached` / `promote_file_cached`).
+- **Investigate Kuzu shared-store teardown segfault** in `tests/knowledge_graph/store/test_origin_gc.py` -- one core dump in C++ during `DETACH DELETE` on session teardown after many tests. Pre-existing on `1edddb4`; suite still passes when run with the test-by-test isolation but flaps under high-coverage runs. Size: M.
+- **Push** `kgweave/kuzu-port` to origin -- 4 commits ahead at journal-write time.
+
+---
+
 ## 2026-05-22 — v1.5-#6 + #4 + #5 — three cheap charter items
 **Branch / commit:** `kgweave/kuzu-port` @ `88ce061` (6 commits on top of v1.5-#1, push pending at journal-write time)
 
