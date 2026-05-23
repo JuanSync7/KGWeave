@@ -14,12 +14,20 @@ utility; v1 deliberately ships no non-trivial connectors.
 
 from __future__ import annotations
 
+from knowledge_graph.connectors._name_index import (
+    SV_INDEXED_KINDS,
+    build_name_index,
+)
 from knowledge_graph.connectors.protocol import Connector
 
 __all__ = [
     "Connector",
     "SemanticSelfRefConnector",
     "SvMarkdownReferenceConnector",
+    # v1.5-#3: shared name-index surface — public so cross-builder
+    # connectors (Python ↔ MD next) can reuse the grouping logic.
+    "SV_INDEXED_KINDS",
+    "build_name_index",
 ]
 
 
@@ -93,18 +101,12 @@ class SvMarkdownReferenceConnector:
     name: str = "sv-md-reference"
     requires: list[str] = ["sv", "md"]
 
-    # SV kind strings indexed by this connector. Order is informational
-    # only — collisions produce edges to ALL matching kinds.
-    _SV_INDEXED_KINDS: tuple[str, ...] = (
-        "SyntaxKind.ModuleDeclaration",
-        "SyntaxKind.PackageDeclaration",
-        "SyntaxKind.TypedefDeclaration",
-        "SyntaxKind.ForwardTypedefDeclaration",
-        "SyntaxKind.ImplicitAnsiPort",
-        "SyntaxKind.ExplicitAnsiPort",
-        "SyntaxKind.ImplicitNonAnsiPort",
-        "SyntaxKind.ExplicitNonAnsiPort",
-    )
+    # SV kind strings indexed by this connector. The tuple lives in
+    # :mod:`knowledge_graph.connectors._name_index` (v1.5-#3) so it is
+    # importable without pulling in the connector class itself. Kept as
+    # a class-level alias for backwards compat with any caller that
+    # reached at ``SvMarkdownReferenceConnector._SV_INDEXED_KINDS``.
+    _SV_INDEXED_KINDS: tuple[str, ...] = SV_INDEXED_KINDS
 
     def synthesize(self, store) -> int:
         conn = store.conn
@@ -121,14 +123,11 @@ class SvMarkdownReferenceConnector:
             """,
             {"kinds": list(self._SV_INDEXED_KINDS)},
         )
-        sv_by_corpus: dict[str, dict[str, list[str]]] = {}
+        rows: list[tuple[str, str | None, str | None]] = []
         while res.has_next():
             sid, name, corpus = res.get_next()
-            if not name:
-                continue
-            sv_by_corpus.setdefault(corpus or "", {}).setdefault(
-                name, []
-            ).append(sid)
+            rows.append((sid, name, corpus))
+        sv_by_corpus = build_name_index(rows)
         if not sv_by_corpus:
             return 0
 
