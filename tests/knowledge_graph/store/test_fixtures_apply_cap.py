@@ -1,12 +1,14 @@
-"""G3: store-test fixtures must open Kuzu with the 256 MiB cap.
+"""G3: store-test fixtures must open Kuzu with the 1 GiB cap.
 
 The ``tmp_store`` and session-scoped ``shared_kuzu_store`` fixtures
 in this directory's conftest must both forward
-``max_db_size_bytes=268_435_456`` (256 MiB) to ``KGStore.open``,
-matching the v1.5-#1 cap that keeps ext4 basetemp wall-times low.
+``max_db_size_bytes=1_073_741_824`` (1 GiB) to ``KGStore.open``.
+v1.5-#1 originally pinned this at 256 MiB; v1.5-#2's bulk-COPY path
+needs more buffer-manager frame groups than 256 MiB allowed and the
+cap was raised to 1 GiB (still well under Kuzu's 8 TB default).
 
 Verified by spying on ``kuzu.Database`` during the fixture's open
-call and asserting ``max_db_size`` was passed as the 256 MiB value.
+call and asserting ``max_db_size`` was passed as the 1 GiB value.
 
 We use an autouse session-scoped spy for the shared store assertion
 because the shared store is opened once-per-session at fixture setup
@@ -20,7 +22,7 @@ import inspect
 
 from knowledge_graph.store import KGStore
 
-_EXPECTED_CAP = 268_435_456  # 2**28 == 256 MiB, power-of-2 (Kuzu req)
+_EXPECTED_CAP = 1_073_741_824  # 2**30 == 1 GiB, power-of-2 (Kuzu req)
 
 
 def test_tmp_store_fixture_uses_max_db_size_cap() -> None:
@@ -46,8 +48,8 @@ def test_tmp_store_fixture_uses_max_db_size_cap() -> None:
     from tests.knowledge_graph.store import conftest as _cmod
     inlined = (
         str(_EXPECTED_CAP) in src
-        or "1 << 28" in src
-        or "2 ** 28" in src
+        or "1 << 30" in src
+        or "2 ** 30" in src
     )
     via_const = (
         "_TEST_MAX_DB_SIZE_BYTES" in src
@@ -55,7 +57,7 @@ def test_tmp_store_fixture_uses_max_db_size_cap() -> None:
     )
     assert inlined or via_const, (
         f"tmp_store fixture must pin max_db_size_bytes={_EXPECTED_CAP} "
-        "(256 MiB, power-of-2); current source:\n" + src
+        "(1 GiB, power-of-2); current source:\n" + src
     )
 
 
@@ -74,8 +76,8 @@ def test_shared_kuzu_session_store_uses_max_db_size_cap() -> None:
     from tests.knowledge_graph.store import conftest as _cmod
     inlined = (
         str(_EXPECTED_CAP) in src
-        or "1 << 28" in src
-        or "2 ** 28" in src
+        or "1 << 30" in src
+        or "2 ** 30" in src
     )
     via_const = (
         "_TEST_MAX_DB_SIZE_BYTES" in src
@@ -83,7 +85,7 @@ def test_shared_kuzu_session_store_uses_max_db_size_cap() -> None:
     )
     assert inlined or via_const, (
         f"shared_kuzu_session_store must pin max_db_size_bytes={_EXPECTED_CAP} "
-        "(256 MiB, power-of-2); current source:\n" + src
+        "(1 GiB, power-of-2); current source:\n" + src
     )
 
 
