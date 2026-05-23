@@ -63,7 +63,13 @@ def _new_store_with_origin(tmp_path: Path):
 # tightened too far, will flake on noisy CI; if loosened too far, will
 # silently absorb regressions.
 _N1000_BUDGET_S = 3.0
-_N10_BUDGET_S = 0.5
+# N=10 budget includes the per-test KGStore.open + schema init + first
+# snapshot_file cost (~0.5-0.7s cold). The actual write_graph work for
+# 10 rows is ~120ms; we set the budget generously at 1.5s so the test
+# catches a real regression (e.g. accidentally routing N=10 through the
+# bulk path, which would pile CSV-flush cost on top) without flapping
+# on cold-cache jitter.
+_N10_BUDGET_S = 1.5
 
 
 @pytest.mark.perf
