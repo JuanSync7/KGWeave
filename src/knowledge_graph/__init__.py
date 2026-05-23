@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from knowledge_graph.builders.md import extract as _md_extract
+from knowledge_graph.builders.py import extract as _py_extract
 from knowledge_graph.builders.sv import (
     ExtractStats,
     extract as _sv_extract,
@@ -278,6 +279,8 @@ def _present_sources(store: KGStore) -> set[str]:
 register_builder("sv", _sv_extract)
 # Built-in MD builder (v1.2 — minimal lift: document/heading/code-fence/inline-code).
 register_builder("md", _md_extract)
+# Built-in Python builder (v1.5-#3 — libcst lift: module/function/class/import).
+register_builder("py", _py_extract)
 
 
 __all__ = [
