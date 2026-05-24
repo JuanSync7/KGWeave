@@ -1173,3 +1173,87 @@ expectations.
 - **Optional follow-up:** add a `lexical_depth` payload field on
   PyComprehension once a consumer wants O(1) scope-chain lookups
   without walking `parent_idx`. YAGNI until that consumer exists.
+
+
+
+## v1.7-#3 retro — PyMatchStatement per-arm payload
+
+**Commits:** `31877c2` (RED mixed-pattern fixture + arm-shape assertions) → `5077a4c` (GREEN `_pattern_kind` + `_collect_bound_names` + payload wiring at both Match emission sites).
+
+### What we did
+Added two private helpers to `builders/py/walker.py`:
+- `_pattern_kind(pat)` classifies a `cst.BaseMatchPattern` into a
+  fixed closed set (see below). MatchAs is unwrapped one level so a
+  guarded-and-bound class pattern like `case Point(x, y) as p if …:`
+  still reports `pattern_kind="class"` rather than `"name"`.
+- `_collect_bound_names(pat, out)` walks the pattern tree collecting
+  every binding site in source order, deduped: `MatchAs.name`,
+  `MatchStar.name`, `MatchClass` positional + keyword sub-patterns,
+  `MatchMapping` values + `**rest`, `MatchList`/`MatchTuple` sequence
+  elements, and every alternative of `MatchOr`. `MatchValue` and
+  `MatchSingleton` bind nothing.
+
+A new helper `_match_arms_payload(match_node)` runs these per case
+and produces one dict per arm with `pattern_kind`, `bound_names`,
+`has_guard`. Wired into both Match emission sites (function-body
+sweep and module top-level).
+
+Fixture `tests/knowledge_graph/fixtures/py/match_arms_mixed.py`
+exercises one arm of each pattern kind plus a guarded class arm. The
+new test in `test_kind_match.py` pins the kinds list, bound-names per
+arm, and guards vector.
+
+### Closed pattern_kind set (pick once, do not iterate)
+`literal | name | class | or | wildcard | sequence | mapping`
+
+- `MatchValue`, `MatchSingleton` → `literal` (folded together — both
+  match by `==`, both bind nothing, downstream consumers don't need
+  to distinguish "string literal" from "None" at this layer).
+- `MatchOr` → `or`.
+- `MatchClass` → `class`.
+- `MatchList`, `MatchTuple` → `sequence` (also folded — PEP 634
+  treats `[…]` and `(…)` patterns identically at runtime).
+- `MatchMapping` → `mapping`.
+- `MatchAs` with neither pattern nor name → `wildcard` (`case _:`).
+- `MatchAs` with name only → `name` (`case x:`).
+- `MatchAs` wrapping another pattern → recurse into that pattern.
+- `MatchStar` → `name` when seen at the top level; in practice it
+  only appears inside sequences and contributes a bound name.
+
+The deferred-but-not-needed kinds (`star`, `value-vs-singleton`)
+were deliberately collapsed to keep the set tight and the downstream
+narrowing-aware connector switch simple.
+
+### Lessons learnt
+- **Fold `MatchValue` and `MatchSingleton` into one `literal` bucket
+  from day one.** The PEP 634 distinction (`==` for `MatchValue` vs.
+  `is` for `MatchSingleton`) matters at runtime but not for
+  narrowing-aware static analysis, which is what consumes this
+  payload. Re-splitting later is cheap if a consumer materialises;
+  pre-splitting now would force every consumer to handle two arms
+  that mean the same thing in 99% of code.
+- **MatchAs is the only non-trivial pattern node.** Every other
+  pattern type has a one-to-one mapping to a `pattern_kind`. The
+  recursion is exactly one place — when MatchAs wraps a sub-pattern
+  the wrapper contributes a bound name and the sub-pattern dictates
+  the kind. Centralising that asymmetry inside `_pattern_kind` kept
+  the call sites trivial.
+- **Visit all OR-alternatives for `bound_names`.** PEP 634 guarantees
+  all alternatives bind identical names, so collecting from one is
+  enough in well-formed code. Walking every alternative and deduping
+  is the same code path and lets the walker emit something sane for
+  syntactically valid but semantically wrong matches (e.g. someone
+  hand-edits a fixture). Deduping is by appearance order, not sort
+  — preserves source order for downstream readability.
+
+### Next moves
+- **v1.7-#4 (decorator-aware connector semantics):** size M, next.
+  No walker changes — a new connector module promotes three known
+  decorator names (`@dataclass`, `@pytest.fixture`, `@property`) to
+  `semantic_role` tags on PyClass/PyFunction. The arm payload added
+  here is independent of #4.
+- **Optional follow-up for #3:** add per-arm byte spans so a future
+  connector can highlight which arm a narrowing edge originates
+  from. YAGNI until a consumer asks. Arms are ordered by source
+  position so a consumer can derive an arm-index → span mapping by
+  re-walking the original `cst.Match` if needed.
