@@ -150,6 +150,7 @@ def lift_python(content: bytes) -> list[PyNode]:
             decs = _decorator_strings(node.decorators, module)
             if decs:
                 payload["decorators"] = decs
+            payload["is_async"] = node.asynchronous is not None
         elif isinstance(node, cst.ClassDef):
             kind = "PyClass"
             name = node.name.value
