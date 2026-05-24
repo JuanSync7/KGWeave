@@ -39,6 +39,9 @@ from knowledge_graph.connectors import (
     SemanticSelfRefConnector,
     SvMarkdownReferenceConnector,
 )
+from knowledge_graph.connectors.py_decorator_semantics import (
+    PyDecoratorSemanticsConnector,
+)
 from knowledge_graph.connectors.py_md import PyMarkdownReferenceConnector
 from knowledge_graph.connectors.protocol import Connector
 from knowledge_graph.query import (
@@ -317,6 +320,7 @@ __all__ = [
     "SemanticSelfRefConnector",
     "SvMarkdownReferenceConnector",
     "PyMarkdownReferenceConnector",
+    "PyDecoratorSemanticsConnector",
     # errors
     "ReadOnlyViolation",
     "AmbiguousAnchor",
