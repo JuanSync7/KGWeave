@@ -112,6 +112,37 @@ def _decorator_strings(
     return out
 
 
+def _extract_dunder_all(module: cst.Module) -> list[str] | None:
+    """Return the literal ``__all__`` list at module scope, if present.
+
+    Only the literal-list / literal-tuple form is recognised — dynamic
+    constructions (``__all__ = list(...)``, augmented assignment) are
+    out of scope for v1.6 and would return ``None`` here.
+    """
+    for stmt in module.body:
+        if not isinstance(stmt, cst.SimpleStatementLine):
+            continue
+        for small in stmt.body:
+            if not isinstance(small, cst.Assign):
+                continue
+            if len(small.targets) != 1:
+                continue
+            target = small.targets[0].target
+            if not (isinstance(target, cst.Name) and target.value == "__all__"):
+                continue
+            value = small.value
+            if not isinstance(value, (cst.List, cst.Tuple)):
+                return None
+            out: list[str] = []
+            for el in value.elements:
+                if isinstance(el, cst.Element) and isinstance(
+                    el.value, cst.SimpleString
+                ):
+                    out.append(el.value.evaluated_value)
+            return out
+    return None
+
+
 def lift_python(content: bytes) -> list[PyNode]:
     """Lift ``content`` (Python source bytes) into a flat PyNode list.
 
@@ -126,6 +157,10 @@ def lift_python(content: bytes) -> list[PyNode]:
     module = wrapper.module
 
     nodes: list[PyNode] = []
+    module_payload: dict[str, object] = {}
+    all_exports = _extract_dunder_all(module)
+    if all_exports is not None:
+        module_payload["all_exports"] = all_exports
     # Index 0 is always the module node, covering the whole file.
     nodes.append(
         PyNode(
@@ -134,7 +169,7 @@ def lift_python(content: bytes) -> list[PyNode]:
             end=len(content),
             name="",
             parent_idx=None,
-            payload={},
+            payload=module_payload,
         )
     )
 
