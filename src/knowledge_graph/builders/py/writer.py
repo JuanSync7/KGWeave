@@ -21,11 +21,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
 
 from knowledge_graph.builders.py.walker import PyNode, lift_python
-from knowledge_graph.builders.sv.writer import ExtractStats, WriteStats
+from knowledge_graph.builders.sv.writer import (
+    _BULK_COPY_MIN_ROWS,
+    _NODE_CSV_COLUMNS,
+    _copy_csv,
+    _detach_delete_node_ids,
+    _node_row_for_csv,
+    ExtractStats,
+    WriteStats,
+)
 from knowledge_graph.schemas import OriginRef
 
 
@@ -113,6 +122,113 @@ def _category_for(kind: str) -> str:
     return "structural"
 
 
+def _node_params_for_py(
+    pn: PyNode,
+    *,
+    nid: str,
+    name: str,
+    content: bytes,
+    origin: OriginRef,
+    source: str,
+    corpus: str,
+) -> dict[str, Any]:
+    """Build the column-dict for one PyNode, shaped to ``_NODE_CSV_COLUMNS``
+    so the same row can feed either the per-row Cypher path or the bulk
+    CSV writer (:func:`_node_row_for_csv`)."""
+    sl, sc = _line_col(content, pn.start)
+    el, ec = _line_col(content, pn.end)
+    return {
+        "id": nid,
+        "kind": pn.kind,
+        "category": _category_for(pn.kind),
+        "name": name,
+        "source": source,
+        "corpus": corpus,
+        "origin_id": origin.id,
+        "start_offset": pn.start,
+        "end_offset": pn.end,
+        "start_line": sl,
+        "end_line": el,
+        "start_col": sc,
+        "end_col": ec,
+        "payload": _serialize_payload(pn),
+    }
+
+
+def _resolve_name(pn: PyNode, origin: OriginRef) -> str:
+    """For the module node use the file stem; everything else uses the
+    walker-provided name. Kept as a free function so both code paths
+    agree (otherwise a divergence would silently shift the file's
+    PyModule name in one branch but not the other)."""
+    if pn.kind == "PyModule":
+        return Path(origin.uri).stem
+    return pn.name
+
+
+def _write_py_bulk(
+    conn: Any,
+    py_nodes: list[PyNode],
+    *,
+    content: bytes,
+    origin: OriginRef,
+    source: str,
+    corpus: str,
+) -> WriteStats:
+    """Bulk-COPY path mirroring SV's :func:`_write_graph_bulk`.
+
+    Strategy (replacement-merge preserved by pre-delete, same as SV):
+
+    1. Compute every node id + its PARENT_OF edges in-memory.
+    2. ``DETACH DELETE`` the to-be-written ids (clears stale rows + all
+       incident rels so the REL COPY below lands clean).
+    3. ``COPY Node`` / ``COPY IN_ORIGIN`` / ``COPY PARENT_OF`` from CSVs
+       inside a per-call tmpdir.
+
+    Py has no ``_unresolved.*`` placeholder synthesis (per-file walker,
+    no cross-file semantic pass), so the bulk path is simpler than SV's.
+    """
+    stats = WriteStats()
+    id_by_index: dict[int, str] = {}
+    node_rows: list[list[Any]] = []
+    in_origin_rows: list[list[Any]] = []
+
+    for idx, pn in enumerate(py_nodes):
+        name = _resolve_name(pn, origin)
+        nid = _node_id(origin.id, pn.kind, pn.start, pn.end, name)
+        id_by_index[idx] = nid
+        params = _node_params_for_py(
+            pn, nid=nid, name=name, content=content,
+            origin=origin, source=source, corpus=corpus,
+        )
+        node_rows.append(_node_row_for_csv(params))
+        in_origin_rows.append([nid, origin.id])
+        stats.nodes_written += 1
+        stats.in_origin_written += 1
+
+    parent_rows: list[list[Any]] = []
+    ordinal_by_parent: dict[int, int] = {}
+    for idx, pn in enumerate(py_nodes):
+        if pn.parent_idx is None:
+            continue
+        ord_ = ordinal_by_parent.get(pn.parent_idx, 0)
+        ordinal_by_parent[pn.parent_idx] = ord_ + 1
+        parent_rows.append([id_by_index[pn.parent_idx], id_by_index[idx], ord_])
+        stats.edges_written["PARENT_OF"] = (
+            stats.edges_written.get("PARENT_OF", 0) + 1
+        )
+
+    _detach_delete_node_ids(conn, list(id_by_index.values()))
+
+    with tempfile.TemporaryDirectory(prefix="kgweave_py_copy_") as td:
+        tmpdir = Path(td)
+        _copy_csv(conn, "Node", _NODE_CSV_COLUMNS, node_rows, tmpdir)
+        _copy_csv(conn, "IN_ORIGIN", ("from", "to"), in_origin_rows, tmpdir)
+        _copy_csv(conn, "PARENT_OF", ("from", "to", "ordinal"),
+                  parent_rows, tmpdir)
+
+    return stats
+
+
 def write_py_graph(
     store: Any,
     py_nodes: list[PyNode],
@@ -127,41 +243,32 @@ def write_py_graph(
     Returns a :class:`WriteStats` with per-table counts. Reuses the SV
     builder's :class:`WriteStats` so the facade's tuple-result contract
     holds without a parallel hierarchy (same call MD does).
+
+    v1.6-#4: above ``_BULK_COPY_MIN_ROWS`` PyNodes we dispatch to the
+    bulk-COPY path (parity with the SV writer). Below it, per-row
+    Cypher MERGE wins on overhead — see the SV writer's
+    ``_BULK_COPY_MIN_ROWS`` docstring for the amortisation reasoning.
     """
-    stats = WriteStats()
     conn = store.conn
+
+    if len(py_nodes) >= _BULK_COPY_MIN_ROWS:
+        return _write_py_bulk(
+            conn, py_nodes, content=content, origin=origin,
+            source=source, corpus=corpus,
+        )
+
+    stats = WriteStats()
     id_by_index: dict[int, str] = {}
 
     for idx, pn in enumerate(py_nodes):
-        # For the module node, use the file basename as the name so
-        # downstream connectors can match against ``import simple_module``.
-        if pn.kind == "PyModule":
-            name = Path(origin.uri).stem
-        else:
-            name = pn.name
+        name = _resolve_name(pn, origin)
         nid = _node_id(origin.id, pn.kind, pn.start, pn.end, name)
         id_by_index[idx] = nid
-        sl, sc = _line_col(content, pn.start)
-        el, ec = _line_col(content, pn.end)
-        conn.execute(
-            _NODE_MERGE_CYPHER,
-            {
-                "id": nid,
-                "kind": pn.kind,
-                "category": _category_for(pn.kind),
-                "name": name,
-                "source": source,
-                "corpus": corpus,
-                "origin_id": origin.id,
-                "start_offset": pn.start,
-                "end_offset": pn.end,
-                "start_line": sl,
-                "end_line": el,
-                "start_col": sc,
-                "end_col": ec,
-                "payload": _serialize_payload(pn),
-            },
+        params = _node_params_for_py(
+            pn, nid=nid, name=name, content=content,
+            origin=origin, source=source, corpus=corpus,
         )
+        conn.execute(_NODE_MERGE_CYPHER, params)
         stats.nodes_written += 1
         conn.execute(_IN_ORIGIN_MERGE, {"nid": nid, "oid": origin.id})
         stats.in_origin_written += 1
