@@ -922,3 +922,154 @@ fixture builds.
   needs the same Cypher. Py now imports five private names from
   `sv.writer`. If the v1.7 builder is on the table, this is the moment
   to lift those into `builders/_writer_common.py` with public names.
+
+## 2026-05-24 — v1.6-#3 libcst Python builder coverage gaps (SHIPPED)
+
+Charter §3 — extend the libcst-driven walker from its v1 set (PyModule
+/ PyImport / PyFunction / PyClass) to cover nine modern-Python
+constructs. TDD per kind, red commit + green commit each, with one
+N-A (`.pyi`) that landed green-only because the audit found it
+already working end-to-end. 18 commits, dir-scoped suites green.
+
+### What we did
+- **G0 audit** (`docs/plans/v1.6-3-audit.md`, commit 2348dad): walked
+  the walker, confirmed all 9 charter gaps were genuinely missing
+  except `.pyi` routing — that one was provisionally green because
+  the walker is content-only and dispatch is by `source=` not extension.
+- **G1 decorators** (fc72d2f red + c5c3633 green): `_decorator_strings`
+  renders each `cst.Decorator.decorator` via `Module.code_for_node`,
+  preserving parametrised forms like `@functools.lru_cache(maxsize=8)`.
+  Skipped writing the payload key when there are no decorators to keep
+  the common case JSON tight.
+- **G2 async def** (f170605 red + 1ee15e6 green): one-line change —
+  `payload["is_async"] = node.asynchronous is not None`. Charter
+  forbade a new kind, so the flag lives on PyFunction. Set
+  unconditionally so consumers can rely on the key being present.
+- **G3 PEP 695 type alias** (6886905 red + 007e021 green): `cst.TypeAlias`
+  nests inside `SimpleStatementLine` (same shape as Import). Lifted
+  with `parent_idx=0`; nested-in-function aliases out of scope.
+- **G4 TYPE_CHECKING imports** (500d64e red + 4094512 green): factored
+  the per-small-statement lift into `_emit_simple_stmt(runtime=)` so
+  the same code handles regular runtime imports (`runtime=True`) and
+  the `if TYPE_CHECKING:` body (`runtime=False`). `_is_type_checking_test`
+  recognises both bare `TYPE_CHECKING` and `typing.TYPE_CHECKING`.
+- **G5 __all__ exports** (203242c red + d67c690 green): `_extract_dunder_all`
+  scans module-level assigns for a single-target `__all__` whose RHS is
+  a literal list/tuple of SimpleStrings, attaches as `all_exports` on
+  the PyModule payload. Dynamic constructions deliberately yield no
+  key — better to surface zero than a misleading partial list.
+- **G6 .pyi stubs** (e591261 green-only): audit-N-A. Walker already
+  parsed `def f(...) -> int: ...`, facade already routed by source not
+  extension. Landed the tests anyway as a regression pin against a
+  future extension allow-list filter.
+- **G7 match-case** (94c0266 red + ec40a30 green): `_MatchFinder`
+  CSTVisitor collects every `cst.Match` reachable from a function body;
+  each is emitted as `PyMatchStatement` parented under the def. Module-
+  level matches handled directly in the main loop. No case-arm payload —
+  out of v1.6 scope.
+- **G8 walrus** (b518b49 red + f3013c1 green): `_WalrusFinder` flips
+  `payload["has_walrus"]` on the enclosing PyFunction when any
+  `cst.NamedExpr` is reachable. Aggregating at function level (not
+  per-assignment) because the charter use-case is filtering, not
+  pinpointing.
+- **G9 comprehensions** (9d6b9c2 red + 029ef32 green): `_ComprehensionFinder`
+  collects List/Set/Dict/GeneratorExp from the whole module. Each
+  becomes a `PyComprehension` with `payload["form"]` ∈ {list, set,
+  dict, generator}. Attached to module (parent_idx=0) rather than the
+  enclosing function — byte spans let downstream consumers locate the
+  scope via interval lookup.
+
+### Lessons learnt
+- **Audit before fan-out paid off.** Spending one commit on G0 caught
+  the `.pyi` N-A before I built a fixture + test infrastructure for a
+  feature that already worked. The charter says "check before fanning
+  out" for a reason — this is the second consecutive v1.6 item where
+  the audit changed the work plan (v1.6-#4 audit found the bulk-COPY
+  cost amortisation already documented in SV; this one found `.pyi`
+  routing already free).
+- **Per-kind tiny test files scale.** Nine `test_kind_*.py` files
+  averaging ~40 LOC each is cleaner than a single 360-LOC bulk test
+  module because each kind's RED commit lands a self-contained test
+  that's easy to inspect at review time. The cross-kind shape repetition
+  is a feature (each test reads identically — set up, lift, assert) not
+  a copy-paste smell.
+- **CSTVisitor is the right tool for "is there any X anywhere in this
+  subtree" questions.** Three of the nine kinds (G7, G8, G9) use the
+  same five-line `cst.CSTVisitor` subclass shape: a visit_X method that
+  appends to or flips a flag. libcst's metaclass-based visitor wiring
+  means there's no need to thread state through manual recursion.
+  Stays trivial to add the next kind (lambda capture in v1.7?) with
+  the same pattern.
+- **Distinguish "new kind" from "new payload flag" early.** The charter
+  was explicit about which constructs become kinds (TypeAlias, Match,
+  Comprehension) and which become flags (`is_async`, `has_walrus`,
+  `runtime`, `decorators`). Following that boundary kept the kind set
+  small (3 new kinds, 6 flags / payload extensions) and avoided the
+  trap of every Python construct getting its own row in the Node
+  table.
+- **Module-scope walrus + comprehension would have been a missed
+  edge.** The fixture for comprehensions puts all 4 forms at module
+  scope, which is exactly where the v1 walker's "only recurse into
+  def/class bodies" shape would have lost them. Doing a whole-module
+  `_find_comprehensions(module)` sweep after the main loop avoided
+  having to thread comprehension state through every recursion level.
+
+### Next moves
+- **Comprehension scope-chain attribution.** Currently every
+  PyComprehension parents to the module. A v1.7 pass should walk the
+  scope chain so a list-comp inside a method parents to that
+  PyFunction. The byte-span info needed is already in place; only the
+  parent_idx assignment needs to change.
+- **Case-arm payload for PyMatchStatement.** Surfacing the literal
+  case patterns (`int()`, `str()`, `_`) would let connectors resolve
+  the type-narrowing branches. Currently the kind is presence-only.
+- **Decorator-aware semantics.** Now that we record `decorators`, the
+  Python ↔ MD connector could promote `@dataclass` / `@pytest.fixture`
+  / `@property` to richer categories. Currently they all stay
+  PyFunction/PyClass — the connector should be the next hop, not the
+  walker.
+- **Lambda capture analysis** (v1.7 charter §3 out-of-scope item):
+  same CSTVisitor pattern as walrus/comprehensions; mainly need to
+  decide the kind name (`PyLambda`?) and whether closure names go
+  on the payload.
+
+## 2026-05-24 — v1.6 CLOSE-OUT
+
+All four charter items shipped on branch `kgweave/kuzu-port`.
+
+| # | item                                            | commits | result   |
+|---|-------------------------------------------------|---------|----------|
+| 1 | md<->sv promote-cache pollution                 | 4       | SHIPPED  |
+| 2 | origin_gc Kuzu teardown segfault                | 1       | NOT-REPRO|
+| 3 | libcst Python builder coverage gaps             | 18      | SHIPPED  |
+| 4 | py writer bulk-COPY parity with SV              | 4       | SHIPPED  |
+
+Total v1.6 commits: **27** from `5128ef5` (charter) to `029ef32`
+(v1.6-#3 G9 green).
+
+### v1.6 commits in order
+- 5128ef5 charter
+- v1.6-#1 (md<->sv cache): 15306fb 12e2f80 8c7ba57 58e1617
+- v1.6-#2 (origin_gc): d984644
+- v1.6-#4 (py bulk-COPY): 2e2b31b b9a40cb 48755f5 0ad4efe
+- v1.6-#3 (libcst gaps): 2348dad fc72d2f c5c3633 f170605 1ee15e6
+  6886905 007e021 500d64e 4094512 203242c d67c690 e591261 94c0266
+  ec40a30 b518b49 f3013c1 9d6b9c2 029ef32
+
+### v1.6 take-aways
+- **The charter's priority ordering held.** Items #1 and #2 unblocked
+  the stability story; #4 unblocked Python at scale before #3 added
+  the coverage that would have stressed the per-row path.
+- **Two audits saved real time.** v1.6-#2 audit found the segfault not
+  reproducible at HEAD (zero engineering work needed); v1.6-#3 audit
+  found `.pyi` already routing correctly. The "G0 pre-flight" line item
+  in every charter §3 spec is now a load-bearing convention.
+- **Dir-scoped pytest discipline held across all 27 commits.** Zero
+  raw `pytest tests/` invocations, zero pre-existing tests skipped or
+  deselected. The four pytest-infra guards (basetemp, timeout,
+  lockfile, kuzu cleanup) caught nothing — which is what you want from
+  guard rails.
+- **All perf floors still green at v1.6 close.** quickstart_perf
+  3.08 s ≤ 10 s; SV writer N=1000 < 3 s; Py writer N=1000 < 6 s. The
+  bulk-COPY parity work (#4) bought the headroom that #3's expanded
+  walker payload writes consumed without rocking the budget.
