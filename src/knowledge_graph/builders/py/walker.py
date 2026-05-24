@@ -135,6 +135,23 @@ def _find_match_statements(subtree: cst.CSTNode) -> list[cst.Match]:
     return finder.matches
 
 
+class _WalrusFinder(cst.CSTVisitor):
+    """Set ``self.found = True`` if any ``cst.NamedExpr`` appears."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.found = False
+
+    def visit_NamedExpr(self, node: cst.NamedExpr) -> None:  # noqa: ARG002
+        self.found = True
+
+
+def _has_walrus(subtree: cst.CSTNode) -> bool:
+    f = _WalrusFinder()
+    subtree.visit(f)
+    return f.found
+
+
 def _extract_dunder_all(module: cst.Module) -> list[str] | None:
     """Return the literal ``__all__`` list at module scope, if present.
 
@@ -209,6 +226,7 @@ def lift_python(content: bytes) -> list[PyNode]:
             if decs:
                 payload["decorators"] = decs
             payload["is_async"] = node.asynchronous is not None
+            payload["has_walrus"] = _has_walrus(node.body)
         elif isinstance(node, cst.ClassDef):
             kind = "PyClass"
             name = node.name.value
