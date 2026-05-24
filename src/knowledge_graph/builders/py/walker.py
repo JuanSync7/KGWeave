@@ -338,6 +338,133 @@ def _find_comprehensions_scoped(
     return f.found
 
 
+# v1.7-#5: lambda capture analysis.
+#
+# A lambda's "captures" = Name identifiers loaded inside its body that
+# are NOT parameters of the lambda itself. We deliberately do NOT verify
+# those names resolve in any enclosing lexical scope — that's static-
+# analysis territory queued for v1.8+. The heuristic suffices for
+# graph-level "this lambda references symbol X" queries.
+#
+# Skipped during the body walk:
+#   * ``Attribute.attr`` — only the receiver Name counts (``self.attr``
+#     contributes ``self``, never ``attr``).
+#   * ``Arg.keyword`` — keyword argument names (``foo(x=1)``) are not
+#     name loads.
+#   * Nested ``Lambda`` subtrees — each nested lambda is emitted in its
+#     own right; its parameters mask names that would otherwise leak
+#     into the outer lambda's capture set.
+def _lambda_param_names(params: cst.Parameters) -> set[str]:
+    """All identifiers bound by a lambda's parameter list."""
+    names: set[str] = set()
+    for p in list(params.posonly_params) + list(params.params) + list(
+        params.kwonly_params
+    ):
+        names.add(p.name.value)
+    if isinstance(params.star_arg, cst.Param):
+        names.add(params.star_arg.name.value)
+    if params.star_kwarg is not None:
+        names.add(params.star_kwarg.name.value)
+    return names
+
+
+def _collect_load_names(node: cst.CSTNode, out: set[str]) -> None:
+    """Recursive walk collecting Name loads inside a lambda body.
+
+    Honours the skip rules documented above: attribute ``.attr`` Names,
+    keyword-argument keyword Names, and nested Lambda subtrees are not
+    descended into.
+    """
+    if isinstance(node, cst.Name):
+        out.add(node.value)
+        return
+    if isinstance(node, cst.Attribute):
+        _collect_load_names(node.value, out)
+        return
+    if isinstance(node, cst.Arg):
+        _collect_load_names(node.value, out)
+        return
+    if isinstance(node, cst.Lambda):
+        # Nested lambdas are visited independently; do not bleed their
+        # body name references into the outer lambda's capture set.
+        return
+    for child in node.children:
+        _collect_load_names(child, out)
+
+
+class _ScopedLambdaFinder(cst.CSTVisitor):
+    """Collect ``(lambda_node, parent_cst)`` honouring lexical scopes.
+
+    Mirrors :class:`_ScopedComprehensionFinder`. The stack top is the
+    nearest enclosing scope-creating CST node (Module / FunctionDef /
+    ClassDef / outer Lambda / Comprehension). Comprehensions count as
+    scopes too so that a lambda nested inside a comprehension parents at
+    the comprehension, not the function around it.
+    """
+
+    def __init__(self, module: cst.Module) -> None:
+        super().__init__()
+        self._stack: list[cst.CSTNode] = [module]
+        self.found: list[tuple[cst.Lambda, cst.CSTNode]] = []
+
+    def _push(self, node: cst.CSTNode) -> None:
+        self._stack.append(node)
+
+    def _pop(self, node: cst.CSTNode) -> None:  # noqa: ARG002
+        self._stack.pop()
+
+    def visit_FunctionDef(self, node: cst.FunctionDef) -> None:
+        self._push(node)
+
+    def leave_FunctionDef(self, original_node: cst.FunctionDef) -> None:
+        self._pop(original_node)
+
+    def visit_ClassDef(self, node: cst.ClassDef) -> None:
+        self._push(node)
+
+    def leave_ClassDef(self, original_node: cst.ClassDef) -> None:
+        self._pop(original_node)
+
+    def visit_ListComp(self, node: cst.ListComp) -> None:
+        self._push(node)
+
+    def leave_ListComp(self, original_node: cst.ListComp) -> None:
+        self._pop(original_node)
+
+    def visit_SetComp(self, node: cst.SetComp) -> None:
+        self._push(node)
+
+    def leave_SetComp(self, original_node: cst.SetComp) -> None:
+        self._pop(original_node)
+
+    def visit_DictComp(self, node: cst.DictComp) -> None:
+        self._push(node)
+
+    def leave_DictComp(self, original_node: cst.DictComp) -> None:
+        self._pop(original_node)
+
+    def visit_GeneratorExp(self, node: cst.GeneratorExp) -> None:
+        self._push(node)
+
+    def leave_GeneratorExp(self, original_node: cst.GeneratorExp) -> None:
+        self._pop(original_node)
+
+    def visit_Lambda(self, node: cst.Lambda) -> None:
+        self.found.append((node, self._stack[-1]))
+        self._push(node)
+
+    def leave_Lambda(self, original_node: cst.Lambda) -> None:
+        self._pop(original_node)
+
+
+def _find_lambdas_scoped(
+    module: cst.Module,
+) -> list[tuple[cst.Lambda, cst.CSTNode]]:
+    f = _ScopedLambdaFinder(module)
+    module.visit(f)
+    return f.found
+
+
 def _extract_dunder_all(module: cst.Module) -> list[str] | None:
     """Return the literal ``__all__`` list at module scope, if present.
 
@@ -596,6 +723,37 @@ def lift_python(content: bytes) -> list[PyNode]:
             )
         )
         cst_to_idx[id(comp_node)] = len(nodes) - 1
+
+    # Scope-aware lambda sweep (v1.7-#5). Parents to nearest enclosing
+    # scope using the same cst_to_idx map. Outer-first ordering ensures
+    # nested lambdas can look up their parent PyLambda by id.
+    scoped_lambdas = _find_lambdas_scoped(module)
+    scoped_lambdas.sort(
+        key=lambda pair: (
+            (spans.get(pair[0]).start if spans.get(pair[0]) else 0),
+            -(spans.get(pair[0]).length if spans.get(pair[0]) else 0),
+        )
+    )
+    for lam_node, parent_cst in scoped_lambdas:
+        lsp = spans.get(lam_node)
+        if lsp is None:
+            continue
+        loaded: set[str] = set()
+        _collect_load_names(lam_node.body, loaded)
+        params = _lambda_param_names(lam_node.params)
+        captures = sorted(loaded - params)
+        parent_idx = cst_to_idx.get(id(parent_cst), 0)
+        nodes.append(
+            PyNode(
+                kind="PyLambda",
+                start=lsp.start,
+                end=lsp.start + lsp.length,
+                name="",
+                parent_idx=parent_idx,
+                payload={"captures": captures},
+            )
+        )
+        cst_to_idx[id(lam_node)] = len(nodes) - 1
 
     return nodes
 
