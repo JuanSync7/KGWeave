@@ -1073,3 +1073,45 @@ Total v1.6 commits: **27** from `5128ef5` (charter) to `029ef32`
   3.08 s ≤ 10 s; SV writer N=1000 < 3 s; Py writer N=1000 < 6 s. The
   bulk-COPY parity work (#4) bought the headroom that #3's expanded
   walker payload writes consumed without rocking the budget.
+
+
+## v1.7-#1 retro — lift writer helpers to builders/_writer_common
+
+**Commits:** `7e590f1` (RED meta test) → `691fcf4` (GREEN refactor).
+
+### What we did
+Lifted five private symbols out of `builders/sv/writer.py` into a new
+shared `builders/_writer_common.py` module (`BULK_COPY_MIN_ROWS`,
+`NODE_CSV_COLUMNS`, `node_row_for_csv`, `detach_delete_node_ids`,
+`copy_csv`) and rewired both the SV and Py writers (plus the SV
+bulk-copy test) to import from there. A meta test pins the invariant:
+`grep`-style scan of `src/` rejects any future `from
+knowledge_graph.builders.<x>.writer import _<name>` line. No
+behavioural change, no API change at the facade.
+
+### Lessons learnt
+- **The previous agent's uncommitted refactor was already coherent.**
+  The diff lifted exactly the five names the charter named, the names
+  shed their leading underscore correctly, and the two writers + one
+  test were consistent. Restarting from scratch would have wasted
+  work; reading `git diff` first paid off.
+- **`ExtractStats` / `WriteStats` were intentionally left as a Py→SV
+  public import.** The meta test rule is scoped to *private* names
+  (leading-underscore) precisely because the public dataclasses are
+  the shared result-tuple contract — moving them would have widened
+  the blast radius beyond v1.7-#1's mechanical scope.
+- **Perf floors held with zero margin loss.** quickstart+SV+Py perf
+  ran in 7.42 s combined; the indirection through `_writer_common`
+  costs nothing (Python's module-level binding resolves once at
+  import).
+
+### Next moves
+- **v1.7-#2 (walker depth):** the next charter item targets recursion
+  depth in `builders/py/walker.py`. The lifted helpers shouldn't
+  affect it, but if v1.7-#2 grows a third builder writer, it now has
+  a stable public surface to reuse.
+- **Optional follow-up (out of scope for #1):** if a third builder
+  arrives in v1.8 that also needs `ExtractStats`/`WriteStats`, lift
+  those into `_writer_common.py` too — but only when the second
+  consumer materialises (YAGNI until then).
+
