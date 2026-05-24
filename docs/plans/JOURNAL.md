@@ -854,3 +854,71 @@ fixture builds.
   the segfault returns on a tmpfs-only or memory-constrained CI host,
   the diagnosis stays valid but the fix list (drop+recreate DB file) is
   back on the table.
+
+## 2026-05-24 — v1.6-#4 Python writer bulk-COPY parity
+**Branch / commit:** kgweave/kuzu-port @ 48755f5
+
+### What we did
+- Audited `src/knowledge_graph/builders/py/writer.py`: 100% per-row
+  Cypher MERGE — no `csv` / `tempfile` / `COPY FROM` anywhere. Confirmed
+  in `docs/plans/v1.6-4-audit.md`.
+- Added `tests/knowledge_graph/builders/py/test_writer_perf.py` mirroring
+  the SV variant: N=1000 budget 6.0 s (=2× SV's 3.0 s per charter §4),
+  N=10 budget 1.5 s pins the sub-threshold path.
+- G2 red: per-row N=1000 ran ~10 s, blew past the 30 s test timeout.
+  Committed red before impl.
+- G3 green: factored `_node_params_for_py` + `_resolve_name` so the
+  per-row and bulk paths share row construction; added `_write_py_bulk`
+  reusing SV's `_BULK_COPY_MIN_ROWS=100`, `_copy_csv`,
+  `_detach_delete_node_ids`, `_node_row_for_csv`. Dispatch threshold is
+  `len(py_nodes) >= _BULK_COPY_MIN_ROWS`.
+- Pre-COPY DETACH DELETE on the to-be-written ids preserves the
+  replacement-merge contract (same shape SV uses).
+- N=1000 post-impl: ~1.2 s (~5× headroom under the 6.0 s budget).
+- N=10 post-impl: per-row path unchanged.
+- G4 dir-scoped: builders/py 16/16, builders/sv 716/716, connectors
+  test_py_md 5/5, _meta 19/19. G5 perf floors: quickstart_perf + sv
+  writer_perf both green.
+
+### Lessons learnt
+- **Reuse beats reimplementation, even across builders.** SV writer's
+  bulk-COPY helpers (`_copy_csv`, `_detach_delete_node_ids`,
+  `_node_row_for_csv`, `_NODE_CSV_COLUMNS`, `_BULK_COPY_MIN_ROWS`) all
+  generalised cleanly to Py because the underlying Kuzu schema is
+  shared (`Node`, `IN_ORIGIN`, `PARENT_OF` are one table set). Py's
+  bulk path is ~50 LOC because of this; a parallel implementation
+  would have been 150+ and a divergence risk.
+- **Shared row-builder pays its way at the first divergence.** Factoring
+  `_node_params_for_py` BEFORE adding the bulk path meant only one
+  function holds the (line, col, payload) computation. Skipping that
+  refactor would have made the bulk path either (a) duplicate the
+  computation or (b) skip the shared serialise contract and silently
+  drift from per-row.
+- **Charter-derived budgets > vibes-derived budgets.** "≤ 2× the SV
+  wall" is testable; "feels fast enough" isn't. The 6.0 s number came
+  straight from §4 line 92 and made the red→green transition mechanical.
+- **TDD red was a 30 s timeout, not an assertion.** When the per-row
+  cost is ~10 ms/row, a 1000-row N test will time out long before the
+  perf assertion fires. That's still a valid red — the test FAILED.
+  Don't conflate "got an assertion message" with "test failed".
+
+### Next moves
+- **v1.6-#3 — libcst coverage gaps** (charter §3). Largest remaining
+  item; fan out per Python kind in priority order:
+  1. decorators (function + class, runtime + `@property`-family)
+  2. `async def` (flag on `PyFunction`, not a new kind)
+  3. PEP 695 `type X = ...` (new `PyTypeAlias`)
+  4. `if TYPE_CHECKING:` import-runtime flag
+  5. `__all__` exports on `PyModule`
+  6. `.pyi` stub files (same walker, different extension)
+  7. `match-case` (new `PyMatchStatement`)
+  8. walrus flag on assignment
+  9. comprehension scopes (new `PyComprehension`)
+  Each: new fixture(s), walker test, writer round-trip. With the bulk
+  path now landed, the round-trip tests get to run against the same
+  storage path real users will hit at scale.
+- **Re-evaluate the shared writer-helper factor.** v1.5-#3 JOURNAL
+  flagged a `builders._writer_common.NodeMerger` once a third builder
+  needs the same Cypher. Py now imports five private names from
+  `sv.writer`. If the v1.7 builder is on the table, this is the moment
+  to lift those into `builders/_writer_common.py` with public names.
