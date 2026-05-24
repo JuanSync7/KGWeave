@@ -160,40 +160,82 @@ _COMP_FORM_BY_TYPE: dict[type, str] = {
 }
 
 
-class _ComprehensionFinder(cst.CSTVisitor):
-    """Collect (node, form) for every comprehension expression in a subtree.
+class _ScopedComprehensionFinder(cst.CSTVisitor):
+    """Collect (comp_node, form, parent_cst) honouring lexical scopes.
 
-    Comprehensions are scope-creating in Python 3 (PEP 3104 +
-    list-comp parity), so we surface them as their own kind. The
-    form discriminates list / set / dict / generator without forcing
-    the consumer to inspect the CST type.
+    Maintains a stack whose top is the nearest enclosing scope-creating
+    CST node: the Module (sentinel), any FunctionDef / ClassDef, or any
+    comprehension on the way down. Each comprehension records its parent
+    as that current top-of-stack so consumers can reattach parent_idx to
+    the surrounding function / class / outer comp rather than to the
+    module wholesale.
+
+    The visitor traverses the *entire* module in one pass; recording is
+    cheap and avoids re-walking subtrees once per scope.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, module: cst.Module) -> None:
         super().__init__()
-        self.found: list[tuple[cst.CSTNode, str]] = []
+        self._stack: list[cst.CSTNode] = [module]
+        self.found: list[tuple[cst.CSTNode, str, cst.CSTNode]] = []
+
+    def _push(self, node: cst.CSTNode) -> None:
+        self._stack.append(node)
+
+    def _pop(self, node: cst.CSTNode) -> None:  # noqa: ARG002
+        self._stack.pop()
 
     def _record(self, node: cst.CSTNode) -> None:
         form = _COMP_FORM_BY_TYPE.get(type(node))
         if form is not None:
-            self.found.append((node, form))
+            self.found.append((node, form, self._stack[-1]))
+
+    def visit_FunctionDef(self, node: cst.FunctionDef) -> None:
+        self._push(node)
+
+    def leave_FunctionDef(self, original_node: cst.FunctionDef) -> None:
+        self._pop(original_node)
+
+    def visit_ClassDef(self, node: cst.ClassDef) -> None:
+        self._push(node)
+
+    def leave_ClassDef(self, original_node: cst.ClassDef) -> None:
+        self._pop(original_node)
 
     def visit_ListComp(self, node: cst.ListComp) -> None:
         self._record(node)
+        self._push(node)
+
+    def leave_ListComp(self, original_node: cst.ListComp) -> None:
+        self._pop(original_node)
 
     def visit_SetComp(self, node: cst.SetComp) -> None:
         self._record(node)
+        self._push(node)
+
+    def leave_SetComp(self, original_node: cst.SetComp) -> None:
+        self._pop(original_node)
 
     def visit_DictComp(self, node: cst.DictComp) -> None:
         self._record(node)
+        self._push(node)
+
+    def leave_DictComp(self, original_node: cst.DictComp) -> None:
+        self._pop(original_node)
 
     def visit_GeneratorExp(self, node: cst.GeneratorExp) -> None:
         self._record(node)
+        self._push(node)
+
+    def leave_GeneratorExp(self, original_node: cst.GeneratorExp) -> None:
+        self._pop(original_node)
 
 
-def _find_comprehensions(subtree: cst.CSTNode) -> list[tuple[cst.CSTNode, str]]:
-    f = _ComprehensionFinder()
-    subtree.visit(f)
+def _find_comprehensions_scoped(
+    module: cst.Module,
+) -> list[tuple[cst.CSTNode, str, cst.CSTNode]]:
+    f = _ScopedComprehensionFinder(module)
+    module.visit(f)
     return f.found
 
 
@@ -242,6 +284,12 @@ def lift_python(content: bytes) -> list[PyNode]:
     module = wrapper.module
 
     nodes: list[PyNode] = []
+    # Map CST node identity -> index in ``nodes``. Populated as we
+    # emit PyModule / PyFunction / PyClass / PyComprehension so that
+    # the scoped comprehension pass can resolve parent_idx by looking
+    # up its CST-level parent (nearest enclosing function / class /
+    # outer comprehension / module).
+    cst_to_idx: dict[int, int] = {}
     module_payload: dict[str, object] = {}
     all_exports = _extract_dunder_all(module)
     if all_exports is not None:
@@ -257,6 +305,7 @@ def lift_python(content: bytes) -> list[PyNode]:
             payload=module_payload,
         )
     )
+    cst_to_idx[id(module)] = 0
 
     def _emit_def_or_class(node: cst.CSTNode, parent_idx: int) -> None:
         """Recursive walk for FunctionDef / ClassDef bodies."""
@@ -291,6 +340,7 @@ def lift_python(content: bytes) -> list[PyNode]:
             )
         )
         this_idx = len(nodes) - 1
+        cst_to_idx[id(node)] = this_idx
         # Function bodies may contain `match` statements at any depth.
         # Lift each as PyMatchStatement parented under this def/class.
         if isinstance(node, cst.FunctionDef):
@@ -414,24 +464,39 @@ def lift_python(content: bytes) -> list[PyNode]:
         # Anything else (other If, For, Try, ...) is intentionally skipped
         # in v1.
 
-    # Whole-module comprehension sweep. We attach to the module node
-    # (parent_idx=0) rather than walking the function-by-function scope
-    # chain — the comprehension's byte span is enough for a consumer to
-    # locate the enclosing scope via interval lookup.
-    for comp_node, form in _find_comprehensions(module):
+    # Scope-aware comprehension sweep (v1.7-#2). Each PyComprehension
+    # attaches to its nearest enclosing scope-creating CST node:
+    # PyFunction / PyClass / outer PyComprehension, or PyModule when
+    # the comprehension is at module top level. Walk source order so
+    # outer comps land in ``cst_to_idx`` before their inner peers ask
+    # for them.
+    scoped = _find_comprehensions_scoped(module)
+    scoped.sort(
+        key=lambda triple: (
+            (spans.get(triple[0]).start if spans.get(triple[0]) else 0),
+            -(spans.get(triple[0]).length if spans.get(triple[0]) else 0),
+        )
+    )
+    for comp_node, form, parent_cst in scoped:
         csp = spans.get(comp_node)
         if csp is None:
             continue
+        # Resolve parent: nearest enclosing emitted node. If the
+        # CST-level parent is a scope we didn't emit (e.g. a class
+        # body that we DID emit, or a nested comp we just emitted),
+        # the map already has it; otherwise fall back to PyModule.
+        parent_idx = cst_to_idx.get(id(parent_cst), 0)
         nodes.append(
             PyNode(
                 kind="PyComprehension",
                 start=csp.start,
                 end=csp.start + csp.length,
                 name="",
-                parent_idx=0,
+                parent_idx=parent_idx,
                 payload={"form": form},
             )
         )
+        cst_to_idx[id(comp_node)] = len(nodes) - 1
 
     return nodes
 
