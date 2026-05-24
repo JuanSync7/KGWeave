@@ -727,3 +727,80 @@ fixture builds.
   failures (md/sv fixture pollution, see v1.5-#2 entry) and the Kuzu
   shared-store teardown segfault on `test_origin_gc.py`. Neither caused by
   v1.5-#3; both should be picked up before the next slate.
+
+---
+
+## 2026-05-24 — v1.6-#1 — md<->sv promote-cache pollution
+**Branch / commit:** `kgweave/kuzu-port` @ `8c7ba57` (3 commits on top of v1.6 charter `5128ef5`)
+
+### What we did
+- **G1 diagnose.** Reproduced the failure deterministically:
+  running `tests/.../builders/md/test_isolation_i7.py` before
+  `tests/.../builders/sv/legacy_tests/rules/test_types.py` flips the
+  `imports` edges from `fifo` module to the `_unresolved.fifo_pkg`
+  placeholder. Root cause: `tests/.../builders/sv/corpus/` is a SYMLINK
+  to `tests/.../fixtures/sv/`, so MD's `extract(source="sv", paths=[fifo,
+  fifo_pkg])` and the legacy `build_kg([fifo_pkg, fifo])` resolve to
+  IDENTICAL `(uri, sha)` pairs. `compute_corpus_fp` was hashing the
+  SORTED list, collapsing the two file orderings to one cache key.
+  SV promote is order-sensitive (pass1-of-pkg must populate the
+  cross-file name_index before pass2-of-fifo consults it), so the
+  reversed-order replay rewired real `imports` edges to the
+  `_unresolved.<pkg>` placeholder.
+- **G2 red.** Added `tests/knowledge_graph/builders/test_md_sv_lift_cache_order.py`
+  with two regression tests (one full-pipeline, one direct contract on
+  `compute_corpus_fp`). Plus the 3 existing SV legacy tests
+  (`test_s32_wildcard_import_edge_from_fifo`, `test_s32_explicit_item_import_edge_from_fifo`,
+  `test_s50_does_not_disturb_s32_imports_edges`) all fail when run after MD.
+  Red baseline: 5 failures. Sha `15306fb`.
+- **G3 green.** One-line fix in
+  `src/knowledge_graph/builders/sv/semantic/promote_cache.py`:
+  drop `sorted(files)` in `compute_corpus_fp`, hash the list as-given.
+  All 5 red tests turn green. Sha `12e2f80`.
+- **G5 housekeeping.** Flipped the companion unit test
+  `tests/.../sv/test_promote_cache.py::test_compute_corpus_fp_is_order_independent`
+  → `test_compute_corpus_fp_is_order_sensitive` to assert the new
+  contract. Sha `8c7ba57`.
+- **G4 order-independence.** `pytest md-first sv-first` and
+  `pytest sv-first md-first` both green at 63/63 each.
+- **G5 dir-scoped regression.** `builders/sv/` 716 pass, `builders/md/`
+  5 pass, `_meta/` 19 pass (+1 pre-existing skip).
+- **G6 perf floors.** `facade/test_quickstart_perf.py` 1 pass in 3.07s
+  (budget 10 s). `builders/sv/test_writer_perf.py` 2 pass in 2.56s
+  (N=1000 floor 3 s).
+
+### Lessons learnt
+- **Symlinks inside fixture trees are a quiet correctness hazard for
+  any uri-keyed cache** — *`tests/.../builders/sv/corpus -> ../../fixtures/sv`
+  was the seed of the whole bug. `Path.resolve()` collapses the symlink,
+  so two ostensibly-distinct test trees collide on `(uri, sha)` keys
+  inside in-process caches. If we ever land an on-disk cache, the same
+  hazard would survive across pytest sessions.*
+- **The charter underspecified the failure shape** — *the language said
+  "lift cache returns the wrong root kind", but the root kinds were
+  actually correct; the bug was in the PROMOTE cache, not the lift
+  cache, and it manifested as wrong edge dst (real-node vs synthetic
+  unresolved placeholder), not wrong node type. Diagnose first, fix the
+  fix shape suggested by the charter only if it survives diagnosis.*
+- **"order doesn't matter for a fingerprint" is a load-bearing
+  assumption that needs to be tested against dispatch behaviour, not
+  just against the file set** — *the previous `compute_corpus_fp`
+  sort-then-hash looked obviously correct on paper. It wasn't, because
+  SV promote dispatch encodes order in its outputs. Any cache key for
+  an order-sensitive function must encode order.*
+
+### Next moves
+- **v1.6-#2 — `test_origin_gc.py` Kuzu C++ teardown segfault.** Next on
+  the v1.6 slate. Reproduce in isolation, diagnose teardown ordering vs
+  DETACH DELETE Kuzu bug. Currently 16 deselected tests.
+- **Audit the lift cache for the same class of bug.** The lift cache
+  key is `(uri, sha, id_prefix)` and lift is genuinely pure per-file
+  (no cross-file state), so it should be safe — but worth a 10-minute
+  read to confirm there's no implicit cross-file invariant baked into a
+  lift rule.
+- **Symlink hygiene in test trees.** Consider either (a) deleting the
+  `builders/sv/corpus` symlink and updating the legacy tests' `HERE`
+  path to `tests/knowledge_graph/fixtures/sv` directly, or (b) keeping
+  it but adding a docs/tests note that `Path.resolve()`-based cache
+  keys collide across the symlinked tree. (a) is simpler; (b) preserves
+  the existing fixture-discovery layout the legacy tests assume.
