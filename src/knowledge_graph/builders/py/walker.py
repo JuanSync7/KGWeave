@@ -152,6 +152,51 @@ def _has_walrus(subtree: cst.CSTNode) -> bool:
     return f.found
 
 
+_COMP_FORM_BY_TYPE: dict[type, str] = {
+    cst.ListComp: "list",
+    cst.SetComp: "set",
+    cst.DictComp: "dict",
+    cst.GeneratorExp: "generator",
+}
+
+
+class _ComprehensionFinder(cst.CSTVisitor):
+    """Collect (node, form) for every comprehension expression in a subtree.
+
+    Comprehensions are scope-creating in Python 3 (PEP 3104 +
+    list-comp parity), so we surface them as their own kind. The
+    form discriminates list / set / dict / generator without forcing
+    the consumer to inspect the CST type.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.found: list[tuple[cst.CSTNode, str]] = []
+
+    def _record(self, node: cst.CSTNode) -> None:
+        form = _COMP_FORM_BY_TYPE.get(type(node))
+        if form is not None:
+            self.found.append((node, form))
+
+    def visit_ListComp(self, node: cst.ListComp) -> None:
+        self._record(node)
+
+    def visit_SetComp(self, node: cst.SetComp) -> None:
+        self._record(node)
+
+    def visit_DictComp(self, node: cst.DictComp) -> None:
+        self._record(node)
+
+    def visit_GeneratorExp(self, node: cst.GeneratorExp) -> None:
+        self._record(node)
+
+
+def _find_comprehensions(subtree: cst.CSTNode) -> list[tuple[cst.CSTNode, str]]:
+    f = _ComprehensionFinder()
+    subtree.visit(f)
+    return f.found
+
+
 def _extract_dunder_all(module: cst.Module) -> list[str] | None:
     """Return the literal ``__all__`` list at module scope, if present.
 
@@ -368,6 +413,25 @@ def lift_python(content: bytes) -> list[PyNode]:
                     _emit_simple_stmt(inner, runtime=False)
         # Anything else (other If, For, Try, ...) is intentionally skipped
         # in v1.
+
+    # Whole-module comprehension sweep. We attach to the module node
+    # (parent_idx=0) rather than walking the function-by-function scope
+    # chain — the comprehension's byte span is enough for a consumer to
+    # locate the enclosing scope via interval lookup.
+    for comp_node, form in _find_comprehensions(module):
+        csp = spans.get(comp_node)
+        if csp is None:
+            continue
+        nodes.append(
+            PyNode(
+                kind="PyComprehension",
+                start=csp.start,
+                end=csp.start + csp.length,
+                name="",
+                parent_idx=0,
+                payload={"form": form},
+            )
+        )
 
     return nodes
 
