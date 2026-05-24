@@ -112,6 +112,29 @@ def _decorator_strings(
     return out
 
 
+class _MatchFinder(cst.CSTVisitor):
+    """Collect every ``cst.Match`` node reachable from a subtree.
+
+    Bare ``cst.matchers``-free traversal — we just need the nodes
+    themselves so the caller can resolve byte spans through the
+    metadata provider. Used to lift PyMatchStatement inside function
+    bodies (top-level match is handled directly in the module loop).
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.matches: list[cst.Match] = []
+
+    def visit_Match(self, node: cst.Match) -> None:
+        self.matches.append(node)
+
+
+def _find_match_statements(subtree: cst.CSTNode) -> list[cst.Match]:
+    finder = _MatchFinder()
+    subtree.visit(finder)
+    return finder.matches
+
+
 def _extract_dunder_all(module: cst.Module) -> list[str] | None:
     """Return the literal ``__all__`` list at module scope, if present.
 
@@ -205,6 +228,23 @@ def lift_python(content: bytes) -> list[PyNode]:
             )
         )
         this_idx = len(nodes) - 1
+        # Function bodies may contain `match` statements at any depth.
+        # Lift each as PyMatchStatement parented under this def/class.
+        if isinstance(node, cst.FunctionDef):
+            for match_node in _find_match_statements(node.body):
+                msp = spans.get(match_node)
+                if msp is None:
+                    continue
+                nodes.append(
+                    PyNode(
+                        kind="PyMatchStatement",
+                        start=msp.start,
+                        end=msp.start + msp.length,
+                        name="",
+                        parent_idx=this_idx,
+                        payload={},
+                    )
+                )
         # Recurse into the body looking for nested def/class. Imports
         # nested inside a function are NOT lifted in v1 (charter scope).
         for child in node.body.body:
@@ -290,6 +330,19 @@ def lift_python(content: bytes) -> list[PyNode]:
             _emit_simple_stmt(stmt, runtime=True)
         elif isinstance(stmt, (cst.FunctionDef, cst.ClassDef)):
             _emit_def_or_class(stmt, 0)
+        elif isinstance(stmt, cst.Match):
+            msp = spans.get(stmt)
+            if msp is not None:
+                nodes.append(
+                    PyNode(
+                        kind="PyMatchStatement",
+                        start=msp.start,
+                        end=msp.start + msp.length,
+                        name="",
+                        parent_idx=0,
+                        payload={},
+                    )
+                )
         elif isinstance(stmt, cst.If) and _is_type_checking_test(stmt.test):
             # Imports under ``if TYPE_CHECKING:`` are runtime=False.
             for inner in stmt.body.body:
