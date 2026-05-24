@@ -272,13 +272,24 @@ def test_warm_extract_under_budget():
 # ---------------------------------------------------------------------------
 
 
-def test_compute_corpus_fp_is_order_independent():
-    """``compute_corpus_fp`` must hash the sorted set of (uri, sha) pairs."""
+def test_compute_corpus_fp_is_order_sensitive():
+    """v1.6-#1: ``compute_corpus_fp`` must hash the (uri, sha) list **in
+    order**. SV promote dispatch is order-sensitive (pass1 populates the
+    cross-file name_index before any pass2 consults it), so the same set
+    of files in different orders can produce different graphs. The cache
+    key must reflect that — otherwise a reversed-order call hits a stale
+    cache entry and replays the wrong-order delta (the md<->sv pollution
+    bug fixed in v1.6-#1).
+    """
     fp1 = pc.compute_corpus_fp([("a", "1"), ("b", "2")])
     fp2 = pc.compute_corpus_fp([("b", "2"), ("a", "1")])
-    assert fp1 == fp2
+    assert fp1 != fp2, "different orderings must produce different fingerprints"
+    # Different content still produces a different fp at fixed order.
     fp3 = pc.compute_corpus_fp([("a", "1"), ("b", "3")])
     assert fp3 != fp1
+    # Same list yields same fp (deterministic).
+    fp4 = pc.compute_corpus_fp([("a", "1"), ("b", "2")])
+    assert fp4 == fp1
 
 
 def test_compute_ruleset_fp_stable_within_process():
