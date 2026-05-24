@@ -1346,3 +1346,147 @@ consumers control which derived edges/tags get materialised.
   consumer hits the false negative. The walker already preserves
   the `PyImport` rows, so a follow-up connector can build that map
   by reading the same store.
+
+## v1.7-#5 retro — lambda capture analysis
+
+### What we did
+- New `PyLambda` walker kind with byte-precise spans and a scope-aware
+  `parent_idx` that points at the nearest enclosing CST scope
+  (Module / FunctionDef / ClassDef / outer Lambda / Comprehension).
+- Capture extraction as a payload list `captures: list[str]` — the
+  free-variable set referenced inside the lambda body that is NOT a
+  parameter of the lambda itself.
+- Fixture `lambdas_capture.py` covers six emission cases plus the
+  seventh nested-inner lambda: no-cap, params-only, outer-local
+  capture, module-name capture, method self-capture, and the inner of
+  a `lambda x: (lambda y: x+y)` correctly capturing `x`.
+
+### Scope handling
+Reused the v1.7-#2 scope-stack pattern verbatim — a `cst.CSTVisitor`
+maintains a stack whose top is the nearest enclosing scope-creating
+node, pushed on `visit_FunctionDef` / `ClassDef` / each comprehension
+type / `Lambda` and popped on the matching `leave_*`. Each `cst.Lambda`
+records its parent-of-emission moment alongside the current stack
+top. Emission order is (start asc, length desc) so an outer
+`PyLambda` lands in `cst_to_idx` before its nested children look up
+their parent — same recipe as comprehensions.
+
+Lambdas are emitted AFTER comprehensions for the symmetric reason:
+a lambda nested inside a comprehension should parent on that
+`PyComprehension` idx, which only exists once the comprehension pass
+has run.
+
+### Captures algorithm
+Deliberate heuristic for v1.7 — full static-scope resolution is
+queued for v1.8+.
+
+1. Recursive descent over `lambda.body` collecting `cst.Name` loads.
+2. Skip rules during the descent:
+   - `cst.Attribute`: descend into `.value` (the receiver) only.
+     `self.attr` contributes `self`, never `attr`.
+   - `cst.Arg`: descend into `.value` only; `keyword` Names are not
+     name loads.
+   - `cst.Lambda`: do NOT descend. Each nested lambda is emitted in
+     its own right, and its parameter list correctly masks names
+     that would otherwise bleed up into the outer's capture set.
+3. Subtract the lambda's own parameter identifiers — gathered from
+   `posonly_params`, `params`, `kwonly_params`, plus `star_arg` (when
+   it is a real `Param`, not a sentinel) and `star_kwarg`.
+4. Sort the leftover set for deterministic payload ordering.
+
+The walker does NOT verify those captures actually resolve to a name
+bound in some enclosing scope. A lambda referencing an undefined
+`zoo` would still report `captures=["zoo"]`. That's by design — the
+walker is structural, name resolution is a connector concern.
+
+### Lessons learnt
+- **Stack pattern compounds.** v1.7-#2 introduced the scope stack
+  for comprehensions; v1.7-#5 reused it for free with two extra
+  visit/leave pairs (`Lambda`, all four comprehension types as scope
+  sentinels even when we don't emit anything new for them). The
+  abstraction was the right granularity — no rewrite needed.
+- **Skip rules are easier to encode in a hand-rolled descent than
+  in a CSTVisitor.** Tried `visit_Attribute_attr`-style hooks first
+  per the libcst docs — they don't suppress the recursive `visit_Name`
+  on the skipped subtree the way I expected. A 10-line recursive
+  function with explicit `if isinstance(...)` early-returns is
+  clearer and demonstrably correct against the fixture.
+- **Pass-through scopes still need the visit/leave pair.** The
+  ClassDef visit hooks don't emit anything for the lambda finder,
+  but they DO need to push/pop the stack — otherwise a method-body
+  lambda would parent at the enclosing function correctly only when
+  the enclosing class is itself top-level. Easy oversight; caught by
+  fixture case 5.
+
+### Next moves
+- **Capture resolution against actual lexical scopes (v1.8+).** Today
+  every leftover Name is a capture. The "true" definition is: free
+  variables that resolve to a binding in some enclosing scope. Needs
+  a static-scope pass that knows about `nonlocal`, `global`, comp
+  scopes, walrus targets. Walker is the wrong layer; queue as a
+  connector that reads the existing `PyLambda` rows + an as-yet-built
+  scope index.
+- **Metaclass detection, descriptor protocol** — still queued.
+- **Conditional imports beyond TYPE_CHECKING** — still queued.
+- **Builder #4 (another language)** — unblocked by v1.7-#1's
+  `_writer_common` lift. Pick when there's a consumer.
+- **Alias-aware decorator promotion** — see v1.7-#4 follow-up note.
+
+## v1.7 closing summary
+
+v1.7 set out to add walker depth, refactor the writer commons before
+the next builder lands, and add the first connector that interprets
+decorators rather than just recording them. Five items, all shipped.
+
+### Commits
+
+| Slate item | RED | GREEN | Retro |
+|---|---|---|---|
+| Charter | — | — | `8057d89` |
+| #1 _writer_common lift | `7e590f1` | `691fcf4` | `ae1dc68` |
+| #2 comprehension scope-chain | `fd1bea5` | `dac1a2d` | `0575039` |
+| #3 match-case arm payload | `31877c2` | `5077a4c` | `6a58c9c` |
+| #4 decorator-aware connector | `79754be` | `e131e41` | `60a0038` |
+| #5 lambda capture analysis | `f11f771` | `12f1a18` | this commit |
+
+### What shipped
+- `src/knowledge_graph/builders/_writer_common.py` lifted from the SV
+  writer's private surface; Py writer rewired to import from it. No
+  cross-builder private-name imports remain.
+- `PyComprehension.parent_idx` resolves to nearest lexical scope, not
+  unconditionally to `PyModule`. Enabled by a reusable scope-stack
+  visitor pattern.
+- `PyMatchStatement.payload["arms"]` carries per-arm pattern_kind,
+  bound_names, and has_guard for narrowing-aware connectors.
+- `PyDecoratorSemanticsConnector` promotes `@dataclass`, `@property`,
+  and `@pytest.fixture` to `semantic_role` tags on the underlying
+  PyClass / PyFunction without polluting the walker.
+- `PyLambda` kind with scope-aware parent and heuristic capture set;
+  reused the v1.7-#2 scope-stack pattern.
+
+### Validation
+Every slate item shipped RED-before-GREEN. Each commit kept the
+relevant dir-scoped suite at zero failures. All perf floors held end
+to end: quickstart ≤ 10 s, SV writer N=1000 ≤ 3 s, Py writer N=1000
+≤ 6 s. The v1.4 meta tests stayed green throughout.
+
+### Lessons that travelled across slate items
+- **Refactor first wins.** Doing #1 before any walker work meant
+  every subsequent commit had a clean writer surface to extend
+  without three-way private imports. The mechanical extract was the
+  cheapest commit in the whole slate.
+- **Scope-stack pattern is reusable infrastructure.** Introduced in
+  #2 for comprehensions, paid dividends in #5 for lambdas. Resist
+  the temptation to inline ad-hoc parent-resolution per-kind.
+- **Connector-time interpretation > walker-time interpretation.**
+  #4 demonstrated that decorator semantics belong in a connector,
+  not in the walker. The walker stays a structural mirror of the
+  AST; connectors layer derived meaning on top.
+
+### Out of scope, queued for v1.8+
+- Metaclass detection, descriptor protocol.
+- Conditional imports beyond `TYPE_CHECKING`.
+- Capture resolution against actual lexical scopes (from #5).
+- Alias-aware decorator promotion (from #4 follow-up).
+- Builder #4 in a new language.
+- CI disk-budget guard.
