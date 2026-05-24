@@ -179,65 +179,89 @@ def lift_python(content: bytes) -> list[PyNode]:
             if isinstance(inner, (cst.FunctionDef, cst.ClassDef)):
                 _emit_def_or_class(inner, this_idx)
 
+    def _emit_simple_stmt(
+        stmt: cst.SimpleStatementLine, *, runtime: bool
+    ) -> None:
+        """Emit PyImport / PyTypeAlias for each small statement in ``stmt``.
+
+        ``runtime=False`` is used for the body of an ``if TYPE_CHECKING:``
+        block — imports there are only valid for type-checkers and must
+        not be issued at runtime.
+        """
+        for small in stmt.body:
+            if isinstance(small, cst.TypeAlias):
+                sp = spans.get(stmt)
+                if sp is None:
+                    continue
+                nodes.append(
+                    PyNode(
+                        kind="PyTypeAlias",
+                        start=sp.start,
+                        end=sp.start + sp.length,
+                        name=small.name.value,
+                        parent_idx=0,
+                        payload={},
+                    )
+                )
+                continue
+            if isinstance(small, (cst.Import, cst.ImportFrom)):
+                sp = spans.get(stmt)
+                if sp is None:
+                    continue
+                if isinstance(small, cst.Import):
+                    names = _import_aliases(small)
+                    primary = names[0] if names else ""
+                    payload: dict[str, object] = {
+                        "names": names,
+                        "kind": "import",
+                        "runtime": runtime,
+                    }
+                else:
+                    names = _from_import_names(small)
+                    module_name = (
+                        _dotted_name(small.module)
+                        if small.module is not None
+                        else ""
+                    )
+                    primary = module_name
+                    payload = {
+                        "names": names,
+                        "module": module_name,
+                        "kind": "from",
+                        "level": small.relative and len(small.relative) or 0,
+                        "runtime": runtime,
+                    }
+                nodes.append(
+                    PyNode(
+                        kind="PyImport",
+                        start=sp.start,
+                        end=sp.start + sp.length,
+                        name=primary,
+                        parent_idx=0,
+                        payload=payload,
+                    )
+                )
+
+    def _is_type_checking_test(expr: cst.BaseExpression) -> bool:
+        """Recognise ``TYPE_CHECKING`` and ``typing.TYPE_CHECKING`` tests."""
+        if isinstance(expr, cst.Name) and expr.value == "TYPE_CHECKING":
+            return True
+        if isinstance(expr, cst.Attribute) and expr.attr.value == "TYPE_CHECKING":
+            return True
+        return False
+
     for stmt in module.body:
         if isinstance(stmt, cst.SimpleStatementLine):
-            # A SimpleStatementLine wraps one or more small statements.
-            # We care about Import / ImportFrom.
-            for small in stmt.body:
-                if isinstance(small, cst.TypeAlias):
-                    sp = spans.get(stmt)
-                    if sp is None:
-                        continue
-                    nodes.append(
-                        PyNode(
-                            kind="PyTypeAlias",
-                            start=sp.start,
-                            end=sp.start + sp.length,
-                            name=small.name.value,
-                            parent_idx=0,
-                            payload={},
-                        )
-                    )
-                    continue
-                if isinstance(small, (cst.Import, cst.ImportFrom)):
-                    sp = spans.get(stmt)
-                    if sp is None:
-                        continue
-                    if isinstance(small, cst.Import):
-                        names = _import_aliases(small)
-                        primary = names[0] if names else ""
-                        payload: dict[str, object] = {
-                            "names": names,
-                            "kind": "import",
-                        }
-                    else:
-                        names = _from_import_names(small)
-                        module_name = (
-                            _dotted_name(small.module)
-                            if small.module is not None
-                            else ""
-                        )
-                        primary = module_name
-                        payload = {
-                            "names": names,
-                            "module": module_name,
-                            "kind": "from",
-                            "level": small.relative and len(small.relative) or 0,
-                        }
-                    nodes.append(
-                        PyNode(
-                            kind="PyImport",
-                            start=sp.start,
-                            end=sp.start + sp.length,
-                            name=primary,
-                            parent_idx=0,
-                            payload=payload,
-                        )
-                    )
+            _emit_simple_stmt(stmt, runtime=True)
         elif isinstance(stmt, (cst.FunctionDef, cst.ClassDef)):
             _emit_def_or_class(stmt, 0)
-        # Anything else (If, For, Try, decorators, async, ...) is
-        # intentionally skipped in v1.
+        elif isinstance(stmt, cst.If) and _is_type_checking_test(stmt.test):
+            # Imports under ``if TYPE_CHECKING:`` are runtime=False.
+            for inner in stmt.body.body:
+                if isinstance(inner, cst.SimpleStatementLine):
+                    _emit_simple_stmt(inner, runtime=False)
+        # Anything else (other If, For, Try, ...) is intentionally skipped
+        # in v1.
 
     return nodes
 
