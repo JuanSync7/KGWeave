@@ -120,13 +120,25 @@ def _sha256_hex_str(s: str) -> str:
 
 
 def compute_corpus_fp(files: list[tuple[str, str]]) -> str:
-    """Fingerprint a corpus as the sha256 of its sorted ``(uri, sha)`` list.
+    """Fingerprint a corpus as the sha256 of its ordered ``(uri, sha)`` list.
 
-    Any change to a file's bytes (sha) or to the set of participating
-    files / uris flips this fingerprint, invalidating every cached entry
-    that referenced the old corpus state.
+    Any change to a file's bytes (sha), to the set of participating files
+    / uris, OR to the **order** they were presented in flips this
+    fingerprint, invalidating every cached entry that referenced the old
+    corpus state.
+
+    Order matters: SV promote dispatch is order-sensitive — pass1 of file
+    N populates the cross-file ``semantic_name_index`` BEFORE pass2 of any
+    file consults it. The same set of files presented in different orders
+    can produce different ``imports`` / ``of_module`` / ``references_*``
+    edges (a file imported by another file that hasn't been pass1'd yet
+    lands on a synthetic ``_unresolved.<name>`` placeholder). v1.6-#1
+    surfaced this as the md<->sv test-isolation pollution: hashing a
+    sorted list collapsed the two orderings to the same key, so a cache
+    hit replayed the wrong-order delta. The fix is to hash the list
+    AS-GIVEN.
     """
-    payload = json.dumps(sorted(files), sort_keys=True, separators=(",", ":"))
+    payload = json.dumps(list(files), separators=(",", ":"))
     return _sha256_hex_str(payload)
 
 
