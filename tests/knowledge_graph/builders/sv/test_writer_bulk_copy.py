@@ -2,7 +2,7 @@
 
 v1.5-#2 replaced the per-row ``conn.execute(MERGE ...)`` loop in
 :func:`write_graph` with a Kuzu ``COPY FROM`` bulk path when the row
-count is at or above :data:`_BULK_COPY_MIN_ROWS`. These tests pin the
+count is at or above :data:`BULK_COPY_MIN_ROWS`. These tests pin the
 two semantic invariants that the bulk path must preserve:
 
 * **Replacement-merge** (G2): writing the same ``(uri, source, corpus)``
@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from knowledge_graph.builders.sv import write_graph
-from knowledge_graph.builders.sv.writer import _BULK_COPY_MIN_ROWS
+from knowledge_graph.builders._writer_common import BULK_COPY_MIN_ROWS
 from knowledge_graph.store import KGStore
 
 
@@ -58,14 +58,14 @@ def test_bulk_path_replaces_same_key_with_new_content(tmp_path: Path) -> None:
     """Writing the same (uri, source, corpus) twice with different ``kind`` on
     each node keeps only the second write's content -- no duplicates, no
     stale rows from the first write. Exercises the bulk path by writing
-    ``_BULK_COPY_MIN_ROWS`` nodes so the COPY branch is taken (not the
+    ``BULK_COPY_MIN_ROWS`` nodes so the COPY branch is taken (not the
     sub-threshold per-row fallback)."""
     store = KGStore.open(tmp_path / "kg.kuzu")
     f = tmp_path / "x.sv"
     f.write_text("module x; endmodule\n")
     origin = store.snapshot_file(f, source="sv", corpus="bulk")
 
-    n = _BULK_COPY_MIN_ROWS
+    n = BULK_COPY_MIN_ROWS
     g1 = _graph_for("x", n, kind="FIRST")
     write_graph(store, g1, source="sv", corpus="bulk", origins={"x": origin})
 
@@ -100,7 +100,7 @@ def test_bulk_path_materialises_unresolved_placeholder(tmp_path: Path) -> None:
     f.write_text("module x; endmodule\n")
     origin = store.snapshot_file(f, source="sv", corpus="bulk")
 
-    n = _BULK_COPY_MIN_ROWS
+    n = BULK_COPY_MIN_ROWS
     g = _graph_for("x", n)
     # Append an edge to an _unresolved.* endpoint; this placeholder is
     # NOT in graph['nodes'] and must be synthesized by write_graph.

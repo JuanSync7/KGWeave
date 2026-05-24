@@ -36,28 +36,20 @@ raise on the missing FK and abort the whole batch.
 
 from __future__ import annotations
 
-import csv
 import json
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+from knowledge_graph.builders._writer_common import (
+    BULK_COPY_MIN_ROWS,
+    NODE_CSV_COLUMNS,
+    copy_csv,
+    detach_delete_node_ids,
+    node_row_for_csv,
+)
 from knowledge_graph.schemas import OriginRef
-
-
-# v1.5-#2: row-count threshold above which write_graph switches from the
-# per-row Cypher MERGE loop to a Kuzu ``COPY FROM`` bulk path. Justified
-# by a micro-bench on this box (see ``tests/.../test_writer_perf.py``):
-# baseline per-row cost is ~10 ms/row across N=10/100/1000; the bulk path
-# pays a fixed CSV-serialise + flush + COPY-parse cost that only amortises
-# above ~100 rows. Below the threshold the per-row loop wins on overhead.
-_BULK_COPY_MIN_ROWS: int = 100
-
-# Node-PK chunk size for the pre-COPY DETACH DELETE. Kuzu accepts list
-# parameters, but very large lists slow the IN-list scan; 1000 keeps the
-# delete latency negligible for realistic batches (~10k nodes/file).
-_DELETE_CHUNK: int = 1000
 
 
 # Map from graph-dict edge ``type`` → (rel table name, payload-extractor).
@@ -483,71 +475,6 @@ def _resolve_origins_for_nodes(
     return resolved
 
 
-_NODE_CSV_COLUMNS: tuple[str, ...] = (
-    "id", "kind", "category", "name", "source", "corpus", "origin_id",
-    "start_offset", "end_offset", "start_line", "end_line",
-    "start_col", "end_col", "payload",
-)
-
-
-def _node_row_for_csv(params: dict[str, Any]) -> list[Any]:
-    """Project a :func:`_node_params` dict to a CSV row matching the
-    :data:`_NODE_CSV_COLUMNS` order. ``None`` is emitted as the empty
-    string -- Kuzu COPY treats unquoted empties as NULL for nullable
-    columns (``name`` is nullable; the other STRING columns are written
-    as concrete values upstream so the empty-as-NULL ambiguity does not
-    bite)."""
-    return [params[c] if params[c] is not None else "" for c in _NODE_CSV_COLUMNS]
-
-
-def _detach_delete_node_ids(conn: Any, ids: list[str]) -> None:
-    """DETACH DELETE the given Node IDs in chunks.
-
-    Run before the bulk COPY so the replacement-merge contract is
-    preserved without violating the COPY uniqueness constraint. DETACH
-    also wipes every incident REL row, which is what we want -- the
-    follow-up COPY of the typed REL tables replays them fresh.
-    """
-    if not ids:
-        return
-    for i in range(0, len(ids), _DELETE_CHUNK):
-        chunk = ids[i:i + _DELETE_CHUNK]
-        conn.execute(
-            "MATCH (n:Node) WHERE n.id IN $ids DETACH DELETE n",
-            {"ids": chunk},
-        )
-
-
-def _copy_csv(conn: Any, table: str, header: tuple[str, ...],
-              rows: list[list[Any]], tmpdir: Path) -> None:
-    """Write ``rows`` to a CSV under ``tmpdir`` and ``COPY <table> FROM`` it.
-
-    Empty ``rows`` is a no-op (COPY of zero records is wasted I/O and
-    Kuzu's parser still pays for it). The CSV writes the header row so
-    we can pass ``header=true`` to Kuzu and stay column-order-agnostic
-    on the writer side -- Kuzu still requires the column NAMES to match
-    the table schema."""
-    if not rows:
-        return
-    # Distinct file per call so concurrent REL COPYs (sequential here,
-    # but the per-table loop reuses tmpdir) don't collide.
-    fd, path = tempfile.mkstemp(prefix=f"copy_{table}_", suffix=".csv", dir=tmpdir)
-    try:
-        with open(fd, "w", newline="", encoding="utf-8") as fh:
-            w = csv.writer(fh)
-            w.writerow(header)
-            w.writerows(rows)
-        # Escape backslashes in the path for the Cypher literal (Windows
-        # paths would otherwise break; harmless on POSIX).
-        path_lit = path.replace("\\", "\\\\")
-        conn.execute(f"COPY {table} FROM '{path_lit}' (header=true)")
-    finally:
-        try:
-            Path(path).unlink()
-        except OSError:
-            pass
-
-
 def _write_graph_bulk(
     conn: Any,
     stats: WriteStats,
@@ -623,7 +550,7 @@ def _write_graph_bulk(
         params = _node_params(
             node, source=source, corpus=corpus, origin_id=origin.id
         )
-        node_rows.append(_node_row_for_csv(params))
+        node_rows.append(node_row_for_csv(params))
         in_origin_rows.append([nid, origin.id])
         stats.nodes_written += 1
 
@@ -640,7 +567,7 @@ def _write_graph_bulk(
                 {"type": "Unresolved", "placeholder": True}, sort_keys=True
             ),
         }
-        node_rows.append(_node_row_for_csv(params))
+        node_rows.append(node_row_for_csv(params))
         in_origin_rows.append([pid, origin.id])
         stats.placeholders_written += 1
         stats.in_origin_written += 1
@@ -681,17 +608,17 @@ def _write_graph_bulk(
     # DETACH DELETE clears old rows AND incident rels, so the REL COPYs
     # below land into an empty slice for this batch of IDs.
     all_node_ids = [n["id"] for n in nodes] + list(placeholder_origins.keys())
-    _detach_delete_node_ids(conn, all_node_ids)
+    detach_delete_node_ids(conn, all_node_ids)
 
     # CSVs live in a fresh tmpdir that's removed on success. Kept under
     # the OS temp root rather than the store dir so a partial failure
     # never leaves stray files inside the Kuzu database directory.
     with tempfile.TemporaryDirectory(prefix="kgweave_copy_") as td:
         tmpdir = Path(td)
-        _copy_csv(conn, "Node", _NODE_CSV_COLUMNS, node_rows, tmpdir)
-        _copy_csv(conn, "IN_ORIGIN", ("from", "to"), in_origin_rows, tmpdir)
+        copy_csv(conn, "Node", NODE_CSV_COLUMNS, node_rows, tmpdir)
+        copy_csv(conn, "IN_ORIGIN", ("from", "to"), in_origin_rows, tmpdir)
         for table, bucket in rel_buckets.items():
-            _copy_csv(conn, table, bucket["cols"], bucket["rows"], tmpdir)
+            copy_csv(conn, table, bucket["cols"], bucket["rows"], tmpdir)
 
     return stats
 
@@ -725,7 +652,7 @@ def write_graph(
     # v1.5-#2: above the threshold, dispatch to the bulk-COPY path.
     # Below it, the per-row INSERT loop wins on overhead (CSV serialise +
     # flush + COPY parse cost doesn't amortise on tiny batches).
-    if len(nodes) + len(edges) >= _BULK_COPY_MIN_ROWS:
+    if len(nodes) + len(edges) >= BULK_COPY_MIN_ROWS:
         return _write_graph_bulk(
             conn, stats, nodes, edges, order, origins, node_origin,
             source=source, corpus=corpus,

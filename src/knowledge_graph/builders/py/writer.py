@@ -25,16 +25,15 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from knowledge_graph.builders.py.walker import PyNode, lift_python
-from knowledge_graph.builders.sv.writer import (
-    _BULK_COPY_MIN_ROWS,
-    _NODE_CSV_COLUMNS,
-    _copy_csv,
-    _detach_delete_node_ids,
-    _node_row_for_csv,
-    ExtractStats,
-    WriteStats,
+from knowledge_graph.builders._writer_common import (
+    BULK_COPY_MIN_ROWS,
+    NODE_CSV_COLUMNS,
+    copy_csv,
+    detach_delete_node_ids,
+    node_row_for_csv,
 )
+from knowledge_graph.builders.py.walker import PyNode, lift_python
+from knowledge_graph.builders.sv.writer import ExtractStats, WriteStats
 from knowledge_graph.schemas import OriginRef
 
 
@@ -132,9 +131,9 @@ def _node_params_for_py(
     source: str,
     corpus: str,
 ) -> dict[str, Any]:
-    """Build the column-dict for one PyNode, shaped to ``_NODE_CSV_COLUMNS``
+    """Build the column-dict for one PyNode, shaped to ``NODE_CSV_COLUMNS``
     so the same row can feed either the per-row Cypher path or the bulk
-    CSV writer (:func:`_node_row_for_csv`)."""
+    CSV writer (:func:`node_row_for_csv`)."""
     sl, sc = _line_col(content, pn.start)
     el, ec = _line_col(content, pn.end)
     return {
@@ -200,7 +199,7 @@ def _write_py_bulk(
             pn, nid=nid, name=name, content=content,
             origin=origin, source=source, corpus=corpus,
         )
-        node_rows.append(_node_row_for_csv(params))
+        node_rows.append(node_row_for_csv(params))
         in_origin_rows.append([nid, origin.id])
         stats.nodes_written += 1
         stats.in_origin_written += 1
@@ -217,13 +216,13 @@ def _write_py_bulk(
             stats.edges_written.get("PARENT_OF", 0) + 1
         )
 
-    _detach_delete_node_ids(conn, list(id_by_index.values()))
+    detach_delete_node_ids(conn, list(id_by_index.values()))
 
     with tempfile.TemporaryDirectory(prefix="kgweave_py_copy_") as td:
         tmpdir = Path(td)
-        _copy_csv(conn, "Node", _NODE_CSV_COLUMNS, node_rows, tmpdir)
-        _copy_csv(conn, "IN_ORIGIN", ("from", "to"), in_origin_rows, tmpdir)
-        _copy_csv(conn, "PARENT_OF", ("from", "to", "ordinal"),
+        copy_csv(conn, "Node", NODE_CSV_COLUMNS, node_rows, tmpdir)
+        copy_csv(conn, "IN_ORIGIN", ("from", "to"), in_origin_rows, tmpdir)
+        copy_csv(conn, "PARENT_OF", ("from", "to", "ordinal"),
                   parent_rows, tmpdir)
 
     return stats
@@ -244,14 +243,14 @@ def write_py_graph(
     builder's :class:`WriteStats` so the facade's tuple-result contract
     holds without a parallel hierarchy (same call MD does).
 
-    v1.6-#4: above ``_BULK_COPY_MIN_ROWS`` PyNodes we dispatch to the
+    v1.6-#4: above ``BULK_COPY_MIN_ROWS`` PyNodes we dispatch to the
     bulk-COPY path (parity with the SV writer). Below it, per-row
     Cypher MERGE wins on overhead — see the SV writer's
-    ``_BULK_COPY_MIN_ROWS`` docstring for the amortisation reasoning.
+    ``BULK_COPY_MIN_ROWS`` docstring for the amortisation reasoning.
     """
     conn = store.conn
 
-    if len(py_nodes) >= _BULK_COPY_MIN_ROWS:
+    if len(py_nodes) >= BULK_COPY_MIN_ROWS:
         return _write_py_bulk(
             conn, py_nodes, content=content, origin=origin,
             source=source, corpus=corpus,
