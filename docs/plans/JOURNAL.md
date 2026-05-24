@@ -1115,3 +1115,61 @@ behavioural change, no API change at the facade.
   those into `_writer_common.py` too — but only when the second
   consumer materialises (YAGNI until then).
 
+
+
+## v1.7-#2 retro — PyComprehension scope-chain attribution
+
+**Commits:** `fd1bea5` (RED nested-comprehensions fixture + test) → `dac1a2d` (GREEN scoped finder + cst_to_idx parent resolution).
+
+### What we did
+Replaced the whole-module `_ComprehensionFinder` in
+`builders/py/walker.py` with `_ScopedComprehensionFinder`, which
+threads a scope stack through the libcst visit and records each
+comprehension together with its CST-level parent (Module /
+FunctionDef / ClassDef / outer comprehension). The walker now keeps a
+`cst_to_idx: dict[int, int]` map populated as PyModule, PyFunction,
+PyClass, and PyComprehension are emitted; the comprehension emission
+loop resolves `parent_idx` through that map. Comprehensions are sorted
+by `(start asc, length desc)` before emission so outer comps register
+in the map before nested children look up their parent.
+
+New fixture `tests/knowledge_graph/fixtures/py/comprehensions_nested.py`
+pins the four cases the bug ticket called out (module top-level, in
+function, nested-in-nested, in a method on a class). One new walker
+test in `test_kind_comprehensions.py` asserts all four parent-kind
+expectations.
+
+### Lessons learnt
+- **Sort by `(start asc, length desc)` is the trick that makes a
+  single emission pass safe for nested comprehensions.** Outer
+  expression starts at the same offset as its first inner expression
+  in many cases, so sorting purely by `start` ascending is ambiguous;
+  longer span first guarantees the outer lands in `cst_to_idx` before
+  the inner looks it up. If a future scope-creating node adds the same
+  pattern (e.g. nested match arms with bound names), the same
+  ordering trick applies.
+- **`id(cst_node)` as a dict key is fine because libcst nodes outlive
+  the walker call.** Both the `_ScopedComprehensionFinder` results and
+  the `cst_to_idx` map are populated within the single `lift_python`
+  call, so no node gets garbage-collected between recording and
+  lookup. Worth remembering if a future refactor splits the walker
+  into multiple passes that share state across function boundaries —
+  at that point we would need a stable key (e.g. byte span tuple).
+- **Class-scope comprehensions are a Python semantic trap that we
+  resolved correctly by accident.** Comprehensions defined directly
+  in a class body (rare but legal: `class C: xs = [i for i in
+  range(3)]`) do NOT see the class namespace at runtime — they get
+  their own scope whose enclosing scope is the surrounding function
+  or module, not the class. Our walker still parents them to the
+  PyClass for *lexical* attribution, which matches the source
+  structure rather than runtime name resolution. Documented here so
+  the next slate that wires up name-resolution connectors knows to
+  re-traverse, not just trust `parent_idx`.
+
+### Next moves
+- **v1.7-#3 (PyMatchStatement arm payload):** next charter item. The
+  scope-stack pattern from #2 is reusable there if we want to scope
+  pattern-bound names to their match arm. Size S.
+- **Optional follow-up:** add a `lexical_depth` payload field on
+  PyComprehension once a consumer wants O(1) scope-chain lookups
+  without walking `parent_idx`. YAGNI until that consumer exists.
