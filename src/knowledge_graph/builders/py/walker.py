@@ -135,6 +135,105 @@ def _find_match_statements(subtree: cst.CSTNode) -> list[cst.Match]:
     return finder.matches
 
 
+# v1.7-#3: per-arm classification for PyMatchStatement.
+#
+# Closed pattern_kind set (chosen once, see JOURNAL v1.7-#3 retro):
+#   literal | name | class | or | wildcard | sequence | mapping
+#
+# Mapping from libcst pattern node to pattern_kind:
+#   MatchValue, MatchSingleton          -> literal
+#   MatchOr                              -> or
+#   MatchClass                           -> class
+#   MatchList, MatchTuple                -> sequence
+#   MatchMapping                         -> mapping
+#   MatchAs(pattern=None, name=None)     -> wildcard  (the ``_`` case)
+#   MatchAs(pattern=None, name=Name)     -> name      (capture-only)
+#   MatchAs(pattern=X,    name=Name?)    -> classify X (and add ``as`` name)
+#   MatchStar                            -> name (capture inside a sequence)
+def _pattern_kind(pat: cst.BaseMatchPattern) -> str:
+    if isinstance(pat, cst.MatchAs):
+        if pat.pattern is None:
+            return "wildcard" if pat.name is None else "name"
+        return _pattern_kind(pat.pattern)
+    if isinstance(pat, (cst.MatchValue, cst.MatchSingleton)):
+        return "literal"
+    if isinstance(pat, cst.MatchOr):
+        return "or"
+    if isinstance(pat, cst.MatchClass):
+        return "class"
+    if isinstance(pat, (cst.MatchList, cst.MatchTuple)):
+        return "sequence"
+    if isinstance(pat, cst.MatchMapping):
+        return "mapping"
+    if isinstance(pat, cst.MatchStar):
+        return "name"
+    return "wildcard"
+
+
+def _collect_bound_names(pat: cst.BaseMatchPattern, out: list[str]) -> None:
+    """Collect names this pattern binds, in source order, deduped.
+
+    Walks all binding sites: ``MatchAs.name``, ``MatchStar.name``,
+    ``MatchClass`` positional + keyword sub-patterns, ``MatchMapping``
+    values + ``rest``, ``MatchList``/``MatchTuple`` sequence elements,
+    and ``MatchOr`` alternatives (PEP 634 requires all OR-alternatives
+    bind the same names; collecting from one alternative is enough,
+    but we walk all and dedupe to stay robust).
+    """
+    if isinstance(pat, cst.MatchAs):
+        if pat.name is not None and pat.name.value not in out:
+            out.append(pat.name.value)
+        if pat.pattern is not None:
+            _collect_bound_names(pat.pattern, out)
+        return
+    if isinstance(pat, cst.MatchStar):
+        if pat.name is not None and pat.name.value not in out:
+            out.append(pat.name.value)
+        return
+    if isinstance(pat, (cst.MatchList, cst.MatchTuple)):
+        for el in pat.patterns:
+            if isinstance(el, cst.MatchSequenceElement):
+                _collect_bound_names(el.value, out)
+            elif isinstance(el, cst.MatchStar):
+                _collect_bound_names(el, out)
+        return
+    if isinstance(pat, cst.MatchMapping):
+        for el in pat.elements:
+            _collect_bound_names(el.pattern, out)
+        if pat.rest is not None and pat.rest.value not in out:
+            out.append(pat.rest.value)
+        return
+    if isinstance(pat, cst.MatchClass):
+        for el in pat.patterns:
+            if isinstance(el, cst.MatchSequenceElement):
+                _collect_bound_names(el.value, out)
+        for kw in pat.kwds:
+            _collect_bound_names(kw.pattern, out)
+        return
+    if isinstance(pat, cst.MatchOr):
+        for alt in pat.patterns:
+            _collect_bound_names(alt, out)
+        return
+    # MatchValue / MatchSingleton bind no names.
+    return
+
+
+def _match_arms_payload(match_node: cst.Match) -> list[dict[str, object]]:
+    """Build the ``arms`` payload list for one ``cst.Match`` node."""
+    arms: list[dict[str, object]] = []
+    for case in match_node.cases:
+        bound: list[str] = []
+        _collect_bound_names(case.pattern, bound)
+        arms.append(
+            {
+                "pattern_kind": _pattern_kind(case.pattern),
+                "bound_names": bound,
+                "has_guard": case.guard is not None,
+            }
+        )
+    return arms
+
+
 class _WalrusFinder(cst.CSTVisitor):
     """Set ``self.found = True`` if any ``cst.NamedExpr`` appears."""
 
@@ -355,7 +454,7 @@ def lift_python(content: bytes) -> list[PyNode]:
                         end=msp.start + msp.length,
                         name="",
                         parent_idx=this_idx,
-                        payload={},
+                        payload={"arms": _match_arms_payload(match_node)},
                     )
                 )
         # Recurse into the body looking for nested def/class. Imports
@@ -453,7 +552,7 @@ def lift_python(content: bytes) -> list[PyNode]:
                         end=msp.start + msp.length,
                         name="",
                         parent_idx=0,
-                        payload={},
+                        payload={"arms": _match_arms_payload(stmt)},
                     )
                 )
         elif isinstance(stmt, cst.If) and _is_type_checking_test(stmt.test):
