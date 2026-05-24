@@ -804,3 +804,53 @@ fixture builds.
   it but adding a docs/tests note that `Path.resolve()`-based cache
   keys collide across the symlinked tree. (a) is simpler; (b) preserves
   the existing fixture-discovery layout the legacy tests assume.
+
+## 2026-05-24 — v1.6-#2 origin_gc Kuzu teardown segfault: not reproducible
+**Branch / commit:** kgweave/kuzu-port @ 58e1617 (pre-this-move)
+
+### What we did
+- Re-checked the harness for any `--deselect` / `--ignore` targeting
+  `test_origin_gc.py`. None exists. Single `deselect` hit in the repo is
+  `pyproject.toml:59` for the `perf` marker docstring, unrelated.
+- Ran `pytest tests/knowledge_graph/store/test_origin_gc.py -v --timeout=120`:
+  16/16 PASS in 16.16 s, exit 0, no native abort.
+- Ran `pytest tests/knowledge_graph/store/ -v --timeout=120`: 88/88 PASS in
+  126.74 s, exit 0.
+- Verified G4 dir-scoped runs: `_meta` 19 passed/1 skipped; `builders/sv`
+  716 passed; `builders/md` 5 passed.
+- Verified G5 perf floors: quickstart_perf + writer_perf (N=1000) both PASS,
+  total wall 8.78 s.
+- Captured environment + evidence in `docs/plans/v1.6-2-diagnosis.md`.
+- Closed v1.6-#2 as **resolved by prior work**. No code commit needed;
+  the v1.5 hardening (per-corpus DETACH DELETE scoping, 1 GiB
+  `_TEST_MAX_DB_SIZE_BYTES`, `~/.pytest-tmp` basetemp off tmpfs) was
+  sufficient against Kuzu 0.11.3 on this box.
+
+### Lessons learnt
+- **Reproduce before fixing.** The charter quoted "16 deselected tests"
+  from the v1.5-#1 retro as if it were the current state. It wasn't —
+  the deselection had already been removed (or never landed on this
+  branch). Five minutes of `grep deselect` saved an afternoon of guessing
+  at fix shapes for a bug that doesn't manifest.
+- **Native-abort flake claims age fast.** A C++ teardown segfault can
+  stop reproducing for any of: Kuzu version bump, buffer-manager cap
+  change, basetemp filesystem switch, per-test scoping of the cleanup
+  query. When v1.5 changed three of those four simultaneously, the
+  bug had no remaining triggers — but the JOURNAL still listed it as
+  open because nobody re-ran the failing invocation.
+- **TDD discipline doesn't work when there's no red.** Charter G2 demanded
+  a red commit by un-deselecting; that's a no-op when nothing is deselected.
+  The honest move is to document the non-reproduction, not synthesize a
+  red commit to fit the template.
+
+### Next moves
+- **v1.6-#4 — Python builder bulk-COPY parity.** Audit
+  `builders/py/writer.py` for SV bulk-COPY reuse vs per-row fallback.
+  Charter §4. Small mechanical win before the long-tail #3.
+- **v1.6-#3 — libcst coverage gaps.** Largest remaining item; fan out per
+  Python kind (decorators → async → PEP 695 → TYPE_CHECKING → `__all__`
+  → `.pyi` → match-case → walrus → comprehensions).
+- **Re-check origin_gc on a CI box.** This box's outcome ≠ all boxes. If
+  the segfault returns on a tmpfs-only or memory-constrained CI host,
+  the diagnosis stays valid but the fix list (drop+recreate DB file) is
+  back on the table.
