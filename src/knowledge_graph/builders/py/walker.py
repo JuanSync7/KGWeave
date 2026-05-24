@@ -184,6 +184,21 @@ def lift_python(content: bytes) -> list[PyNode]:
             # A SimpleStatementLine wraps one or more small statements.
             # We care about Import / ImportFrom.
             for small in stmt.body:
+                if isinstance(small, cst.TypeAlias):
+                    sp = spans.get(stmt)
+                    if sp is None:
+                        continue
+                    nodes.append(
+                        PyNode(
+                            kind="PyTypeAlias",
+                            start=sp.start,
+                            end=sp.start + sp.length,
+                            name=small.name.value,
+                            parent_idx=0,
+                            payload={},
+                        )
+                    )
+                    continue
                 if isinstance(small, (cst.Import, cst.ImportFrom)):
                     sp = spans.get(stmt)
                     if sp is None:
