@@ -1257,3 +1257,92 @@ narrowing-aware connector switch simple.
   from. YAGNI until a consumer asks. Arms are ordered by source
   position so a consumer can derive an arm-index → span mapping by
   re-walking the original `cst.Match` if needed.
+
+
+## v1.7-#4 retro — decorator-aware connector semantics
+
+**Commits:** `79754be` (RED: 4 fixtures + 4 connector tests) → `e131e41` (GREEN: `PyDecoratorSemanticsConnector` + facade re-export).
+
+### What we did
+New connector `src/knowledge_graph/connectors/py_decorator_semantics.py`
+reads `payload['decorators']` from every PyFunction / PyClass node,
+canonicalises each decorator string by stripping at the first `(`,
+and applies a closed promotion table to set
+`payload['semantic_role']` on matching nodes. Walker is untouched —
+the reinterpretation lives entirely at connector time so the walker
+stays a pure structural lifter (v1.6-#3 invariant preserved).
+
+Promotion table (closed; adding a fourth promotion is one row plus
+nothing else):
+
+```
+property               -> PyFunction.semantic_role = "property"
+dataclass              -> PyClass.semantic_role    = "dataclass"
+dataclasses.dataclass  -> PyClass.semantic_role    = "dataclass"
+pytest.fixture         -> PyFunction.semantic_role = "fixture"
+```
+
+Outer-most decorator wins. Mismatched `(kind, role)` (e.g. someone
+applies `@dataclass` to a function) is skipped, not coerced. Other
+decorators (`@functools.cache`, `@staticmethod`, user wrappers)
+leave `semantic_role` unset.
+
+### Where the role lives
+Node `payload` is a single JSON STRING column on the Node table —
+schema is fixed, so a new top-level column would mean migration.
+Instead the connector inserts the new key into the existing inner
+payload dict and rewrites the JSON string via
+`SET n.payload = $payload`. Same shape the walker emits, so existing
+payload-roundtrip tests continue to pass.
+
+### Match rule (decided once, do not iterate)
+Walker emits decorator source as written, including call-argument
+lists (`pytest.fixture(scope="module")`,
+`functools.lru_cache(maxsize=8)`). The canonicalisation is the
+minimal viable rule: strip everything from the first `(` onward,
+trim, then exact-match the result against the four keys in the
+table. No regex, no module-alias resolution, no `from … import …`
+chasing. If someone aliases `dataclass` (`from dataclasses import
+dataclass as _dc`) the connector won't promote — that's an
+acceptable false negative for v1.7-#4. The walker preserves the
+full decorator list so a future, alias-aware connector can layer on
+top without re-walking the AST.
+
+### Registration shape
+Facade re-exports `PyDecoratorSemanticsConnector` for
+discoverability; actual `register_connector(...)` happens at the
+consumer site (mirroring how `PyMarkdownReferenceConnector` is wired
+in `examples/quickstart_md.py` and the connector test modules). No
+new auto-registration on import — connectors stay opt-in so
+consumers control which derived edges/tags get materialised.
+
+### Lessons learnt
+- **Connector-time promotion beats walker-time interpretation.** The
+  walker already had every decorator string on the payload — pushing
+  the closed-set rules into a separate module kept the walker pure
+  and made the promotion contract a single ~150-line file that's
+  trivial to audit and extend.
+- **JSON-payload writes are fine here.** The connector touches one
+  property on a small subset of nodes; a per-row `SET n.payload`
+  Cypher MERGE is well below the per-test budget. If a future
+  connector needs to mutate every node's payload, factor a bulk-CSV
+  rewrite path; not needed for this slate.
+- **Strip-at-first-paren is the right canonicalisation.** Considered
+  parsing the decorator string as a Python expression to handle
+  exotic cases (decorator factories returning factories,
+  conditional decorators); rejected — the payload is "what the
+  walker saw", and any consumer that wants AST-level decorator
+  reasoning should look at the libcst node, not the string. The
+  string canonicalisation only needs to handle the practical
+  shapes: bare, dotted, and called.
+
+### Next moves
+- **v1.7-#5 (lambda capture analysis):** new `PyLambda` kind, walker
+  emits and parents to enclosing scope (per v1.7-#2 scope-chain
+  fix), records captured free variables. Size M, walker-touching.
+- **Optional follow-up for #4:** alias-aware promotion via a tiny
+  per-file import-rename map (`from dataclasses import dataclass as
+  _dc` → `_dc` resolves to `dataclasses.dataclass`). YAGNI until a
+  consumer hits the false negative. The walker already preserves
+  the `PyImport` rows, so a follow-up connector can build that map
+  by reading the same store.
