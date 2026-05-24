@@ -90,6 +90,28 @@ def _from_import_names(node: cst.ImportFrom) -> list[str]:
     return out
 
 
+def _decorator_strings(
+    decorators: object, module: cst.Module
+) -> list[str]:
+    """Render each decorator expression to source text.
+
+    libcst's ``Decorator.decorator`` is a ``BaseExpression`` (Name,
+    Attribute, Call, ...). We delegate to ``Module.code_for_node`` so
+    parametrised forms like ``@functools.lru_cache(maxsize=8)`` keep
+    their argument list intact. Returned list is outer-most first to
+    match source order ("the decorator nearest the def runs last").
+    """
+    out: list[str] = []
+    for dec in decorators or ():  # type: ignore[union-attr]
+        try:
+            text = module.code_for_node(dec.decorator).strip()
+        except Exception:
+            text = ""
+        if text:
+            out.append(text)
+    return out
+
+
 def lift_python(content: bytes) -> list[PyNode]:
     """Lift ``content`` (Python source bytes) into a flat PyNode list.
 
@@ -121,12 +143,19 @@ def lift_python(content: bytes) -> list[PyNode]:
         sp = spans.get(node)
         if sp is None:
             return
+        payload: dict[str, object] = {}
         if isinstance(node, cst.FunctionDef):
             kind = "PyFunction"
             name = node.name.value
+            decs = _decorator_strings(node.decorators, module)
+            if decs:
+                payload["decorators"] = decs
         elif isinstance(node, cst.ClassDef):
             kind = "PyClass"
             name = node.name.value
+            decs = _decorator_strings(node.decorators, module)
+            if decs:
+                payload["decorators"] = decs
         else:
             return
         nodes.append(
@@ -136,7 +165,7 @@ def lift_python(content: bytes) -> list[PyNode]:
                 end=sp.start + sp.length,
                 name=name,
                 parent_idx=parent_idx,
-                payload={},
+                payload=payload,
             )
         )
         this_idx = len(nodes) - 1
