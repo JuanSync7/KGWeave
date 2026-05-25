@@ -1743,3 +1743,66 @@ d8f0e11 docs(v1.8-#1 G5): JOURNAL retro -- alias-aware decorator promotion
 - v1.9-#2 `__set_name__` hook (connector-only, S).
 - v1.9-#3 cross-file module-export index (M, headline).
 - v1.9-#4 descriptor inheritance chasing (S).
+
+## 2026-05-25 — v1.9-#3: cross-file module-export index for capture resolution
+**Branch / commit:** kgweave/kuzu-port @ 9a48011
+
+### What we did
+- `PyScopeResolutionConnector` now builds two corpus-wide indices once
+  per invocation: a `{module_qualname: set[exported_name]}` rollup of
+  every top-level `PyFunction` / `PyClass` plus `PyImport` re-export
+  aliases, and a per-origin `{local_name: canonical_dotted}` map
+  aggregated from the consuming file's `PyImport.aliases` payloads
+  (v1.8-#1).
+- Captures previously tagged `module-level` because an `import` bound
+  them at module scope are now re-classified: if the canonical form is
+  `<module>.<leaf>` with `<module>` present in the corpus and `<leaf>`
+  in its export set, the entry becomes
+  `kind="cross-file-import"` with `origin_module=<module>` attached;
+  otherwise it drops to `unresolved` — the safe answer for "imported
+  from somewhere we can't see in this corpus".
+- Closed set extended **4 → 5**:
+  `{local-in-enclosing, module-level, builtin, cross-file-import,
+  unresolved}`. Updated the connector's docstring + module header to
+  document the new value and the lift rules.
+- Star-imports stay `unresolved` (charter out-of-scope).
+- Plain `import a` / `import a.b` style imports (where the local is the
+  module object, no `.` in the canonical) stay `unresolved` for the
+  capture-of-the-module case — those aren't cross-file *member*
+  references and we don't want to lift them silently.
+- New two-file fixture (`crossfile_capture_a.py` defines `foo` /
+  `Widget`; `crossfile_capture_b.py` does
+  `from crossfile_capture_a import foo` and captures `foo` in a
+  lambda); positive test asserts `cross-file-import` with the right
+  `origin_module`. Negative fixture (`crossfile_capture_external.py`)
+  imports from a module not in the corpus; test asserts the capture
+  stays `unresolved` and no `origin_module` field is added.
+- 2 commits (RED test + GREEN impl). Targeted dirs:
+  connectors / builders/py / _meta / store — all 205 passed, 1
+  skipped. Perf gates green: quickstart wall, py N=1000, sv N=1000
+  all under their floors.
+
+### Lessons learnt
+- The acceptance gate language ("currently classified `unresolved`")
+  was imprecise — `import` bindings actually surface as
+  `module-level` today because they bind a module-scope local. The
+  intent (lift import-derived captures to `cross-file-import` when we
+  can name the source, else `unresolved`) is what matters; the lift
+  branches off the `module-level` kind, not the `unresolved` kind.
+  Documented in the connector module docstring so future readers
+  don't get tripped up.
+- Re-using `PyImport.aliases` from v1.8-#1 paid off — no walker
+  changes needed for v1.9-#3, the whole slate item is connector-only.
+- The corpus-wide PyModule export pass is two Cypher queries (one for
+  PyFunction/PyClass children, one for PyImport re-exports). Both run
+  once per connector invocation; no per-file re-querying. Idempotent
+  reruns produce the same payload (the `captures_resolved` overwrite
+  is a stable JSON-serialise).
+
+### Next moves
+- v1.9-#4 descriptor inheritance chasing (S, connector extension over
+  v1.8-#4's structure).
+- Type inference / annotation-driven resolution is still a separate
+  slate (own charter, deferred). The cross-file index here is a name
+  index, not a type index — it only tells you "this name lives in
+  that module", not "this name has this type".
