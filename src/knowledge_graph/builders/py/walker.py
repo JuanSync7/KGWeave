@@ -90,6 +90,61 @@ def _from_import_names(node: cst.ImportFrom) -> list[str]:
     return out
 
 
+def _import_alias_map(node: cst.Import) -> dict[str, str]:
+    """Build ``{local_binding: canonical_dotted_name}`` for ``import x[.y][ as z]``.
+
+    Structural-only — preserves the ``asname`` that the bare ``names``
+    list drops. ``import a, b.c as q`` → ``{"a": "a", "q": "b.c"}``.
+    Consumed by :mod:`knowledge_graph.connectors.py_decorator_semantics`
+    (v1.8-#1) to normalise aliased decorator strings before promotion.
+    """
+    out: dict[str, str] = {}
+    for alias in node.names:
+        canonical = _dotted_name(alias.name)
+        if not canonical:
+            continue
+        if alias.asname is not None and isinstance(alias.asname.name, cst.Name):
+            local = alias.asname.name.value
+        else:
+            # No `as` — the local binding is the top-level segment
+            # (``import a.b.c`` binds ``a``).
+            local = canonical.split(".", 1)[0]
+        out[local] = canonical
+    return out
+
+
+def _from_import_alias_map(node: cst.ImportFrom) -> dict[str, str]:
+    """Build ``{local_binding: canonical_dotted_name}`` for ``from m import a[ as b]``.
+
+    Canonical form uses the source module: ``from dataclasses import
+    dataclass as _dc`` → ``{"_dc": "dataclasses.dataclass"}``. Star
+    imports return ``{}`` since the bindings are not statically known.
+    Relative imports (``from .pkg import x``) record the leading dots
+    verbatim so the connector can still recognise pure-local renames
+    (``{".pkg.x": ...}``) without resolving the package.
+    """
+    if isinstance(node.names, cst.ImportStar):
+        return {}
+    module = _dotted_name(node.module) if node.module is not None else ""
+    dots = "." * (node.relative and len(node.relative) or 0)
+    prefix = f"{dots}{module}".rstrip(".") if module else dots
+    out: dict[str, str] = {}
+    for alias in node.names:
+        if isinstance(alias.name, cst.Name):
+            imported = alias.name.value
+        else:
+            imported = _dotted_name(alias.name)
+        if not imported:
+            continue
+        canonical = f"{prefix}.{imported}" if prefix else imported
+        if alias.asname is not None and isinstance(alias.asname.name, cst.Name):
+            local = alias.asname.name.value
+        else:
+            local = imported.split(".", 1)[0]
+        out[local] = canonical
+    return out
+
+
 def _decorator_strings(
     decorators: object, module: cst.Module
 ) -> list[str]:
@@ -627,6 +682,7 @@ def lift_python(content: bytes) -> list[PyNode]:
                     primary = names[0] if names else ""
                     payload: dict[str, object] = {
                         "names": names,
+                        "aliases": _import_alias_map(small),
                         "kind": "import",
                         "runtime": runtime,
                     }
@@ -640,6 +696,7 @@ def lift_python(content: bytes) -> list[PyNode]:
                     primary = module_name
                     payload = {
                         "names": names,
+                        "aliases": _from_import_alias_map(small),
                         "module": module_name,
                         "kind": "from",
                         "level": small.relative and len(small.relative) or 0,
