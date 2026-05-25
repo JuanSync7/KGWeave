@@ -520,6 +520,150 @@ def _find_lambdas_scoped(
     return f.found
 
 
+# v1.9-#1: PyComprehension capture analysis.
+#
+# A comprehension's "captures" = Name identifiers loaded inside any
+# part of the comprehension (elt + for-in chain including all iters
+# and ifs) that are NOT bound by the comprehension's own scope. Locally
+# bound names are:
+#   * for-target names (recursively through tuple/list unpacking) of
+#     every CompFor in this comprehension's chain
+#   * walrus (NamedExpr) target Names anywhere inside this comp
+#     (PEP 572 says walrus in a comp binds in the *enclosing* function
+#     scope, but for the comp's capture-set we still treat it as
+#     locally-visible — the name resolves at the comp's loaded use to
+#     a value the comp itself produced, which is not "captured from
+#     enclosing".)
+#
+# Skip rules mirror the lambda body walk:
+#   * ``Attribute.attr`` — only the receiver Name counts
+#   * ``Arg.keyword`` — keyword-arg keyword Names aren't loads
+#   * nested ``Lambda`` subtrees — those produce their own PyLambda;
+#     their body names must not bleed into the outer comp's set
+#   * nested comprehensions — produce their own PyComprehension with
+#     their own captures; their iter-target / body Names are not the
+#     outer comp's captures
+def _comp_target_names(target: cst.BaseExpression) -> list[str]:
+    """Names bound by a CompFor target (recursive unpack)."""
+    out: list[str] = []
+
+    def walk(node: cst.CSTNode) -> None:
+        if isinstance(node, cst.Name):
+            out.append(node.value)
+            return
+        if isinstance(node, (cst.Tuple, cst.List)):
+            for el in node.elements:
+                walk(el)
+            return
+        if isinstance(node, (cst.Element, cst.StarredElement)):
+            walk(node.value)
+            return
+        # Attribute / Subscript: not a fresh binding.
+
+    walk(target)
+    return out
+
+
+def _comp_iter_targets(comp: cst.CSTNode) -> set[str]:
+    """All for-target names across the comp's CompFor chain."""
+    out: set[str] = set()
+    for_in = getattr(comp, "for_in", None)
+    while isinstance(for_in, cst.CompFor):
+        for n in _comp_target_names(for_in.target):
+            out.add(n)
+        for_in = for_in.inner_for_in
+    return out
+
+
+def _collect_comp_walrus_targets(node: cst.CSTNode, out: set[str]) -> None:
+    """Walrus targets defined inside the comprehension subtree.
+
+    Stops at nested scope-creating nodes (Lambda, FunctionDef, ClassDef,
+    inner comprehensions) so a walrus inside a nested comp doesn't
+    bleed into the outer comp's local set.
+    """
+    if isinstance(
+        node,
+        (
+            cst.Lambda,
+            cst.FunctionDef,
+            cst.ClassDef,
+            cst.ListComp,
+            cst.SetComp,
+            cst.DictComp,
+            cst.GeneratorExp,
+        ),
+    ):
+        return
+    if isinstance(node, cst.NamedExpr) and isinstance(node.target, cst.Name):
+        out.add(node.target.value)
+    for child in node.children:
+        _collect_comp_walrus_targets(child, out)
+
+
+def _collect_comp_load_names(node: cst.CSTNode, out: set[str]) -> None:
+    """Recursive walk collecting Name loads inside a comprehension.
+
+    Honours the skip rules documented above: ``Attribute.attr`` Names,
+    keyword-arg keyword Names, and nested Lambda / nested comprehension
+    subtrees are not descended into.
+    """
+    if isinstance(node, cst.Name):
+        out.add(node.value)
+        return
+    if isinstance(node, cst.Attribute):
+        _collect_comp_load_names(node.value, out)
+        return
+    if isinstance(node, cst.Arg):
+        _collect_comp_load_names(node.value, out)
+        return
+    if isinstance(
+        node,
+        (
+            cst.Lambda,
+            cst.ListComp,
+            cst.SetComp,
+            cst.DictComp,
+            cst.GeneratorExp,
+        ),
+    ):
+        # Nested scope-creators emit their own captures; don't bleed.
+        return
+    for child in node.children:
+        _collect_comp_load_names(child, out)
+
+
+def _comprehension_captures(comp: cst.CSTNode) -> list[str]:
+    """Free Name loads inside ``comp`` not bound by the comp's scope.
+
+    Walks elt (or key/value), every CompFor's iter and ifs, including
+    the leftmost-iter — names referenced in the leftmost iter ARE
+    captures w.r.t. the comp scope (Python evaluates that iter in the
+    enclosing scope, so any free name there resolves outside the comp
+    too).
+    """
+    loaded: set[str] = set()
+    # Element expressions vary by comp kind.
+    if isinstance(comp, cst.DictComp):
+        _collect_comp_load_names(comp.key, loaded)
+        _collect_comp_load_names(comp.value, loaded)
+    else:
+        elt = getattr(comp, "elt", None)
+        if elt is not None:
+            _collect_comp_load_names(elt, loaded)
+    # Walk the CompFor chain: every iter + every if.
+    for_in = getattr(comp, "for_in", None)
+    while isinstance(for_in, cst.CompFor):
+        _collect_comp_load_names(for_in.iter, loaded)
+        for cif in for_in.ifs:
+            _collect_comp_load_names(cif, loaded)
+        for_in = for_in.inner_for_in
+    # Subtract locally-bound names (iter targets + walrus targets).
+    local = _comp_iter_targets(comp)
+    _collect_comp_walrus_targets(comp, local)
+    return sorted(loaded - local)
+
+
 def _extract_dunder_all(module: cst.Module) -> list[str] | None:
     """Return the literal ``__all__`` list at module scope, if present.
 
@@ -907,6 +1051,7 @@ def lift_python(content: bytes) -> list[PyNode]:
         # body that we DID emit, or a nested comp we just emitted),
         # the map already has it; otherwise fall back to PyModule.
         parent_idx = cst_to_idx.get(id(parent_cst), 0)
+        captures = _comprehension_captures(comp_node)
         nodes.append(
             PyNode(
                 kind="PyComprehension",
@@ -914,7 +1059,7 @@ def lift_python(content: bytes) -> list[PyNode]:
                 end=csp.start + csp.length,
                 name="",
                 parent_idx=parent_idx,
-                payload={"form": form},
+                payload={"form": form, "captures": captures},
             )
         )
         cst_to_idx[id(comp_node)] = len(nodes) - 1
