@@ -1660,3 +1660,31 @@ d8f0e11 docs(v1.8-#1 G5): JOURNAL retro -- alias-aware decorator promotion
 **Perf floors at v1.8 close:** quickstart 3.15 s / 10 s; sv N=1000 1.02 s / 3 s; py N=1000 0.94 s / 6 s. All comfortably under.
 
 **Deferred (v1.9 backlog):** cross-file scope + type resolution; PyComprehension free-name capture; Builder #4 in a new language; CI disk-budget guard; `__set_name__` + runtime class creation.
+
+## 2026-05-25 — v1.9-#1: PyComprehension free-name capture
+**Branch / commit:** kgweave/kuzu-port @ afdc1a0
+
+### What we did
+- Walker: `PyComprehension` payload now carries `captures: list[str]`
+  for free names not bound by iter-targets / walrus / nested comp locals.
+  Mirrors v1.7-#5 `PyLambda.captures`.
+- Connector: `_LambdaScopeIndexer` parametrised over `Lambda|Comprehension`;
+  writes `captures_resolved` with the existing 4-value closed set
+  `{local-in-enclosing, module-level, builtin, unresolved}`.
+- 4 commits (RED walker, GREEN walker, RED connector, GREEN connector).
+- New fixture(s) under `tests/knowledge_graph/fixtures/py/`; py builder
+  dir 49 green, connectors 43 green, _meta 20+1skip.
+
+### Lessons learnt
+- Sub-agent stalled after writing GREEN connector code but before
+  committing — uncommitted GREEN diff sat in working tree. Pattern:
+  every sub-agent dispatch in this slate should explicitly bookend
+  "commit BEFORE you exit" and we still need to verify on return.
+- Reusing the v1.8-#3 indexer was clean — closed set didn't widen, just
+  the kinds the indexer accepts. Worth this design every time the next
+  scope-bearing construct comes up.
+
+### Next moves
+- v1.9-#2 `__set_name__` hook (connector-only, S).
+- v1.9-#3 cross-file module-export index (M, headline).
+- v1.9-#4 descriptor inheritance chasing (S).
