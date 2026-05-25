@@ -1490,3 +1490,31 @@ to end: quickstart ≤ 10 s, SV writer N=1000 ≤ 3 s, Py writer N=1000
 - Alias-aware decorator promotion (from #4 follow-up).
 - Builder #4 in a new language.
 - CI disk-budget guard.
+
+---
+
+## 2026-05-25 — v1.8-#1 — alias-aware decorator promotion
+**Branch / commit:** `kgweave/kuzu-port` @ `6fcedcc` (G1 RED `4d72dee`, G2 GREEN `6fcedcc`)
+
+### What we did
+- **Walker fact-extension:** added `_import_alias_map` and `_from_import_alias_map` in `src/knowledge_graph/builders/py/walker.py`. Both produce `{local_binding: canonical_dotted_name}` from `cst.Import` / `cst.ImportFrom`, preserving the `asname` info that `_import_aliases` / `_from_import_names` discard. The new dict ships in `PyImport.payload["aliases"]` alongside the existing `names`.
+- **Connector rewrite:** `PyDecoratorSemanticsConnector.synthesize` now does two MATCH passes — first PyImport rows grouped by `origin_id` to fold a per-file alias map, then the existing PyClass/PyFunction sweep with `_apply_alias_map(canonical, aliases)` slotted between `_canonical_decorator_name` and the closed-table lookup.
+- **Closed table extension:** added one row, `"builtins.property" → ("PyFunction", "property")`, to cover `from builtins import property as prop` (rare-but-legal, charter-required). The four pre-existing rows are unchanged.
+- **Fixtures + tests:** three new fixtures (`dataclass_aliased.py`, `pytest_fixture_aliased.py`, `property_aliased.py`), four new test cases — three promote-through-alias positives plus the `cached_property as cp` negative control. RED before GREEN, both committed.
+
+### Validation
+- 8/8 in `tests/knowledge_graph/connectors/test_py_decorator_semantics.py`.
+- 71/71 in `tests/knowledge_graph/connectors/` + `tests/knowledge_graph/builders/py/` combined.
+- 736 passed / 1 skipped in `tests/knowledge_graph/builders/sv/` + `tests/_meta/`.
+- Perf floors held: `test_py_writer_perf_n1000` and `test_writer_perf_n1000` PASS in their dir-scoped runs.
+
+### Lessons learnt
+- **"Walker stays pure" ≠ "walker payload is frozen."** Charter said no walker edits for #1, but `asname` was being silently dropped by the v1 walker — there was no other surface for the connector to read. Preserving a structural fact the AST already carries is still pure structural lifting; reinterpreting it would not be. Don't conflate the two when reading future charter constraints.
+- **Identity entries in the alias map simplify the lookup.** `import pytest` records `{"pytest": "pytest"}` rather than nothing, so the connector never needs an "absent-means-identity" branch. The cost is a few extra bytes per PyImport payload, the win is one fewer code path.
+- **`origin_id` is the right per-file scoping key for connectors.** No need to thread file URIs or paths; every node already carries it, and grouping by it gives clean per-file isolation for rebindings.
+- **Closed-table additions stay one-line.** Adding `builtins.property` for the alias case took a single dict row — the connector design from v1.7-#4 absorbed the v1.8-#1 requirement without restructuring. Validates the v1.7 closing lesson that decorator semantics belong in a connector with a closed promotion table.
+
+### Next moves
+- v1.8-#2: conditional imports beyond `TYPE_CHECKING` — `try/except ImportError`, `if sys.version_info ...`, generic `if <expr>` guards. Walker addition; new `import_guard` payload field over a closed enum. Size S, risk low.
+- v1.8-#3: capture resolution against lexical scopes (new `py_scope_resolution.py` connector). Size M, risk medium.
+- v1.8-#4: metaclass + descriptor protocol annotation. Size S–M.
