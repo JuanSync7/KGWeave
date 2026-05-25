@@ -608,6 +608,19 @@ def lift_python(content: bytes) -> list[PyNode]:
             decs = _decorator_strings(node.decorators, module)
             if decs:
                 payload["decorators"] = decs
+            # v1.8-#4: capture ``metaclass=...`` kwarg from class header.
+            # ``class Foo(Base, metaclass=Meta)`` exposes the kwarg under
+            # ``node.keywords``. Value is lifted as a dotted name (e.g.
+            # ``Meta`` or ``abc.ABCMeta``); non-name expressions (rare —
+            # ``metaclass=type("X",(),{})``) flatten to "" via the existing
+            # _dotted_name helper, in which case we record None. Other
+            # kwargs (e.g. PEP 487 ``**kwargs``) are ignored.
+            for kw in node.keywords:
+                if kw.keyword is not None and kw.keyword.value == "metaclass":
+                    dotted = _dotted_name(kw.value)
+                    if dotted:
+                        payload["metaclass"] = dotted
+                    break
         else:
             return
         nodes.append(
