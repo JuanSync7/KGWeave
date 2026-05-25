@@ -14,9 +14,18 @@ This connector closes that gap. Per file (per ``origin_id``) it:
    scopes but PyComprehension capture resolution is out of scope for
    this iteration — see "PyComprehension status" below.)
 3. For each ``PyLambda`` row, classifies every ``captures`` entry into
-   the closed set::
+   the closed set (v1.9-#3 extended 4 → 5 values)::
 
-       {"local-in-enclosing", "module-level", "builtin", "unresolved"}
+       {"local-in-enclosing", "module-level", "builtin",
+        "cross-file-import", "unresolved"}
+
+   ``cross-file-import`` is emitted when a capture's module-level
+   binding came from a ``PyImport`` whose origin module is also present
+   in the corpus and exposes the canonical name at top level. The
+   parallel ``captures_resolved`` entry then also carries
+   ``origin_module: <str>`` (the qualname of the defining module, taken
+   from ``PyModule.name``). Star-imports (``from X import *``) stay
+   ``unresolved`` — out of scope.
 
 4. Writes the result back as ``payload['captures_resolved']`` — a
    ``list[dict]`` where each entry has shape
@@ -115,10 +124,11 @@ from libcst.metadata import ByteSpanPositionProvider, MetadataWrapper
 from knowledge_graph.store.snapshot import BYTES_CODEC
 
 
-# Closed classification set.
+# Closed classification set (v1.9-#3: extended 4 -> 5).
 KIND_LOCAL_ENCLOSING = "local-in-enclosing"
 KIND_MODULE_LEVEL = "module-level"
 KIND_BUILTIN = "builtin"
+KIND_CROSS_FILE_IMPORT = "cross-file-import"
 KIND_UNRESOLVED = "unresolved"
 
 
@@ -664,6 +674,166 @@ def _classify(name: str, frame: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Cross-file index construction (v1.9-#3)
+# ---------------------------------------------------------------------------
+
+
+def _build_module_exports(conn) -> dict[str, set[str]]:
+    """Corpus-wide ``{module_qualname: set[exported_name]}`` index.
+
+    A *module qualname* is ``PyModule.name`` (the writer sets this to
+    the file stem — see ``builders/py/writer.py::_resolve_name``). An
+    *exported name* is any top-level (parent is the ``PyModule``)
+    ``PyFunction`` / ``PyClass`` declaration, plus the locally-bound
+    names of any ``PyImport`` re-export (``from x import foo`` makes
+    ``foo`` a name in this module's surface even though it originated
+    elsewhere). Star-imports contribute nothing to the export set —
+    their bindings are not statically knowable here (v1.9-#3 scope).
+
+    Implementation pulls the data via two Cypher queries: one for
+    PyFunction/PyClass children of PyModule, one for PyImport rows
+    parented to a PyModule (their ``aliases`` payload gives the local
+    bindings). Both run once per connector invocation.
+    """
+    exports: dict[str, set[str]] = {}
+
+    # Top-level PyFunction / PyClass children of any PyModule.
+    res = conn.execute(
+        """
+        MATCH (m:Node)-[:PARENT_OF]->(c:Node)
+        WHERE m.source = 'py' AND m.kind = 'PyModule'
+          AND c.source = 'py' AND c.kind IN ['PyFunction', 'PyClass']
+        RETURN m.name AS mname, c.name AS cname
+        """,
+        {},
+    )
+    while res.has_next():
+        row = res.get_next()
+        mname, cname = row[0], row[1]
+        if not mname or not cname:
+            continue
+        exports.setdefault(mname, set()).add(cname)
+
+    # PyImport rows parented to a PyModule contribute their local
+    # bindings (``aliases`` keys) as re-exports.
+    res = conn.execute(
+        """
+        MATCH (m:Node)-[:PARENT_OF]->(i:Node)
+        WHERE m.source = 'py' AND m.kind = 'PyModule'
+          AND i.source = 'py' AND i.kind = 'PyImport'
+          AND i.payload IS NOT NULL
+        RETURN m.name AS mname, i.payload AS pl
+        """,
+        {},
+    )
+    while res.has_next():
+        row = res.get_next()
+        mname, pl = row[0], row[1]
+        if not mname or not pl:
+            continue
+        try:
+            payload_obj = json.loads(pl)
+        except (TypeError, ValueError):
+            continue
+        inner = payload_obj.get("payload")
+        if not isinstance(inner, dict):
+            continue
+        aliases = inner.get("aliases")
+        if not isinstance(aliases, dict):
+            continue
+        for local_name in aliases:
+            if isinstance(local_name, str) and local_name:
+                exports.setdefault(mname, set()).add(local_name)
+
+    return exports
+
+
+def _imports_for_origin(conn, origin_id: str) -> dict[str, str]:
+    """Return ``{local_name: canonical_dotted_name}`` for one consuming
+    file's ``PyImport`` rows.
+
+    Aggregates every ``PyImport.payload.aliases`` map that belongs to
+    this ``origin_id``. Star-import rows carry an empty aliases dict
+    (walker convention) so they contribute nothing — the corresponding
+    captures therefore stay ``unresolved``, matching the v1.9-#3
+    out-of-scope rule.
+    """
+    out: dict[str, str] = {}
+    res = conn.execute(
+        """
+        MATCH (i:Node)
+        WHERE i.source = 'py' AND i.kind = 'PyImport'
+          AND i.origin_id = $oid AND i.payload IS NOT NULL
+        RETURN i.payload AS pl
+        """,
+        {"oid": origin_id},
+    )
+    while res.has_next():
+        pl = res.get_next()[0]
+        if not pl:
+            continue
+        try:
+            payload_obj = json.loads(pl)
+        except (TypeError, ValueError):
+            continue
+        inner = payload_obj.get("payload")
+        if not isinstance(inner, dict):
+            continue
+        aliases = inner.get("aliases")
+        if not isinstance(aliases, dict):
+            continue
+        for local_name, canonical in aliases.items():
+            if isinstance(local_name, str) and isinstance(canonical, str):
+                out[local_name] = canonical
+    return out
+
+
+def _lift_to_cross_file(
+    name: str,
+    imports: dict[str, str],
+    module_exports: dict[str, set[str]],
+) -> tuple[str, str | None]:
+    """Try to lift ``name`` to ``cross-file-import``.
+
+    Returns ``(kind, origin_module)``. ``origin_module`` is set only
+    when ``kind == "cross-file-import"``. If the lift fails the caller
+    should fall back to ``unresolved``.
+
+    Lift rules:
+
+    * ``name`` must appear in ``imports`` (the consuming file's
+      ``PyImport.aliases`` rollup).
+    * The canonical form must be ``"<module>.<leaf>"`` — i.e. a
+      ``from m import leaf`` style. Plain ``import a`` / ``import a.b``
+      bindings give canonical ``"a"`` / ``"a.b"`` with the local being
+      the top-level segment; capturing those means referencing the
+      *module object* itself, not a member, so we do NOT lift those.
+    * ``<module>`` must be in ``module_exports`` AND ``<leaf>`` must be
+      in that module's export set.
+
+    Relative imports keep their leading dots in the canonical form
+    (``.pkg.foo``); the dotted-module lookup naturally misses for
+    them (no PyModule has a leading-dot name), so they fall through to
+    ``unresolved``. That's the safe answer until v1.10 wires package
+    resolution.
+    """
+    canonical = imports.get(name)
+    if not canonical:
+        return KIND_UNRESOLVED, None
+    if "." not in canonical:
+        # Plain ``import a`` — captured name is the module object.
+        # Not a cross-file member reference; stay unresolved.
+        return KIND_UNRESOLVED, None
+    origin_module, _, leaf = canonical.rpartition(".")
+    if not origin_module or not leaf:
+        return KIND_UNRESOLVED, None
+    exports = module_exports.get(origin_module)
+    if exports is None or leaf not in exports:
+        return KIND_UNRESOLVED, None
+    return KIND_CROSS_FILE_IMPORT, origin_module
+
+
+# ---------------------------------------------------------------------------
 # Connector class
 # ---------------------------------------------------------------------------
 
@@ -726,9 +896,21 @@ class PyScopeResolutionConnector:
         if not any_rows:
             return 0
 
-        # Step 2: per-origin, fetch source and build scope index.
+        # Step 2 (v1.9-#3): corpus-wide module-export index. Built once
+        # per connector invocation and shared across every consuming
+        # file we visit below. Star-imports are not in this map (their
+        # exports aren't statically knowable) so captures that resolve
+        # through a star-import stay ``unresolved`` — matching the
+        # v1.9-#3 out-of-scope rule.
+        module_exports = _build_module_exports(conn)
+
+        # Step 3: per-origin, fetch source and build scope index.
         touched = 0
         for origin_id, scope_rows in per_origin.items():
+            # v1.9-#3: per consuming file, gather the union of all
+            # ``PyImport.aliases`` maps. The cross-file lift below only
+            # fires for names that came from an import in THIS file.
+            imports_here = _imports_for_origin(conn, origin_id)
             origin_res = conn.execute(
                 "MATCH (o:Origin {id: $oid}) RETURN o.content",
                 {"oid": origin_id},
@@ -774,10 +956,39 @@ class PyScopeResolutionConnector:
                         for c in captures
                     ]
                 else:
-                    resolved = [
-                        {"name": str(c), "kind": _classify(str(c), frame)}
-                        for c in captures
-                    ]
+                    resolved = []
+                    for c in captures:
+                        cname = str(c)
+                        kind_str = _classify(cname, frame)
+                        entry: dict[str, str] = {
+                            "name": cname,
+                            "kind": kind_str,
+                        }
+                        # v1.9-#3: any module-level binding that came in
+                        # via a PyImport is candidate for the lift. If
+                        # the import points at a corpus-resident module
+                        # whose export set includes the canonical leaf,
+                        # we re-tag to ``cross-file-import`` and attach
+                        # ``origin_module``. Otherwise — including when
+                        # the origin module isn't in the corpus — the
+                        # capture drops to ``unresolved`` so the caller
+                        # can tell the difference between "a local def
+                        # named foo" and "an imported foo whose home
+                        # we couldn't statically locate".
+                        if (
+                            kind_str == KIND_MODULE_LEVEL
+                            and cname in imports_here
+                        ):
+                            new_kind, origin_mod = _lift_to_cross_file(
+                                cname, imports_here, module_exports
+                            )
+                            entry["kind"] = new_kind
+                            if (
+                                new_kind == KIND_CROSS_FILE_IMPORT
+                                and origin_mod is not None
+                            ):
+                                entry["origin_module"] = origin_mod
+                        resolved.append(entry)
                 inner["captures_resolved"] = resolved
                 new_payload = json.dumps(
                     payload_obj, ensure_ascii=False, sort_keys=True, default=str
