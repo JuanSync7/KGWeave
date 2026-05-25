@@ -1579,3 +1579,84 @@ to end: quickstart ≤ 10 s, SV writer N=1000 ≤ 3 s, Py writer N=1000
 - v1.8-#4: metaclass + descriptor protocol annotation. Walker emits `metaclass: str | None` on PyClass when bases declare `metaclass=...`; new connector tags `semantic_role="descriptor"` on classes implementing `__get__` (+ optional `__set__` / `__delete__`). Size S–M.
 - v1.9 candidate: PyComprehension free-name capture extraction. Walker payload addition + reuse this connector's `_bindings_in_block` / `_LambdaScopeIndexer` scaffolding (likely renamed to `_ScopeIndexer` and parametrised over `Lambda | Comprehension`).
 - v1.9 candidate: cross-file resolution. Today every `unresolved` could be a name imported from another module; the connector would need a corpus-wide module-export index to lift those to `cross-file-{origin}`.
+
+## 2026-05-25 — v1.8-#4 — metaclass payload + descriptor-protocol connector
+**Branch / commit:** `kgweave/kuzu-port` @ `9935b3d` (G1 RED `023fc9b`, G2 GREEN `d741a30`, G3 RED `85a2f44`, G4 GREEN `9935b3d`)
+
+### What we did
+- **Walker (G2):** Added a six-line block to `ClassDef` handling in `src/knowledge_graph/builders/py/walker.py` that scans `node.keywords` for `keyword.value == "metaclass"`, lifts the value via the existing `_dotted_name` helper, and records `payload["metaclass"] = dotted` only when the dotted name is non-empty. Absent key encodes "no metaclass kwarg" — matches the existing `decorators` list convention (absent ≠ empty list). Non-Name expressions (rare: `metaclass=type("X",(),{})`) flatten to `""` via `_dotted_name` and intentionally omit the field rather than encode a meaningless string.
+- **Connector (G4):** New `src/knowledge_graph/connectors/py_descriptor_semantics.py` (`PyDescriptorSemanticsConnector`, registered name `py-descriptor-semantics`, `requires=["py"]`). Indexes every PyClass's direct `PARENT_OF` PyFunction children in one Cypher pass, builds `{class_id: set(method_name)}`, then tags `semantic_role="descriptor"` on classes whose method set contains `__get__`. Inheritance is NOT chased — a subclass that inherits `__get__` without redeclaring it is not tagged (cross-class resolution deferred to v1.9 alongside cross-file scope).
+- **Precedence policy:** decorator-wins. The descriptor connector skips any class whose `semantic_role` is already set, so `@dataclass class Hybrid: def __get__...` keeps `semantic_role="dataclass"`. Rationale: the decorator is *explicit* (the user typed it); descriptor detection is *structural* (inferred from method shape). Explicit beats inferred. Tested directly via `test_decorator_role_takes_precedence_over_descriptor`.
+- **Three new fixtures + four-case connector test:** `descriptor_get_only.py` (only `__get__`), `descriptor_full.py` (`__get__` + `__set__` + `__delete__`), `not_descriptor.py` (`Plain` with no `__get__`, plus `SetOnly` with only `__set__` as negative control). Walker test file `test_kind_metaclass.py` adds 4 cases (basic, with-bases, no-metaclass, writer-roundtrip).
+- **Facade:** `PyDescriptorSemanticsConnector` exported from `knowledge_graph/__init__.py` alongside the other Py connectors.
+
+### Validation
+- 4/4 walker tests green in `test_kind_metaclass.py`.
+- 4/4 new connector tests green in `test_py_descriptor_semantics.py`.
+- 42/42 in `tests/knowledge_graph/connectors/` (all four Py + SV connectors now: py-md, decorator, scope-resolution, descriptor).
+- 48/48 in `tests/knowledge_graph/builders/py/`.
+- 716/716 in `tests/knowledge_graph/builders/sv/`.
+- 20 passed + 1 skipped in `tests/_meta/`.
+- 88/88 in `tests/knowledge_graph/store/`.
+- 5/5 in `tests/knowledge_graph/builders/md/`.
+- Perf floors held: quickstart 3.15 s (≤ 10 s), sv N=1000 1.02 s (≤ 3 s), py N=1000 0.94 s (≤ 6 s).
+
+### Lessons learnt
+- **Single-valued `semantic_role` forces an explicit precedence choice.** The charter flagged this conflict-avoidance question up front: a class can be both `@dataclass` and a descriptor. Picking decorator-wins took two extra lines in the connector (the `is not None` guard) and one extra test, and keeps the field shape unchanged. The alternative — making `semantic_role` a list — would have rippled through every consumer and existing test. Don't broaden a payload field's cardinality to dodge a precedence question; pick the precedence.
+- **`PARENT_OF` already encodes the class-method relation.** No need to re-parse the AST in this connector (unlike `py_scope_resolution.py` which needs the bytes for binding-resolution). One Cypher pass over the existing edges is enough because "class defines method `__get__`" is a direct structural fact already lifted by the walker.
+- **"Absent payload key" is the right encoding for negative facts.** `metaclass` follows `decorators` rather than `runtime`/`import_guard` — set the key when the fact exists, omit it otherwise. Consumers read with `.get("metaclass")` and get `None` either way. Saves ~25 bytes per PyClass row and avoids the "explicit None vs absent" interpretation question.
+- **The closed-table connector pattern absorbed item #4 without restructuring.** v1.7-#4 introduced the `payload.semantic_role` slot; v1.8-#1 extended its lookup with alias-aware promotion; v1.8-#4 added a *second* tagger writing the same slot under a precedence rule. Three iterations, same field, same consumer story. The connector layer is doing what it was designed for.
+
+### Next moves
+- v1.9 candidate: cross-file scope and type resolution (corpus-wide module-export index lifts `unresolved` captures to `cross-file-{origin}`; descriptor inheritance chases base classes).
+- v1.9 candidate: PyComprehension free-name capture extraction (walker payload addition; reuse `_LambdaScopeIndexer` parametrised over `Lambda | Comprehension`).
+- v1.9 candidate: Builder #4 in a new language (unblocked since v1.7-#1 — separate charter recommended).
+- v1.9 candidate: CI disk-budget guard (still pending first full-suite green run).
+- v1.9 candidate: `__set_name__` + runtime `type(name, bases, dict)` class creation (descriptor and metaclass tails).
+
+---
+
+## v1.8 closing summary — Python semantic polish
+
+**Branch:** `kgweave/kuzu-port`. **Status:** all four items shipped.
+
+**Charter:** `8057d89` (v1.7 closing) → `81a33c3` v1.8 charter (alias-aware decorator + scope resolution + class protocol).
+
+**Commits landed (charter + #1 + #2 + #3 + #4):**
+
+```
+9935b3d feat(v1.8-#4 G4 GREEN): PyDescriptorSemanticsConnector tags __get__ classes
+85a2f44 test(v1.8-#4 G3 RED): descriptor-protocol connector tag PyClass
+d741a30 feat(v1.8-#4 G2 GREEN): walker emits metaclass payload on PyClass
+023fc9b test(v1.8-#4 G1 RED): metaclass payload on PyClass walker
+682b9e9 docs(v1.8-#3 G5): JOURNAL retro -- lambda capture lexical-scope resolution
+62f6402 v1.8-#3 (GREEN): py-scope-resolution connector classifies lambda captures
+3e05008 v1.8-#3 (RED): py-scope-resolution connector tests + fixtures
+ba3c023 docs(v1.8-#2 G5): JOURNAL retro -- closed-set import_guard payload
+90db850 v1.8-#2 (GREEN): walker emits closed-set import_guard payload
+7bf577a v1.8-#2 (RED): import_guard closed-set tests + fixtures for conditional PyImports
+d8f0e11 docs(v1.8-#1 G5): JOURNAL retro -- alias-aware decorator promotion
+6fcedcc v1.8-#1 (GREEN): alias-aware decorator promotion via per-file import-rename map
+4d72dee v1.8-#1 (RED): alias-aware decorator promotion tests + fixtures
+81a33c3 docs: v1.8 charter -- alias-aware decorator + scope resolution + class protocol
+```
+
+**Items shipped (4/4):**
+
+1. **#1 alias-aware decorator promotion** — Per-file import-rename map (built from `PyImport.aliases`) normalises decorator strings through `local_name → canonical_dotted_name` before the closed-table lookup. `from dataclasses import dataclass as _dc; @_dc` now promotes. Walker emits `aliases` payload on every PyImport; connector consumes it. One closed-table row added (`builtins.property`).
+2. **#2 conditional imports beyond `TYPE_CHECKING`** — Closed-set `import_guard ∈ {type-checking, try-import, version-guard, conditional, None}` payload field on PyImport. Walker recognises `cst.If` (TYPE_CHECKING, `sys.version_info`, generic `if`) and `cst.Try` (try-import idiom) wrappers; `elif`/`else` chains inherit the same guard.
+3. **#3 capture resolution against lexical scopes** — New `py-scope-resolution` connector. Per-file scope index built by `_LambdaScopeIndexer` (re-parses Origin bytes via libcst MetadataWrapper); classifies each PyLambda capture into `{local-in-enclosing, module-level, builtin, unresolved}`. Respects class-scope opacity (LEGB), `nonlocal`/`global`/walrus declarations. Writes `payload["captures_resolved"]` parallel to existing `captures`.
+4. **#4 metaclass + descriptor protocol annotations** — Walker emits `PyClass.payload.metaclass` (dotted name from `class X(metaclass=Meta)`); new `py-descriptor-semantics` connector tags `semantic_role="descriptor"` on classes defining `__get__`. Decorator-wins precedence vs `@dataclass` (explicit beats structural).
+
+**Net new payload surface (v1.8):**
+- `PyImport.aliases : dict[str,str]` (#1)
+- `PyImport.import_guard : str | None` (#2, closed enum)
+- `PyLambda.captures_resolved : list[{name,kind}]` (#3, closed kind enum)
+- `PyClass.metaclass : str | None` (#4)
+- `PyClass.semantic_role : "descriptor"` (#4, joins existing `dataclass`/`property`/`fixture` via decorator connector)
+
+**Net new connectors:** 2 (`py-scope-resolution`, `py-descriptor-semantics`) bringing the Py connector total to 3 (+ `py-md` from earlier) and the registered connector count to 4 (+ SV `sv-md-reference`).
+
+**Perf floors at v1.8 close:** quickstart 3.15 s / 10 s; sv N=1000 1.02 s / 3 s; py N=1000 0.94 s / 6 s. All comfortably under.
+
+**Deferred (v1.9 backlog):** cross-file scope + type resolution; PyComprehension free-name capture; Builder #4 in a new language; CI disk-budget guard; `__set_name__` + runtime class creation.
