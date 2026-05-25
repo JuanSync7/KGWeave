@@ -106,3 +106,67 @@ def test_unknown_decorator_leaves_semantic_role_unset(tmp_path: Path) -> None:
         assert _semantic_role(store, "util") is None
     finally:
         store.close()
+
+
+# ---------------------------------------------------------------------------
+# v1.8-#1: alias-aware promotion via per-file import-rename map.
+#
+# Walker preserves the ``asname`` from ``import x as y`` /
+# ``from m import a as b`` on the PyImport payload as
+# ``aliases: {local_name: canonical_dotted_name}``. The connector reads
+# every PyImport row in the same file as a PyClass/PyFunction, builds
+# a per-file map, and rewrites the leading dotted-segment of each
+# decorator string THROUGH that map before the closed-table lookup.
+# ---------------------------------------------------------------------------
+
+
+def test_aliased_dataclass_decorator_promotes_through_import_rename(
+    tmp_path: Path,
+) -> None:
+    """``from dataclasses import dataclass as _dc; @_dc`` must promote."""
+    store = open_store(tmp_path / "kg.kuzu")
+    try:
+        _run(store, "dataclass_aliased.py")
+        assert _semantic_role(store, "AliasedPoint") == "dataclass"
+    finally:
+        store.close()
+
+
+def test_aliased_pytest_module_decorator_promotes_through_import_rename(
+    tmp_path: Path,
+) -> None:
+    """``import pytest as pt; @pt.fixture`` must promote."""
+    store = open_store(tmp_path / "kg.kuzu")
+    try:
+        _run(store, "pytest_fixture_aliased.py")
+        assert _semantic_role(store, "aliased_fixture") == "fixture"
+    finally:
+        store.close()
+
+
+def test_aliased_property_decorator_promotes_through_import_rename(
+    tmp_path: Path,
+) -> None:
+    """``from builtins import property as prop; @prop`` must promote."""
+    store = open_store(tmp_path / "kg.kuzu")
+    try:
+        _run(store, "property_aliased.py")
+        assert _semantic_role(store, "radius") == "property"
+    finally:
+        store.close()
+
+
+def test_aliased_cached_property_does_NOT_promote(tmp_path: Path) -> None:
+    """``cached_property`` is not in the closed table — alias must not promote.
+
+    Negative control: even though ``@cp`` resolves through the import-
+    rename map to ``functools.cached_property``, that canonical name is
+    deliberately absent from ``_DECORATOR_ROLE``, so ``semantic_role``
+    must stay unset.
+    """
+    store = open_store(tmp_path / "kg.kuzu")
+    try:
+        _run(store, "property_aliased.py")
+        assert _semantic_role(store, "diameter") is None
+    finally:
+        store.close()
