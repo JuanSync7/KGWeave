@@ -42,6 +42,9 @@ from knowledge_graph.connectors import (
 from knowledge_graph.connectors.py_decorator_semantics import (
     PyDecoratorSemanticsConnector,
 )
+from knowledge_graph.connectors.py_scope_resolution import (
+    PyScopeResolutionConnector,
+)
 from knowledge_graph.connectors.py_md import PyMarkdownReferenceConnector
 from knowledge_graph.connectors.protocol import Connector
 from knowledge_graph.query import (
@@ -321,6 +324,7 @@ __all__ = [
     "SvMarkdownReferenceConnector",
     "PyMarkdownReferenceConnector",
     "PyDecoratorSemanticsConnector",
+    "PyScopeResolutionConnector",
     # errors
     "ReadOnlyViolation",
     "AmbiguousAnchor",
