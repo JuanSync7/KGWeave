@@ -765,6 +765,20 @@ def lift_python(content: bytes) -> list[PyNode]:
                     if dotted:
                         payload["metaclass"] = dotted
                     break
+            # v1.9-#4: record declared base classes as dotted names so
+            # PyDescriptorSemanticsConnector can chase inheritance for
+            # ``__get__`` resolution. ``class B(A, mod.Mixin):`` -> ``["A",
+            # "mod.Mixin"]``. Non-name expressions (e.g. dynamic base
+            # ``class X(make_base()):``) flatten to "" via _dotted_name
+            # and are dropped — they cannot participate in static
+            # inheritance chasing.
+            bases: list[str] = []
+            for base_arg in node.bases:
+                dotted = _dotted_name(base_arg.value)
+                if dotted:
+                    bases.append(dotted)
+            if bases:
+                payload["bases"] = bases
         else:
             return
         nodes.append(

@@ -12,11 +12,17 @@ This connector tags every qualifying ``PyClass`` with
 
 Detection rule (closed)
 -----------------------
-A ``PyClass`` qualifies iff at least one of its direct ``PyFunction``
-children (via ``PARENT_OF``) is named exactly ``__get__``. Inheritance
-is NOT chased: a subclass that inherits ``__get__`` from a parent
-without defining it locally is not tagged. (Cross-class resolution is
-queued for v1.9 alongside cross-file scope resolution.)
+A ``PyClass`` qualifies iff either:
+
+* at least one of its direct ``PyFunction`` children (via
+  ``PARENT_OF``) is named exactly ``__get__``; **or**
+* (v1.9-#4) any class reachable by chasing ``payload['bases']``
+  recursively — restricted to PyClass rows in the same corpus and
+  matched by ``name`` — directly declares ``__get__``.
+
+Bases not present in the corpus (typically ``object`` or stdlib
+classes like ``typing.Generic``) are silently skipped — there is no
+attempt to introspect external code.
 
 Precedence vs PyDecoratorSemanticsConnector
 -------------------------------------------
@@ -92,25 +98,77 @@ class PyDescriptorSemanticsConnector:
             method_index.setdefault(cid, set()).add(mname)
 
         # Step 2: walk every PyClass and decide whether to tag it.
+        # Build parallel indices keyed by corpus for inheritance chasing —
+        # name_to_id resolves a base reference back to its PyClass row,
+        # bases_index holds declared base names, corpus_of confines
+        # resolution to the same corpus as the subclass (v1.9-#4 scope).
+        rows: list[tuple[str, str]] = []
+        name_to_id: dict[tuple[str, str], str] = {}
+        bases_index: dict[str, list[str]] = {}
+        corpus_of: dict[str, str] = {}
         res = conn.execute(
             """
             MATCH (n:Node)
             WHERE n.source = 'py'
               AND n.kind = 'PyClass'
               AND n.payload IS NOT NULL
-            RETURN n.id, n.payload
+            RETURN n.id, n.payload, n.name, n.corpus
             """,
             {},
         )
-        rows: list[tuple[str, str]] = []
         while res.has_next():
             row = res.get_next()
-            rows.append((row[0], row[1]))
+            nid, payload_str, cname, corpus = row[0], row[1], row[2], row[3]
+            rows.append((nid, payload_str))
+            if cname:
+                name_to_id[(corpus, cname)] = nid
+            corpus_of[nid] = corpus
+            try:
+                payload_obj = json.loads(payload_str)
+            except (TypeError, ValueError):
+                continue
+            inner = payload_obj.get("payload")
+            if isinstance(inner, dict):
+                bs = inner.get("bases")
+                if isinstance(bs, list):
+                    bases_index[nid] = [b for b in bs if isinstance(b, str)]
+
+        def _has_inherited_get(start_nid: str) -> bool:
+            """Walk declared bases (recursively, same-corpus only). True
+            if any reachable ancestor directly declares ``__get__``.
+            """
+            corpus = corpus_of.get(start_nid)
+            if corpus is None:
+                return False
+            seen: set[str] = {start_nid}
+            stack: list[str] = list(bases_index.get(start_nid, []))
+            while stack:
+                base_name = stack.pop()
+                # Match the trailing segment too so ``mod.A`` and bare
+                # ``A`` both resolve when ``A`` lives in the corpus.
+                candidates = [base_name]
+                if "." in base_name:
+                    candidates.append(base_name.rsplit(".", 1)[-1])
+                resolved: str | None = None
+                for cand in candidates:
+                    hit = name_to_id.get((corpus, cand))
+                    if hit is not None and hit not in seen:
+                        resolved = hit
+                        break
+                if resolved is None:
+                    continue  # base not in corpus — skip
+                seen.add(resolved)
+                methods = method_index.get(resolved)
+                if methods and _DESCRIPTOR_BINDING_METHOD in methods:
+                    return True
+                stack.extend(bases_index.get(resolved, []))
+            return False
 
         touched = 0
         for nid, payload_str in rows:
             methods = method_index.get(nid)
-            if not methods or _DESCRIPTOR_BINDING_METHOD not in methods:
+            directly = methods and _DESCRIPTOR_BINDING_METHOD in methods
+            if not directly and not _has_inherited_get(nid):
                 continue
             try:
                 payload_obj = json.loads(payload_str)
