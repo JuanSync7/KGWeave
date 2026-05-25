@@ -1518,3 +1518,31 @@ to end: quickstart ≤ 10 s, SV writer N=1000 ≤ 3 s, Py writer N=1000
 - v1.8-#2: conditional imports beyond `TYPE_CHECKING` — `try/except ImportError`, `if sys.version_info ...`, generic `if <expr>` guards. Walker addition; new `import_guard` payload field over a closed enum. Size S, risk low.
 - v1.8-#3: capture resolution against lexical scopes (new `py_scope_resolution.py` connector). Size M, risk medium.
 - v1.8-#4: metaclass + descriptor protocol annotation. Size S–M.
+
+---
+
+## 2026-05-25 — v1.8-#2 — conditional imports beyond `TYPE_CHECKING`
+**Branch / commit:** `kgweave/kuzu-port` @ `90db850` (G1 RED `7bf577a`, G2 GREEN `90db850`)
+
+### What we did
+- **Closed payload set locked once:** `import_guard ∈ {"type-checking", "try-import", "version-guard", "conditional", None}`. Absent key encodes `None`. Documented inline on `_emit_simple_stmt`'s docstring so the next contributor cannot drift it.
+- **Walker dispatch:** the module top-level loop in `src/knowledge_graph/builders/py/walker.py` now branches on `cst.If` and `cst.Try`:
+  - `if TYPE_CHECKING:` → `import_guard="type-checking"` AND preserves the v1.6-#3 `runtime=False` flag (both layers ship together).
+  - `if sys.version_info <cmp> ...:` → `import_guard="version-guard"`; new `_is_version_info_test` matches any Compare whose left operand is an Attribute chain ending in `version_info`.
+  - Any other `cst.If` → `import_guard="conditional"`. Walks `elif` / `else` chains so all branches inherit the same guard.
+  - `try: import X / except ...: import Y` → `import_guard="try-import"` on both the try-body imports and any handler-body imports. New `_try_block_imports_only` keeps us off `try` blocks that aren't the optional-import idiom.
+- **Three new fixtures + one new test file:** `import_try_except.py`, `import_version_guard.py`, `import_conditional.py`, and `tests/knowledge_graph/builders/py/test_kind_imports_guards.py` (5 cases, including a closed-set invariant test that runs across every guard fixture).
+- **TYPE_CHECKING fixture re-asserted** in the new test file — `runtime=False` is preserved AND `import_guard="type-checking"` is added. Existing `test_kind_type_checking.py` stayed green untouched.
+
+### Validation
+- 5/5 new guard tests green; 44/44 `tests/knowledge_graph/builders/py/` green; 716 SV-builder green; 32/32 connector green; 20 passed + 1 skipped in `tests/_meta/`.
+- Perf floors held: `test_py_writer_perf_n1000` and SV `test_writer_perf_n1000` PASS dir-scoped.
+
+### Lessons learnt
+- **Test fixtures with duplicate primary names mislead `by_primary` lookups.** First draft of `import_try_except.py` had a top-level `import json` and a fallback `import json as ujson` — both PyImports record `name="json"`, so the second clobbered the first in the dict and broke an assertion that only ran because the test happened to look it up. Fix was a fixture change (use a `ujson = None` sentinel in the except arm) rather than changing the test indexing strategy — the unique-primary-name assumption is shared across nearly every existing walker test and breaking it would have widened blast radius.
+- **Closed-set discipline pays off at test time.** The dedicated `test_import_guard_values_are_in_closed_set` invariant test costs four lines and catches any future contributor who silently introduces a sixth value. Cheap defense, high payoff.
+- **`elif`/`else` propagation is the correct default, not a refinement.** Treating an `else` branch under `if sys.version_info ...` as still `version-guard` matches the operator-mental-model (the branch is reachable iff the version condition is false) and avoids the closed set growing an `inverse-version-guard` member.
+
+### Next moves
+- v1.8-#3: capture resolution against actual lexical scopes — new `py_scope_resolution.py` connector, scope index built from PyModule/PyFunction/PyClass parent_idx chains, walks `PyLambda.captures` and (later) PyComprehension free names. Size M, risk medium.
+- v1.8-#4: metaclass + descriptor protocol annotation. Size S–M.
