@@ -380,20 +380,69 @@ def _bindings_in_block(
     return locals_, nonlocals_, globals_
 
 
-class _LambdaScopeIndexer(cst.CSTVisitor):
-    """Walk a module and record per-lambda enclosing-scope bindings.
+def _comp_iter_target_names(target: cst.BaseExpression) -> list[str]:
+    """Names bound by a CompFor target (recursive unpack).
 
-    For every ``Lambda`` encountered we capture:
+    Mirrors :func:`_names_bound_by_assign_target` but kept separate so
+    the comprehension-scope construction here is self-contained.
+    """
+    out: list[str] = []
+
+    def walk(node: cst.CSTNode) -> None:
+        if isinstance(node, cst.Name):
+            out.append(node.value)
+            return
+        if isinstance(node, (cst.Tuple, cst.List)):
+            for el in node.elements:
+                walk(el)
+            return
+        if isinstance(node, (cst.Element, cst.StarredElement)):
+            walk(node.value)
+            return
+
+    walk(target)
+    return out
+
+
+def _comprehension_local_names(comp: cst.CSTNode) -> set[str]:
+    """All names bound by a comprehension's own scope (iter-targets).
+
+    Walrus targets inside a comp are NOT classified as comp-local for
+    closure-resolution purposes (PEP 572 sends them to the enclosing
+    function), but the walker already subtracted walrus targets from
+    the ``captures`` list it shipped, so the connector never sees them
+    here. Iter-targets alone suffice.
+    """
+    out: set[str] = set()
+    for_in = getattr(comp, "for_in", None)
+    while isinstance(for_in, cst.CompFor):
+        for n in _comp_iter_target_names(for_in.target):
+            out.add(n)
+        for_in = for_in.inner_for_in
+    return out
+
+
+class _LambdaScopeIndexer(cst.CSTVisitor):
+    """Walk a module and record per-lambda / per-comprehension scopes.
+
+    For every ``Lambda`` / ``ListComp`` / ``SetComp`` / ``DictComp`` /
+    ``GeneratorExp`` encountered we capture:
 
     * its byte span (start, end) — for matching back to DB rows
-    * its own parameter names
-    * the bindings of every enclosing FunctionDef / Lambda
+    * its own locally-bound names (lambda params / comp iter-targets)
+    * the bindings of every enclosing FunctionDef / Lambda /
+      Comprehension
     * the bindings of the Module
     * whether any enclosing scope is a class (which is *opaque* to
-      this lambda for closure-name lookup, per Python scoping)
+      nested closures for closure-name lookup, per Python scoping)
 
     Walking is depth-first; we push/pop a stack frame on every
     scope-creating node.
+
+    Generalises the original v1.8-#3 lambda-only indexer to cover
+    comprehensions as well (v1.9-#1). The class name is retained for
+    back-compat — ``self.lambdas`` and ``self.comprehensions`` give
+    span-keyed frames per kind.
     """
 
     METADATA_DEPENDENCIES = (ByteSpanPositionProvider,)
@@ -404,6 +453,7 @@ class _LambdaScopeIndexer(cst.CSTVisitor):
         self._stack: list[dict[str, Any]] = []
         # span -> {"enclosing_locals": list[set[str]], "module_locals": set[str]}
         self.lambdas: dict[tuple[int, int], dict[str, Any]] = {}
+        self.comprehensions: dict[tuple[int, int], dict[str, Any]] = {}
         self._module_locals: set[str] = set()
         # Precompute module-level bindings once.
         mloc, _, _ = _bindings_in_block(module)
@@ -459,7 +509,7 @@ class _LambdaScopeIndexer(cst.CSTVisitor):
         # but the walker already excludes such targets from the
         # capture list (walrus assigns a Name load on lookup); we don't
         # need to enumerate them in the lambda frame itself.
-        self._record_lambda(node, params)
+        self._record_scope(node, self.lambdas, params)
         self._stack.append(
             {
                 "kind": "lambda",
@@ -472,13 +522,67 @@ class _LambdaScopeIndexer(cst.CSTVisitor):
     def leave_Lambda(self, original_node: cst.Lambda) -> None:
         self._stack.pop()
 
+    # --- comprehension scopes (v1.9-#1) ----------------------------------
+
+    def _enter_comp(self, node: cst.CSTNode) -> None:
+        locals_ = _comprehension_local_names(node)
+        self._record_scope(node, self.comprehensions, locals_)
+        self._stack.append(
+            {
+                "kind": "comprehension",
+                "locals": locals_,
+                "nonlocals": set(),
+                "globals": set(),
+            }
+        )
+
+    def _leave_comp(self) -> None:
+        self._stack.pop()
+
+    def visit_ListComp(self, node: cst.ListComp) -> None:
+        self._enter_comp(node)
+
+    def leave_ListComp(self, original_node: cst.ListComp) -> None:
+        self._leave_comp()
+
+    def visit_SetComp(self, node: cst.SetComp) -> None:
+        self._enter_comp(node)
+
+    def leave_SetComp(self, original_node: cst.SetComp) -> None:
+        self._leave_comp()
+
+    def visit_DictComp(self, node: cst.DictComp) -> None:
+        self._enter_comp(node)
+
+    def leave_DictComp(self, original_node: cst.DictComp) -> None:
+        self._leave_comp()
+
+    def visit_GeneratorExp(self, node: cst.GeneratorExp) -> None:
+        self._enter_comp(node)
+
+    def leave_GeneratorExp(self, original_node: cst.GeneratorExp) -> None:
+        self._leave_comp()
+
     # --- recording --------------------------------------------------------
 
-    def _record_lambda(self, node: cst.Lambda, params: set[str]) -> None:
+    def _record_scope(
+        self,
+        node: cst.CSTNode,
+        bucket: dict[tuple[int, int], dict[str, Any]],
+        locals_: set[str],
+    ) -> None:
+        """Snapshot the current enclosing-scope stack for ``node``.
+
+        Used for both lambdas (recording into ``self.lambdas``) and
+        comprehensions (recording into ``self.comprehensions``). The
+        frame snapshot is keyed by byte span so the connector can
+        later match it to the corresponding PyLambda / PyComprehension
+        DB row.
+        """
         span = self.get_metadata(ByteSpanPositionProvider, node, None)
         if span is None:
             return
-        # Collect enclosing scopes (excluding the not-yet-pushed lambda).
+        # Collect enclosing scopes (excluding the not-yet-pushed frame).
         # Order: innermost-first.
         enclosing_locals: list[set[str]] = []
         enclosing_nonlocals: list[set[str]] = []
@@ -489,8 +593,8 @@ class _LambdaScopeIndexer(cst.CSTVisitor):
             enclosing_nonlocals.append(frame["nonlocals"])
             enclosing_globals.append(frame["globals"])
             enclosing_kinds.append(frame["kind"])
-        self.lambdas[(span.start, span.start + span.length)] = {
-            "params": params,
+        bucket[(span.start, span.start + span.length)] = {
+            "params": locals_,
             "enclosing_locals": enclosing_locals,
             "enclosing_nonlocals": enclosing_nonlocals,
             "enclosing_globals": enclosing_globals,
@@ -583,33 +687,48 @@ class PyScopeResolutionConnector:
     def synthesize(self, store) -> int:
         conn = store.conn
 
-        # Step 1: gather PyLambda rows grouped by origin_id.
+        # Step 1: gather PyLambda + PyComprehension rows grouped by
+        # origin_id. Both kinds carry ``payload['captures']`` (v1.7-#5
+        # for lambdas, v1.9-#1 for comprehensions); classification
+        # mechanics are identical.
         res = conn.execute(
             """
             MATCH (n:Node)
             WHERE n.source = 'py'
-              AND n.kind = 'PyLambda'
+              AND n.kind IN ['PyLambda', 'PyComprehension']
               AND n.payload IS NOT NULL
-            RETURN n.id, n.origin_id, n.start_offset, n.end_offset, n.payload
+            RETURN n.id, n.origin_id, n.start_offset, n.end_offset,
+                   n.payload, n.kind
             """,
             {},
         )
-        rows: list[tuple[str, str, int, int, str]] = []
-        per_origin: dict[str, list[tuple[str, int, int, str]]] = {}
+        # Per origin, separate buckets for lambdas vs comprehensions so
+        # we look up the right indexer dict for each.
+        per_origin: dict[
+            str, list[tuple[str, int, int, str, str]]
+        ] = {}
+        any_rows = False
         while res.has_next():
             row = res.get_next()
-            nid, oid, so, eo, payload = row[0], row[1], row[2], row[3], row[4]
+            nid, oid, so, eo, payload, kind = (
+                row[0],
+                row[1],
+                row[2],
+                row[3],
+                row[4],
+                row[5],
+            )
             if oid is None or payload is None:
                 continue
-            rows.append((nid, oid, so, eo, payload))
-            per_origin.setdefault(oid, []).append((nid, so, eo, payload))
+            any_rows = True
+            per_origin.setdefault(oid, []).append((nid, so, eo, payload, kind))
 
-        if not rows:
+        if not any_rows:
             return 0
 
         # Step 2: per-origin, fetch source and build scope index.
         touched = 0
-        for origin_id, lam_rows in per_origin.items():
+        for origin_id, scope_rows in per_origin.items():
             origin_res = conn.execute(
                 "MATCH (o:Origin {id: $oid}) RETURN o.content",
                 {"oid": origin_id},
@@ -631,7 +750,7 @@ class PyScopeResolutionConnector:
                 # surfacing as a hard error from a connector.
                 continue
 
-            for nid, so, eo, payload_str in lam_rows:
+            for nid, so, eo, payload_str, kind in scope_rows:
                 try:
                     payload_obj = json.loads(payload_str)
                 except (TypeError, ValueError):
@@ -642,7 +761,10 @@ class PyScopeResolutionConnector:
                 captures = inner.get("captures")
                 if not isinstance(captures, list):
                     continue
-                frame = indexer.lambdas.get((so, eo))
+                if kind == "PyLambda":
+                    frame = indexer.lambdas.get((so, eo))
+                else:
+                    frame = indexer.comprehensions.get((so, eo))
                 if frame is None:
                     # Span mismatch — record every capture as unresolved
                     # rather than dropping the row. Defensive: keeps the
