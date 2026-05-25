@@ -24,6 +24,61 @@ Entry skeleton:
 
 ---
 
+## 2026-05-25 — v1.9-#2 — `__set_name__` protocol-hook tagging
+**Branch / commit:** `kgweave/kuzu-port` @ `79d3ca4`
+
+### What we did
+- New connector module `src/knowledge_graph/connectors/py_set_name_semantics.py`
+  — copy-shape of `py_descriptor_semantics.py` from v1.8-#4, matching
+  `__set_name__` instead of `__get__`. Tags qualifying `PyClass` with
+  `payload.semantic_role = "set-name-hook"`.
+- Detection rule (closed): direct `PyFunction` children of the `PyClass`
+  named `__set_name__`. No inheritance chasing (mirrors v1.8-#4).
+- Precedence: skip when `semantic_role` already set. Chain becomes
+  `decorator (explicit) > descriptor (__get__ structural) >
+  set-name-hook (__set_name__ structural)`.
+- Registered `PySetNameSemanticsConnector` in the facade
+  (`src/knowledge_graph/__init__.py`) alongside the v1.8-#4 descriptor
+  connector.
+- Three fixtures + three connector tests: positive (set_name_only),
+  precedence (set_name_with_get → descriptor wins), negative
+  (not_descriptor reused).
+- Targeted suites green: `tests/knowledge_graph/connectors/`,
+  `tests/knowledge_graph/builders/py/`, `tests/_meta/` — 115 passed, 1
+  skipped in 125.93 s.
+
+### Lessons learnt
+- **Connector duplication beats template parametrisation when the
+  protocols are conceptually distinct** — *`__get__` (PEP 252 descriptor
+  protocol) and `__set_name__` (PEP 487 binding-time hook) share a method-
+  match shape but represent different language contracts. Extending
+  `py_descriptor_semantics.py` to take a method-name parameter would
+  couple their lifecycles; a near-identical sibling module keeps each
+  protocol owns its own connector name, requires-list, and tests. Charter
+  v1.9-#2 explicitly listed it as a separate item so the duplication is
+  warranted.*
+- **Precedence rule scales by always reading, never writing-over** —
+  *Every new structural tagger added to the chain (descriptor, set-name-
+  hook, and any future v1.9-#4 inheritance-chase tag) only writes when
+  `semantic_role is None`. The chain is purely additive — connector
+  order is a runtime ordering of write-priorities, not a compile-time
+  rewrite of priors. Future tags can be slotted in by ordering alone.*
+
+### Next moves
+- **v1.9-#3 cross-file module-export index** (M, headline item) — the
+  M-sized cross-file pass that widens capture resolution from 4 closed
+  values to 5. Build the corpus-wide `{module_qualname: set[exported]}`
+  index, hook into `PyScopeResolutionConnector` for unresolved-name
+  lookup.
+- **v1.9-#4 descriptor inheritance chasing** (S) — extend the v1.8-#4
+  connector (NOT this one) to walk `PyClass.payload["bases"]` and tag
+  classes whose base declares `__get__`. Lands after #3 to avoid
+  surface-conflict with #3's index work.
+- Same inheritance-chase extension could later apply to set-name-hook,
+  but charter v1.9 does not list it — defer to a future slate.
+
+---
+
 ## 2026-05-23 — v1.5-#2 — bulk-COPY writer
 **Branch / commit:** `kgweave/kuzu-port` @ `e6b7281` (4 commits on top of v1.5-#6+#4+#5 head `2c90d29`, push pending at journal-write time)
 
