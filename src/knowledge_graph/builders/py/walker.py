@@ -649,13 +649,22 @@ def lift_python(content: bytes) -> list[PyNode]:
                 _emit_def_or_class(inner, this_idx)
 
     def _emit_simple_stmt(
-        stmt: cst.SimpleStatementLine, *, runtime: bool
+        stmt: cst.SimpleStatementLine,
+        *,
+        runtime: bool,
+        import_guard: str | None = None,
     ) -> None:
         """Emit PyImport / PyTypeAlias for each small statement in ``stmt``.
 
         ``runtime=False`` is used for the body of an ``if TYPE_CHECKING:``
         block — imports there are only valid for type-checkers and must
         not be issued at runtime.
+
+        ``import_guard`` (v1.8-#2) records the wrapping control-flow
+        construct from the closed set
+        ``{"type-checking", "try-import", "version-guard",
+        "conditional", None}``. Only attached to PyImport rows (not
+        PyTypeAlias). Absent payload key == ``None``.
         """
         for small in stmt.body:
             if isinstance(small, cst.TypeAlias):
@@ -702,6 +711,8 @@ def lift_python(content: bytes) -> list[PyNode]:
                         "level": small.relative and len(small.relative) or 0,
                         "runtime": runtime,
                     }
+                if import_guard is not None:
+                    payload["import_guard"] = import_guard
                 nodes.append(
                     PyNode(
                         kind="PyImport",
@@ -721,6 +732,47 @@ def lift_python(content: bytes) -> list[PyNode]:
             return True
         return False
 
+    def _is_version_info_test(expr: cst.BaseExpression) -> bool:
+        """Recognise ``sys.version_info ...`` comparisons.
+
+        Matches any Compare whose left operand is an Attribute chain
+        ending in ``version_info`` (covers ``sys.version_info``,
+        ``_sys.version_info``, ``compat.sys.version_info``).
+        """
+        if not isinstance(expr, cst.Comparison):
+            return False
+        left = expr.left
+        if isinstance(left, cst.Attribute) and left.attr.value == "version_info":
+            return True
+        return False
+
+    def _try_block_imports_only(node: cst.Try) -> bool:
+        """True if the ``try`` body's small statements are all imports.
+
+        Used to recognise the optional-import idiom; ``try: import X /
+        except ImportError: ...``. We don't require the except handler
+        catches ``ImportError`` literally — any try-wrapped import is
+        guarded against import failure in practice.
+        """
+        for inner in node.body.body:
+            if isinstance(inner, cst.SimpleStatementLine):
+                for small in inner.body:
+                    if not isinstance(small, (cst.Import, cst.ImportFrom)):
+                        return False
+            else:
+                # nested def/class/etc inside try — not the simple idiom
+                return False
+        return True
+
+    def _emit_if_branch_imports(
+        branch_body: cst.IndentedBlock, *, runtime: bool, import_guard: str
+    ) -> None:
+        for inner in branch_body.body:
+            if isinstance(inner, cst.SimpleStatementLine):
+                _emit_simple_stmt(
+                    inner, runtime=runtime, import_guard=import_guard
+                )
+
     for stmt in module.body:
         if isinstance(stmt, cst.SimpleStatementLine):
             _emit_simple_stmt(stmt, runtime=True)
@@ -739,12 +791,85 @@ def lift_python(content: bytes) -> list[PyNode]:
                         payload={"arms": _match_arms_payload(stmt)},
                     )
                 )
-        elif isinstance(stmt, cst.If) and _is_type_checking_test(stmt.test):
-            # Imports under ``if TYPE_CHECKING:`` are runtime=False.
+        elif isinstance(stmt, cst.If):
+            # v1.8-#2: closed-set import_guard dispatch.
+            if _is_type_checking_test(stmt.test):
+                # Imports under ``if TYPE_CHECKING:`` are runtime=False.
+                for inner in stmt.body.body:
+                    if isinstance(inner, cst.SimpleStatementLine):
+                        _emit_simple_stmt(
+                            inner, runtime=False, import_guard="type-checking"
+                        )
+            elif _is_version_info_test(stmt.test):
+                _emit_if_branch_imports(
+                    stmt.body, runtime=True, import_guard="version-guard"
+                )
+                # `else` / `elif` branches of a version guard are still
+                # version-guarded.
+                orelse = stmt.orelse
+                while orelse is not None:
+                    if isinstance(orelse, cst.If):
+                        _emit_if_branch_imports(
+                            orelse.body,
+                            runtime=True,
+                            import_guard="version-guard",
+                        )
+                        orelse = orelse.orelse
+                    elif isinstance(orelse, cst.Else):
+                        _emit_if_branch_imports(
+                            orelse.body,
+                            runtime=True,
+                            import_guard="version-guard",
+                        )
+                        orelse = None
+                    else:
+                        orelse = None
+            else:
+                _emit_if_branch_imports(
+                    stmt.body, runtime=True, import_guard="conditional"
+                )
+                orelse = stmt.orelse
+                while orelse is not None:
+                    if isinstance(orelse, cst.If):
+                        _emit_if_branch_imports(
+                            orelse.body,
+                            runtime=True,
+                            import_guard="conditional",
+                        )
+                        orelse = orelse.orelse
+                    elif isinstance(orelse, cst.Else):
+                        _emit_if_branch_imports(
+                            orelse.body,
+                            runtime=True,
+                            import_guard="conditional",
+                        )
+                        orelse = None
+                    else:
+                        orelse = None
+        elif isinstance(stmt, cst.Try) and _try_block_imports_only(stmt):
+            # ``try: import X / except ImportError: import Y`` — both
+            # branches recorded as guarded imports.
             for inner in stmt.body.body:
                 if isinstance(inner, cst.SimpleStatementLine):
-                    _emit_simple_stmt(inner, runtime=False)
-        # Anything else (other If, For, Try, ...) is intentionally skipped
+                    _emit_simple_stmt(
+                        inner, runtime=True, import_guard="try-import"
+                    )
+            for handler in stmt.handlers:
+                for inner in handler.body.body:
+                    if isinstance(inner, cst.SimpleStatementLine):
+                        # Only emit if the handler statements are also
+                        # imports (the fallback form); other small
+                        # statements (re-raise, logging) are not lifted.
+                        if any(
+                            isinstance(s, (cst.Import, cst.ImportFrom))
+                            for s in inner.body
+                        ):
+                            _emit_simple_stmt(
+                                inner,
+                                runtime=True,
+                                import_guard="try-import",
+                            )
+        # Anything else (For, while, with, ...) is intentionally skipped
         # in v1.
 
     # Scope-aware comprehension sweep (v1.7-#2). Each PyComprehension

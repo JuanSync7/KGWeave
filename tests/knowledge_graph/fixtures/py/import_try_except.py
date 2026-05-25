@@ -10,8 +10,8 @@ import json
 try:
     import ujson
 except ImportError:
-    import json as ujson
+    ujson = None  # type: ignore[assignment]
 
 
 def dump(obj: object) -> str:
-    return ujson.dumps(obj)
+    return (ujson or json).dumps(obj)
