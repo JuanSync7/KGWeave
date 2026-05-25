@@ -1546,3 +1546,36 @@ to end: quickstart ≤ 10 s, SV writer N=1000 ≤ 3 s, Py writer N=1000
 ### Next moves
 - v1.8-#3: capture resolution against actual lexical scopes — new `py_scope_resolution.py` connector, scope index built from PyModule/PyFunction/PyClass parent_idx chains, walks `PyLambda.captures` and (later) PyComprehension free names. Size M, risk medium.
 - v1.8-#4: metaclass + descriptor protocol annotation. Size S–M.
+
+---
+
+## 2026-05-25 — v1.8-#3 — capture resolution against lexical scopes
+**Branch / commit:** `kgweave/kuzu-port` @ `62f6402` (G1 RED `3e05008`, G2 GREEN `62f6402`)
+
+### What we did
+- **New connector:** `src/knowledge_graph/connectors/py_scope_resolution.py` (`PyScopeResolutionConnector`, registered name `py-scope-resolution`, `requires=["py"]`). Per-file (per `origin_id`) it fetches the Origin's source bytes, re-parses with libcst via `MetadataWrapper`, and builds a lambda-keyed scope index via the `_LambdaScopeIndexer` `cst.CSTVisitor`. Scope stack frames are `{kind, locals, nonlocals, globals}`; lambda lookup walks innermost-first, skips ClassDef frames (Python LEGB class-opacity), promotes `nonlocal` declarations as `local-in-enclosing`, and routes `global` declarations through module/builtin/unresolved as appropriate.
+- **Per-scope binding collection (`_bindings_in_block`):** walks one suite without crossing nested scope-creators (FunctionDef / ClassDef / Lambda / comprehensions) and collects bindings from parameters, `Assign` / `AugAssign` / `AnnAssign` (recursive tuple/list unpack via `_names_bound_by_assign_target`), walrus (`NamedExpr.target` — including walrus inside comprehensions per PEP 572), `for` / `with` / `except as` targets, function/class def names, `import` / `from … import` bindings (`_import_bindings`), and `nonlocal` / `global` declarations.
+- **Builtin set:** `frozenset(n for n in dir(builtins) if not (n.startswith("__") and n.endswith("__")))`. Chosen over `builtins.__all__` (incomplete — misses `True`, `False`, `None`, `__build_class__` helpers). Documented in module docstring.
+- **Payload shape:** `payload["captures_resolved"] = [{name, kind}, ...]`, parallel to the existing `payload["captures"]`. Original list preserved verbatim for back-compat. Kind ∈ closed set `{local-in-enclosing, module-level, builtin, unresolved}`.
+- **Lambda matching:** by `(origin_id, start_offset, end_offset)`. If a span doesn't resolve (re-parse skew), the connector falls back to `unresolved` for every capture rather than dropping the row, keeping the payload-shape contract honest.
+- **Public facade:** `PyScopeResolutionConnector` exported from `knowledge_graph` `__init__` alongside `PyDecoratorSemanticsConnector`.
+- **Six fixtures + six tests:** `lambda_closure_locals.py`, `lambda_module_level.py`, `lambda_builtin.py`, `lambda_unresolved.py`, `lambda_nonlocal.py`, `lambda_walrus.py`; one test per fixture asserting `captures_resolved` mapping. RED before GREEN, both committed.
+
+### Validation
+- 6/6 new connector tests green on first GREEN run.
+- 38/38 in `tests/knowledge_graph/connectors/`.
+- 44/44 in `tests/knowledge_graph/builders/py/` (no regressions to existing lambda + comprehension tests).
+- 716 in `tests/knowledge_graph/builders/sv/`.
+- 20 passed + 1 skipped in `tests/_meta/`.
+- Perf floors held: `test_quickstart_wall_clock_under_budget` (3.11 s), `test_py_writer_perf_n1000`, `test_writer_perf_n1000` (sv) all PASS.
+
+### Lessons learnt
+- **Re-parse from `Origin.content` is the right answer.** The walker doesn't emit per-binding facts (it only emits scope-creating nodes + a sorted captures list), so the connector needs the AST. The Origin row already carries the latin-1 mirror of source bytes — `BYTES_CODEC` round-trips — so the connector re-uses the same libcst pipeline the builder uses. No new walker payload, no new edge type. Re-parse cost is amortised over every lambda in a file, and only fires when the connector runs.
+- **Class-scope opacity is the easy-to-forget LEGB rule.** First instinct was to treat every enclosing scope as transparent. CPython skips ClassDef when nested functions/lambdas look up free names. Got it right on the first pass by encoding `kind` on each stack frame and `continue`-ing past `"class"` in `_classify`'s pass-1 loop — the existing v1.7-#5 fixture (`lambdas_capture.py`)'s method-body lambda capturing `self` already exercises this path and stays green.
+- **PyComprehension capture-equivalent deferred to v1.9.** Walker today never records comp captures (only iter-targets). Adding that would be a walker payload addition — out of scope for a connector-only v1.8 item. The class-opacity, walrus-bubbles-up-from-comp, and scope-stack groundwork in this connector all reuse cleanly when v1.9 adds the comp-side payload.
+- **Idempotency comes for free with `{name, kind}` shape + sort_keys=True.** Second connector run produces byte-identical JSON; the test suite doesn't even need an explicit idempotency assertion because re-running over the same store mutates nothing.
+
+### Next moves
+- v1.8-#4: metaclass + descriptor protocol annotation. Walker emits `metaclass: str | None` on PyClass when bases declare `metaclass=...`; new connector tags `semantic_role="descriptor"` on classes implementing `__get__` (+ optional `__set__` / `__delete__`). Size S–M.
+- v1.9 candidate: PyComprehension free-name capture extraction. Walker payload addition + reuse this connector's `_bindings_in_block` / `_LambdaScopeIndexer` scaffolding (likely renamed to `_ScopeIndexer` and parametrised over `Lambda | Comprehension`).
+- v1.9 candidate: cross-file resolution. Today every `unresolved` could be a name imported from another module; the connector would need a corpus-wide module-export index to lift those to `cross-file-{origin}`.
