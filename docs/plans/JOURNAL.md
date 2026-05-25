@@ -24,6 +24,144 @@ Entry skeleton:
 
 ---
 
+## 2026-05-25 — v1.9-#4 — descriptor inheritance chasing
+**Branch / commit:** `kgweave/kuzu-port` @ `49b192e`
+
+### What we did
+- Walker now emits `PyClass.payload["bases"]` — list of dotted names
+  lifted from `ClassDef.bases` via the existing `_dotted_name` helper.
+  Dynamic / non-name bases (e.g. `class X(make_base())`) flatten to "" and
+  are dropped, matching the metaclass-kwarg rule.
+- `PyDescriptorSemanticsConnector` now builds three corpus-keyed
+  indices in its second Cypher pass: `name_to_id[(corpus, class_name)]
+  → nid`, `bases_index[nid] → list[str]`, `corpus_of[nid] → corpus`.
+  A class is tagged `semantic_role='descriptor'` if either it directly
+  declares `__get__` (v1.8-#4 behaviour) **or** any reachable ancestor
+  via declared bases (recursively, same-corpus only) declares `__get__`.
+- Resolution tries both the full dotted base (`mod.A`) and the bare
+  trailing segment (`A`) against `name_to_id`. Bases not in the corpus
+  (`object`, `typing.Generic`, …) are skipped silently.
+- Precedence unchanged: `inner.get("semantic_role")` non-None still
+  short-circuits — descriptor-via-inheritance never overwrites a
+  prior dataclass / set-name-hook / direct-descriptor tag. The
+  set-name precedence test confirms `B(A)` inheriting `__get__` and
+  declaring its own `__set_name__` stays `"descriptor"`.
+- Two new fixtures (`descriptor_inherited.py`,
+  `descriptor_inherited_multi_hop.py`) + a new connector test module
+  (`test_py_descriptor_inheritance.py`, 4 tests covering single-hop,
+  multi-hop, out-of-corpus base, and set-name precedence). All 11
+  descriptor + set-name tests green; full
+  `tests/knowledge_graph/connectors/` + `tests/knowledge_graph/builders/py/`
+  + `tests/_meta/` suites green at 121 passed / 1 skipped.
+
+### Lessons learnt
+- **Charter said "PyClass.payload['bases'] (already in)" but the
+  field didn't exist yet.** The walker only captured decorators +
+  metaclass for ClassDef. The fix was a 6-line addition to the
+  `_emit_def_or_class` ClassDef branch — but the assumption could
+  have caused a downstream connector to silently no-op if the test
+  scaffolding were thinner. **Validate fixture/payload preconditions
+  before sizing the connector work.**
+- **Inheritance chasing is just name-matching, not type resolution.**
+  Same-corpus + same-name + `__get__`-present is the entire
+  decision. Resisting the urge to thread in the v1.9-#3 cross-file
+  index (which would let an external base in another corpus module
+  count) kept the diff S-size and the precedence story simple.
+- **Trailing-segment fallback covers the common case where a base is
+  used unqualified inside its own module.** Full-dotted matching
+  alone misses `class B(A)` where `A` is the local symbol; bare-name
+  matching alone risks colliding two classes with the same leaf name
+  from different modules. Trying full-dotted first then trailing
+  segment is the right priority — and the same-corpus restriction
+  keeps the false-positive surface small.
+
+### Next moves
+- v1.9 slate is closed; see the closing-summary entry directly below
+  for the v1.10 candidate queue.
+
+---
+
+## 2026-05-25 — v1.9 slate close
+**Branch / commit:** `kgweave/kuzu-port` @ `49b192e`
+
+### What we did
+Closed the v1.9 four-item slate (Python scope/type completeness):
+
+1. **v1.9-#1 PyComprehension free-name capture** — walker now emits
+   `PyComprehension.captures: list[str]` and the existing
+   `_LambdaScopeIndexer` (renamed/parametrised over `Lambda |
+   Comprehension`) classifies comprehension captures the same way as
+   lambda captures.
+2. **v1.9-#2 `__set_name__` hook** — new
+   `PySetNameSemanticsConnector` tags `PyClass.semantic_role =
+   "set-name-hook"` for classes that directly declare `__set_name__`,
+   with descriptor-wins precedence.
+3. **v1.9-#3 cross-file module-export index** — corpus-wide static
+   `{module: exported_names}` + per-origin `{local: canonical}`
+   indices lift capture-resolution from a closed set of 4 to 5
+   (added `cross-file-import` with `origin_module`). Star-imports and
+   bare-module imports stay `unresolved` per charter scope.
+4. **v1.9-#4 descriptor inheritance chasing** — walker emits
+   `PyClass.payload["bases"]`; descriptor connector chases them
+   recursively within the same corpus to tag subclasses that inherit
+   `__get__`.
+
+Perf snapshot (post-slate, all under their charter floors):
+- quickstart wall: ~1.4 s (floor ≤ 10 s)
+- py writer N=1000: ~0.6 s (floor ≤ 6 s)
+- sv writer N=1000: well under 3 s (untouched this slate)
+
+Total slate footprint: 4 RED + 4 GREEN + 4 docs commits across two
+walker payload additions, one new connector, and extensions to two
+existing connectors. No regressions: 121 passed / 1 skipped on the
+combined `connectors/` + `builders/py/` + `_meta/` directory-scoped
+runs.
+
+### Lessons learnt
+- **Connector-only slates ship fast.** Three of four items were
+  connector logic over existing payload (or a 6-line walker
+  addition); only v1.9-#3 required new corpus-wide index machinery.
+  The single moderately-sized item carried the slate cleanly while
+  the three S-items shipped in under an hour each.
+- **Precedence is the recurring shape.** Every semantic-role
+  connector this slate (descriptor, set-name, descriptor-inherited)
+  uses the same "skip if `semantic_role` already set" guard. Worth
+  extracting a tiny `_role_already_set(payload_obj) -> bool` helper
+  in a future cleanup pass to remove the boilerplate triplet.
+- **Charter assumptions need a precondition check.** v1.9-#4's
+  charter said `payload["bases"]` was already emitted; it wasn't.
+  Reading the walker before sizing the work would have caught it.
+  Add a "validate inputs exist" step to the slate kickoff template.
+
+### Next moves — v1.10 candidate queue
+- **Builder #4 in a new language** (L, own charter). Unblocked since
+  v1.7-#1; recommend Go, Rust, or TS based on RagWeave's import
+  appetite. Recommend its own slate, not bundled.
+- **CI disk-budget guard** (S). Still blocked on first green
+  full-suite raw `pytest tests/` run; chews /tmp today. The dir-scoped
+  runs all stay healthy, so a one-off cleanup pass + tighter
+  `tmp_path_factory` lifecycles should unblock it.
+- **Type inference / annotation-driven resolution** (M/L, own
+  slate). The v1.9-#3 cross-file index is a *name* index; a *type*
+  index would let captures with `: T` annotations resolve to the
+  declaring module's symbol, lifting more `unresolved` to a typed
+  kind.
+- **`from X import *` star-import expansion in cross-file index**
+  (M). Today star-imports stay `unresolved`; widening the index to
+  consult `__all__` (already in `PyModule.payload["all_exports"]`)
+  would lift them when statically determinable.
+- **Relative-import package resolution** (S/M). Cross-file index
+  records leading dots verbatim (`.pkg.x`) but doesn't resolve them
+  against the consuming module's package — needed for projects with
+  intra-package `from .util import foo`.
+- **Module-object captures from `import x` form** (S). Today
+  `import a` followed by `lambda: a.thing()` captures the module
+  object as `module-level` (correct) but doesn't lift the `.thing`
+  member access through the cross-file index. Connector-only
+  extension.
+
+---
+
 ## 2026-05-25 — v1.9-#2 — `__set_name__` protocol-hook tagging
 **Branch / commit:** `kgweave/kuzu-port` @ `79d3ca4`
 
