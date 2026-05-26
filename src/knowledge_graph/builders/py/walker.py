@@ -865,6 +865,9 @@ def lift_python(content: bytes) -> list[PyNode]:
                         "aliases": _import_alias_map(small),
                         "kind": "import",
                         "runtime": runtime,
+                        # v1.10-#3: only ``from X import *`` is a star
+                        # import; plain ``import x`` never is.
+                        "is_star": False,
                     }
                 else:
                     names = _from_import_names(small)
@@ -881,6 +884,11 @@ def lift_python(content: bytes) -> list[PyNode]:
                         "kind": "from",
                         "level": small.relative and len(small.relative) or 0,
                         "runtime": runtime,
+                        # v1.10-#3: mark ``from X import *`` distinctly so
+                        # PyScopeResolutionConnector can expand it against
+                        # the origin module's export set. Absent key MUST
+                        # be treated as False by readers (back-compat).
+                        "is_star": isinstance(small.names, cst.ImportStar),
                     }
                 if import_guard is not None:
                     payload["import_guard"] = import_guard
