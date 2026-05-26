@@ -2067,3 +2067,136 @@ d8f0e11 docs(v1.8-#1 G5): JOURNAL retro -- alias-aware decorator promotion
 ### Next moves
 - v1.10-#4 `__init_subclass__` hook (S, connector-only).
 - v1.10 slate close JOURNAL after #4.
+
+## 2026-05-26 — v1.10-#4: `__init_subclass__` protocol hook
+**Branch / commit:** kgweave/kuzu-port @ HEAD
+
+### What we did
+- New connector `src/knowledge_graph/connectors/py_init_subclass_semantics.py`
+  mirroring v1.9-#2's `py_set_name_semantics.py` line-for-line, with
+  method-name swapped to `__init_subclass__` and role swapped to
+  `init-subclass-hook`.
+- Same closed detection rule as v1.9-#2: a PyClass qualifies iff at
+  least one of its direct PyFunction children (via PARENT_OF) is
+  named exactly `__init_subclass__`. Inheritance NOT chased.
+- Same precedence guard: skips when `payload.semantic_role` is already
+  populated, so descriptor / decorator / set-name-hook all win on
+  shared classes.
+- Wired into the public facade in `src/knowledge_graph/__init__.py`
+  alongside `PySetNameSemanticsConnector`. No auto-registration —
+  callers (and tests) opt in via `register_connector()` (same pattern
+  v1.9-#2 used).
+- Fixtures: `init_subclass_only.py` (TaggedBase declares only
+  `__init_subclass__`), `init_subclass_with_get.py`
+  (DescriptorWithInitSubclass declares both `__get__` and
+  `__init_subclass__`). Reused `not_descriptor.py` for the negative
+  case.
+- 3 new tests in `test_py_init_subclass_semantics.py` (positive,
+  descriptor precedence, negative). All green.
+- Required test dirs all green: 136 passed, 1 skipped across
+  `tests/knowledge_graph/connectors/`, `tests/knowledge_graph/builders/py/`,
+  `tests/_meta/`.
+- Perf: quickstart wall ≤ 10s (existing tests assert in-band, both
+  perf tests passed). Py writer N=1000 ≤ 6s (asserted in-band).
+
+### Lessons learnt
+- **Mirror-of-mirror connector work converges to zero novelty** —
+  *v1.10-#4 is the third connector in the same shape family
+  (descriptor → set-name-hook → init-subclass-hook). The pattern is
+  now a stamping mill: index methods-by-parent-class, walk PyClass
+  rows, skip if `semantic_role` already set, write role. Worth
+  promoting the loop body into a shared helper next time another
+  same-shape hook lands (PEP 487 only gave us two; PEP 749 metaclass
+  __set_descriptor__ would be the next candidate but it's not stdlib
+  yet). Hold the helper extraction until N=4.*
+- **Precedence chain is now four-deep and ordering matters** —
+  *decorator > descriptor > set-name-hook > init-subclass-hook. The
+  "skip if semantic_role already set" guard handles all of it
+  correctly because each connector is independently idempotent and
+  only newer-than-decorator roles are added structurally. But the
+  docstrings in each connector now need to enumerate the full chain
+  to stay accurate; rewrote this one's docstring to list all four.*
+
+### Next moves
+- v1.10 slate close JOURNAL entry (this same commit).
+- v1.11 candidate queue: see slate-close entry.
+
+## 2026-05-26 — v1.10 slate close
+**Branch / commit:** kgweave/kuzu-port @ HEAD
+
+### Four items shipped
+- **#1 `module-import` capture kind (S).** PyScopeResolutionConnector
+  closed set widens 5→6: adds `module-import` for `import X` /
+  `import X.Y` captures where X is a corpus module. Out-of-corpus
+  stays `unresolved`.
+- **#2 relative-import package resolution (S/M).** New
+  `_resolve_relative_qualname(consuming_module, relative_target)`
+  helper threaded through both `_lift_to_module_import` and
+  `_lift_to_cross_file`. PEP 328 dot semantics: k dots strip k
+  segments. Escape above root returns `None` (stays `unresolved`).
+  Limited to single-segment PyModule.name (file-stem) corpora.
+- **#3 `from X import *` cross-file expansion (M, slate headline).**
+  Walker marks star-imports with `PyImport.payload["is_star"] =
+  True`. Connector expands each star import via v1.9-#3's
+  `module_exports` set, honouring `__all__` when present (else
+  underscore-prefix filter).
+- **#4 `__init_subclass__` protocol hook (S).** New
+  `PyInitSubclassSemanticsConnector` mirroring v1.9-#2. Tags
+  `semantic_role = "init-subclass-hook"` on PyClass rows that
+  declare `__init_subclass__` directly. Precedence: descriptor /
+  decorator / set-name-hook all win.
+
+### Closed sets at end of slate
+- **Python capture resolution kinds (6, was 5):**
+  `local-in-enclosing`, `module-level`, `builtin`,
+  `cross-file-import`, **`module-import`** (new #1),
+  `unresolved`. Star-import expansion (#3) and relative-import
+  resolution (#2) widen what classifies as `cross-file-import`
+  rather than adding a new kind.
+- **PyClass semantic_role (4):** `dataclass`/`property`/`fixture`
+  (decorator-driven, v1.7-#4 / v1.8-#1) > `descriptor`
+  (v1.8-#4 + v1.9-#4 inheritance) > `set-name-hook` (v1.9-#2) >
+  **`init-subclass-hook`** (new #4).
+
+### Perf snapshot
+- quickstart wall: ≤ 10s (test_quickstart_defaults passed; floor 10s).
+- Py writer N=1000: ≤ 6s (test_py_writer_perf_n1000 passed; floor 6s).
+- SV writer N=1000: ≤ 3s (untouched this slate; v1.5–v1.9 floor holds).
+- Required dir wall (connectors + builders/py + _meta combined):
+  ~161s for 136 tests + 1 skip.
+
+### v1.11 candidate queue (verbatim from charter Out-of-Scope + slate-surfaced gaps)
+- Builder #4 in a new language (L, own charter).
+- CI disk-budget guard (S, blocked on first full-suite green).
+- Type inference / annotation-driven resolution (M/L, own slate).
+- PEP 420 namespace packages.
+- Multi-segment relative-import resolution (today's #2 limited by
+  file-stem PyModule.name).
+- Package-qualified PyModule.name (would unblock multi-segment
+  relative imports cleanly).
+- `__init_subclass__` inheritance chasing.
+- Conditional star-imports (`if cond: from X import *`).
+- Star-imports from out-of-corpus modules.
+- (Slate-surfaced) Extract shared "tag-by-method-name-on-PyClass" helper
+  once a fourth same-shape hook connector lands (currently 3:
+  descriptor / set-name-hook / init-subclass-hook).
+- (Slate-surfaced) Sub-agent "GREEN-or-die" exit precondition —
+  three slate stalls in a row showed the dispatch prompt's exit
+  precondition wasn't honoured; parent-side `git status` verification
+  on every return is the actual safety net.
+
+### Lessons learnt
+- **Stamping-mill connectors converge to zero novelty after the third
+  instance** — *v1.9-#2 and v1.10-#4 are the same connector with two
+  string swaps. Helper extraction earns its keep at N=4, not N=3.*
+- **Closed-set widening cadence works** — *every slate either widens
+  a closed set or holds it; never re-classifies. Capture-resolution
+  kind went 4 → 5 (v1.9) → 6 (v1.10-#1). PyClass semantic_role went
+  3 → 4 (v1.10-#4). Retroactive reasoning is cheap because each
+  bump is monotone.*
+- **Three sub-agent stalls in a row** — *v1.10-#1, v1.10-#2, v1.10-#3
+  all left uncommitted work on the floor. v1.10-#4's dispatch
+  prompt added an explicit non-negotiable "git status clean before
+  termination" gate; this slate landed clean. Worth promoting that
+  gate into the standard sub-agent dispatch template for v1.11.*
+
