@@ -2036,3 +2036,34 @@ d8f0e11 docs(v1.8-#1 G5): JOURNAL retro -- alias-aware decorator promotion
 - v1.10-#2 relative-import package resolution (S/M).
 - v1.10-#3 `from X import *` cross-file expansion (M, headline).
 - v1.10-#4 `__init_subclass__` hook (S).
+
+## 2026-05-26 — v1.10-#3: from X import * cross-file expansion
+**Branch / commit:** kgweave/kuzu-port @ HEAD
+
+### What we did
+- Walker: `PyImport.payload["is_star"]: bool`. True only for
+  `from X import *`. Back-compat: missing key treated as False.
+- Connector: per-file `local_name → origin_module` table expands
+  every is_star=True PyImport using v1.9-#3's `module_exports` set.
+  `__all__` honoured when present; else underscore-prefixed names
+  filtered.
+- 4 connector tests + 4 fixtures (star_target, star_consumer,
+  star_target_all, star_consumer_all). Walker test bundled with
+  walker GREEN commit.
+- Connectors dir 47 green, py builders 50 green, _meta 20+1skip.
+
+### Lessons learnt
+- Sub-agent self-killed mid-flow after writing GREEN connector code
+  (third stall in three slates). Walker commit landed clean but
+  connector RED test + GREEN impl were left uncommitted, requiring
+  manual recovery. The "exit precondition" instruction in the
+  dispatch prompt is correct but agents aren't reliably honoring it;
+  parent verification (`git log` + `git status`) on every return is
+  the actual safety net.
+- Star-import payload was the right granularity — keep walker
+  structural, push semantic decisions (`__all__` filter, underscore
+  rule) into the connector. Pure walker doctrine held.
+
+### Next moves
+- v1.10-#4 `__init_subclass__` hook (S, connector-only).
+- v1.10 slate close JOURNAL after #4.
