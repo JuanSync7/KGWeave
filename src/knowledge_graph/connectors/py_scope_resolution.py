@@ -14,18 +14,29 @@ This connector closes that gap. Per file (per ``origin_id``) it:
    scopes but PyComprehension capture resolution is out of scope for
    this iteration — see "PyComprehension status" below.)
 3. For each ``PyLambda`` row, classifies every ``captures`` entry into
-   the closed set (v1.9-#3 extended 4 → 5 values)::
+   the closed set (v1.10-#1 extended 5 → 6 values)::
 
        {"local-in-enclosing", "module-level", "builtin",
-        "cross-file-import", "unresolved"}
+        "cross-file-import", "module-import", "unresolved"}
 
    ``cross-file-import`` is emitted when a capture's module-level
-   binding came from a ``PyImport`` whose origin module is also present
-   in the corpus and exposes the canonical name at top level. The
-   parallel ``captures_resolved`` entry then also carries
-   ``origin_module: <str>`` (the qualname of the defining module, taken
-   from ``PyModule.name``). Star-imports (``from X import *``) stay
-   ``unresolved`` — out of scope.
+   binding came from a ``from X import name`` ``PyImport`` whose origin
+   module is also present in the corpus and exposes the canonical name
+   at top level. The parallel ``captures_resolved`` entry then also
+   carries ``origin_module: <str>`` (the qualname of the defining
+   module, taken from ``PyModule.name``).
+
+   ``module-import`` is emitted (v1.10-#1) when a capture's module-level
+   binding came from an ``import X`` or ``import X.Y`` ``PyImport``
+   (i.e. the captured local is the module object itself, NOT a member
+   of it) AND ``X`` / ``X.Y`` is itself a corpus-resident module
+   qualname. The entry also carries ``origin_module: <str>`` (the
+   imported module's qualname). The two lifts are disjoint: ``from X
+   import name`` shapes never produce ``module-import``; ``import X``
+   shapes never produce ``cross-file-import``.
+
+   Star-imports (``from X import *``) stay ``unresolved`` — out of
+   scope.
 
 4. Writes the result back as ``payload['captures_resolved']`` — a
    ``list[dict]`` where each entry has shape
@@ -124,11 +135,12 @@ from libcst.metadata import ByteSpanPositionProvider, MetadataWrapper
 from knowledge_graph.store.snapshot import BYTES_CODEC
 
 
-# Closed classification set (v1.9-#3: extended 4 -> 5).
+# Closed classification set (v1.10-#1: extended 5 -> 6).
 KIND_LOCAL_ENCLOSING = "local-in-enclosing"
 KIND_MODULE_LEVEL = "module-level"
 KIND_BUILTIN = "builtin"
 KIND_CROSS_FILE_IMPORT = "cross-file-import"
+KIND_MODULE_IMPORT = "module-import"
 KIND_UNRESOLVED = "unresolved"
 
 
@@ -788,6 +800,76 @@ def _imports_for_origin(conn, origin_id: str) -> dict[str, str]:
     return out
 
 
+def _build_corpus_modules(conn) -> set[str]:
+    """Return the set of every ``PyModule.name`` in the corpus.
+
+    Used by v1.10-#1's ``module-import`` lift: an ``import X`` capture
+    is lifted only when ``X`` matches one of these qualnames (i.e. the
+    imported module is corpus-resident). Out-of-corpus imports (stdlib,
+    third-party) stay ``unresolved``.
+    """
+    out: set[str] = set()
+    res = conn.execute(
+        """
+        MATCH (m:Node)
+        WHERE m.source = 'py' AND m.kind = 'PyModule' AND m.name IS NOT NULL
+        RETURN m.name AS mname
+        """,
+        {},
+    )
+    while res.has_next():
+        mname = res.get_next()[0]
+        if isinstance(mname, str) and mname:
+            out.add(mname)
+    return out
+
+
+def _lift_to_module_import(
+    name: str,
+    imports: dict[str, str],
+    corpus_modules: set[str],
+) -> tuple[str, str | None]:
+    """Try to lift ``name`` to ``module-import`` (v1.10-#1).
+
+    Returns ``(kind, origin_module)``. ``origin_module`` is set only
+    when ``kind == "module-import"``. If the lift fails the caller
+    should try ``_lift_to_cross_file`` next, then fall back to
+    ``unresolved``.
+
+    Lift rules:
+
+    * ``name`` must appear in ``imports`` (the consuming file's
+      ``PyImport.aliases`` rollup).
+    * The canonical form must be a bare ``import X`` shape — either
+      ``X`` (no dots) OR ``X.Y[.Z...]`` where the LOCAL binding is the
+      module's full canonical name (i.e. ``import a.b`` with no
+      ``as`` binds ``a`` locally, canonical ``a.b``; the captured
+      name is the top-level segment ``a``). We detect this by checking
+      that the canonical name itself is in ``corpus_modules`` — that
+      is, the imported thing IS a module, not a member.
+    * ``from X import name`` shapes are deliberately excluded: in those
+      cases the canonical is ``X.name`` where ``X`` is the module and
+      ``name`` is a member of it; ``X.name`` would not be a module
+      qualname (no PyModule with that name exists), so the corpus-
+      modules check naturally rejects them.
+
+    The two-lift architecture means ``module-import`` and
+    ``cross-file-import`` are disjoint by construction.
+    """
+    canonical = imports.get(name)
+    if not canonical:
+        return KIND_UNRESOLVED, None
+    # An ``import X`` binding has the LOCAL name equal to the top-level
+    # segment of canonical. For ``from X import leaf`` the LOCAL is
+    # ``leaf`` and canonical is ``X.leaf`` — top-level segment is ``X``,
+    # which is NOT the local. We disambiguate purely on whether the
+    # canonical name itself is a corpus-resident module qualname; that
+    # is true for ``import X`` / ``import X.Y`` only.
+    if canonical not in corpus_modules:
+        return KIND_UNRESOLVED, None
+    return KIND_MODULE_IMPORT, canonical
+
+
 def _lift_to_cross_file(
     name: str,
     imports: dict[str, str],
@@ -903,6 +985,10 @@ class PyScopeResolutionConnector:
         # through a star-import stay ``unresolved`` — matching the
         # v1.9-#3 out-of-scope rule.
         module_exports = _build_module_exports(conn)
+        # v1.10-#1: corpus-wide set of every PyModule.name. Drives the
+        # ``module-import`` lift below (only fires for ``import X`` /
+        # ``import X.Y`` where X / X.Y is a corpus-resident module).
+        corpus_modules = _build_corpus_modules(conn)
 
         # Step 3: per-origin, fetch source and build scope index.
         touched = 0
@@ -979,12 +1065,23 @@ class PyScopeResolutionConnector:
                             kind_str == KIND_MODULE_LEVEL
                             and cname in imports_here
                         ):
-                            new_kind, origin_mod = _lift_to_cross_file(
-                                cname, imports_here, module_exports
+                            # v1.10-#1: try module-import lift first
+                            # (``import X`` shapes). Disjoint from the
+                            # v1.9-#3 cross-file lift below.
+                            new_kind, origin_mod = _lift_to_module_import(
+                                cname, imports_here, corpus_modules
                             )
+                            if new_kind != KIND_MODULE_IMPORT:
+                                new_kind, origin_mod = _lift_to_cross_file(
+                                    cname, imports_here, module_exports
+                                )
                             entry["kind"] = new_kind
                             if (
-                                new_kind == KIND_CROSS_FILE_IMPORT
+                                new_kind
+                                in (
+                                    KIND_CROSS_FILE_IMPORT,
+                                    KIND_MODULE_IMPORT,
+                                )
                                 and origin_mod is not None
                             ):
                                 entry["origin_module"] = origin_mod
