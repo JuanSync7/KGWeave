@@ -766,9 +766,9 @@ def _imports_for_origin(conn, origin_id: str) -> dict[str, str]:
 
     Aggregates every ``PyImport.payload.aliases`` map that belongs to
     this ``origin_id``. Star-import rows carry an empty aliases dict
-    (walker convention) so they contribute nothing — the corresponding
-    captures therefore stay ``unresolved``, matching the v1.9-#3
-    out-of-scope rule.
+    (walker convention) so they contribute nothing here — they are
+    expanded separately by :func:`_star_imports_for_origin` /
+    :func:`_expand_star_imports` (v1.10-#3).
     """
     out: dict[str, str] = {}
     res = conn.execute(
@@ -798,6 +798,124 @@ def _imports_for_origin(conn, origin_id: str) -> dict[str, str]:
             if isinstance(local_name, str) and isinstance(canonical, str):
                 out[local_name] = canonical
     return out
+
+
+def _star_imports_for_origin(conn, origin_id: str) -> list[str]:
+    """Return the list of origin module qualnames star-imported by one
+    consuming file (v1.10-#3).
+
+    A row counts as a star-import iff its payload has ``is_star: True``
+    (walker contract; missing key treated as False for back-compat).
+    Relative star-imports (``from . import *``) currently keep their
+    leading-dot module form; downstream lookup against
+    ``module_exports`` naturally misses them, matching the v1.10-#2
+    "no relative-package resolution yet" stance.
+    """
+    out: list[str] = []
+    res = conn.execute(
+        """
+        MATCH (i:Node)
+        WHERE i.source = 'py' AND i.kind = 'PyImport'
+          AND i.origin_id = $oid AND i.payload IS NOT NULL
+        RETURN i.payload AS pl
+        """,
+        {"oid": origin_id},
+    )
+    while res.has_next():
+        pl = res.get_next()[0]
+        if not pl:
+            continue
+        try:
+            payload_obj = json.loads(pl)
+        except (TypeError, ValueError):
+            continue
+        inner = payload_obj.get("payload")
+        if not isinstance(inner, dict):
+            continue
+        if not bool(inner.get("is_star", False)):
+            continue
+        module_name = inner.get("module")
+        if isinstance(module_name, str) and module_name:
+            out.append(module_name)
+    return out
+
+
+def _build_module_all_index(conn) -> dict[str, list[str]]:
+    """Corpus-wide ``{module_qualname: list[name]}`` for modules with a
+    literal top-level ``__all__`` (v1.10-#3).
+
+    Walker stores the parsed ``__all__`` list under
+    ``PyModule.payload.all_exports`` (see ``walker._extract_dunder_all``).
+    Modules without ``__all__`` are absent from this map; star-import
+    expansion then falls back to the "no underscore" public-export rule.
+    """
+    out: dict[str, list[str]] = {}
+    res = conn.execute(
+        """
+        MATCH (m:Node)
+        WHERE m.source = 'py' AND m.kind = 'PyModule'
+          AND m.payload IS NOT NULL AND m.name IS NOT NULL
+        RETURN m.name AS mname, m.payload AS pl
+        """,
+        {},
+    )
+    while res.has_next():
+        row = res.get_next()
+        mname, pl = row[0], row[1]
+        if not mname or not pl:
+            continue
+        try:
+            payload_obj = json.loads(pl)
+        except (TypeError, ValueError):
+            continue
+        inner = payload_obj.get("payload")
+        if not isinstance(inner, dict):
+            continue
+        all_exports = inner.get("all_exports")
+        if not isinstance(all_exports, list):
+            continue
+        names = [n for n in all_exports if isinstance(n, str) and n]
+        out[mname] = names
+    return out
+
+
+def _expand_star_imports(
+    star_origins: list[str],
+    module_exports: dict[str, set[str]],
+    module_all_index: dict[str, list[str]],
+    base_imports: dict[str, str],
+) -> dict[str, str]:
+    """Expand each star-import origin into ``{local_name: canonical}``
+    entries (v1.10-#3).
+
+    For each star-import target module ``X``:
+
+    * If ``X`` declares ``__all__`` (corpus-resident with a literal
+      ``__all__`` list), use exactly that list.
+    * Else if ``X`` is corpus-resident, use every export of ``X`` whose
+      name does NOT start with an underscore (PEP 8 public).
+    * Else (``X`` not in the corpus), contribute nothing — captures
+      that would have flowed through stay ``unresolved``.
+
+    Named imports in ``base_imports`` win over star-import expansions —
+    if a local name is already bound by an explicit import, the star
+    must not shadow it. This matches Python's actual import semantics:
+    ``from X import *`` only binds names not already bound.
+    """
+    expanded = dict(base_imports)
+    for origin in star_origins:
+        if origin in module_all_index:
+            names = module_all_index[origin]
+        else:
+            exports = module_exports.get(origin)
+            if exports is None:
+                continue
+            names = [n for n in exports if not n.startswith("_")]
+        for name in names:
+            if name in expanded:
+                continue
+            expanded[name] = f"{origin}.{name}"
+    return expanded
 
 
 def _build_corpus_modules(conn) -> set[str]:
@@ -1079,6 +1197,10 @@ class PyScopeResolutionConnector:
         # ``module-import`` lift below (only fires for ``import X`` /
         # ``import X.Y`` where X / X.Y is a corpus-resident module).
         corpus_modules = _build_corpus_modules(conn)
+        # v1.10-#3: ``{module_qualname: __all__}`` for modules whose
+        # source literally declared ``__all__``. Drives the star-import
+        # expansion below; absence falls back to the public-name rule.
+        module_all_index = _build_module_all_index(conn)
 
         # Step 3: per-origin, fetch source and build scope index.
         touched = 0
@@ -1086,7 +1208,22 @@ class PyScopeResolutionConnector:
             # v1.9-#3: per consuming file, gather the union of all
             # ``PyImport.aliases`` maps. The cross-file lift below only
             # fires for names that came from an import in THIS file.
-            imports_here = _imports_for_origin(conn, origin_id)
+            named_imports = _imports_for_origin(conn, origin_id)
+            # v1.10-#3: layer star-import expansions on top of explicit
+            # named imports. Named bindings win on collision (Python
+            # semantics: ``from X import *`` only binds names not
+            # already bound). Out-of-corpus star origins contribute
+            # nothing, so the captured names stay unresolved.
+            star_origins = _star_imports_for_origin(conn, origin_id)
+            if star_origins:
+                imports_here = _expand_star_imports(
+                    star_origins,
+                    module_exports,
+                    module_all_index,
+                    named_imports,
+                )
+            else:
+                imports_here = named_imports
             # v1.10-#2: consuming module's qualname (PyModule.name —
             # currently the file stem) drives relative-import
             # resolution. Empty string when no PyModule row exists for
@@ -1116,6 +1253,16 @@ class PyScopeResolutionConnector:
                 wrapper = MetadataWrapper(cst.parse_module(raw.decode("utf-8")))
                 module = wrapper.module
                 indexer = _LambdaScopeIndexer(module)
+                # v1.10-#3: names imported via ``from X import *`` are
+                # module-level bindings in the consuming file but are
+                # invisible to ``_bindings_in_block`` (which conservatively
+                # treats star-imports as opaque). Inject the star-expansion
+                # names into ``module_locals`` BEFORE walking so ``_classify``
+                # promotes them to ``module-level``, enabling the cross-file
+                # lift below.
+                if star_origins:
+                    star_only_names = set(imports_here) - set(named_imports)
+                    indexer._module_locals.update(star_only_names)
                 wrapper.visit(indexer)
             except Exception:
                 # Origins that fail to re-parse are skipped; this should
