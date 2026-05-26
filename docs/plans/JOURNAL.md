@@ -24,6 +24,70 @@ Entry skeleton:
 
 ---
 
+## 2026-05-26 — v1.10-#2 — relative-import package resolution
+**Branch / commit:** `kgweave/kuzu-port` @ `979d1c8`
+
+### What we did
+- New helper `_resolve_relative_qualname(consuming_module, relative_target)`
+  in `src/knowledge_graph/connectors/py_scope_resolution.py`. Counts
+  leading dots in the canonical, strips that many rightmost segments
+  off the consuming module's qualname, appends the dot-stripped body,
+  returns `None` when the escape goes above the package root.
+- Both `_lift_to_module_import` (v1.10-#1) and `_lift_to_cross_file`
+  (v1.9-#3) now check `canonical.startswith(".")` first and consult
+  the resolver before the bare-string lookup against
+  `corpus_modules` / `module_exports`. Both grew a `consuming_module`
+  param (default `""` so direct callers in unit tests / docs keep
+  working).
+- Connector pulls the consuming module's `PyModule.name` once per
+  origin and threads it into both lifts.
+- Fixtures under `tests/knowledge_graph/fixtures/py/`:
+  - `relimport_pkg/{__init__,sibling,consumer}.py` — `consumer.py`
+    does `from .sibling import foo` and captures `foo` in a lambda.
+  - `relimport_escape_pkg/{__init__,escape_consumer}.py` — escape
+    consumer does `from ..outside import foo` (escapes above root).
+- New test module `test_py_scope_resolution_relimport.py`:
+  positive case asserts `kind=='cross-file-import'` with
+  `origin_module=='sibling'` (PyModule.name is the file stem in this
+  corpus); negative case asserts the escape stays `unresolved`.
+- All previously-green test dirs stay green: 214 passed, 1 skipped
+  across `connectors/`, `builders/py/`, `_meta/`, `store/`.
+- Perf snapshot: quickstart wall = 3.54s (≤ 10s); py writer N=1000 =
+  1.19s (≤ 6s).
+
+### Lessons learnt
+- **PyModule.name = file stem, not package-qualified path** — *the
+  writer's `_resolve_name` uses `Path(origin.uri).stem` so a sibling
+  in `relimport_pkg/` registers as `sibling`, not `relimport_pkg.sibling`.
+  The relative resolver still works (1-dot from 1-segment `consumer`
+  strips to empty package + `sibling` body = `sibling`), but the test
+  oracle must match this convention. Until a v1.x iteration teaches
+  the writer real package qualnames, multi-level package fixtures
+  must keep their relative shapes within reach of single-segment
+  consumers.*
+- **PEP 328 semantics = strip k segments, not k-1** — *one dot already
+  refers to the package containing the consuming module, which is
+  equivalent to stripping the consuming module's own leaf segment
+  (1 segment). So k dots strip k segments total. Easy off-by-one to
+  trip on if you start from "k-1 levels up from the module".*
+- **Default-param back-compat over signature churn** — *adding
+  `consuming_module: str = ""` to the lift functions kept their
+  in-process unit-test call sites green without a single edit. The
+  empty default never resolves a relative canonical (resolver returns
+  `None` on empty consuming_module), so behaviour is conservative.*
+
+### Next moves
+- v1.10-#3 `from X import *` cross-file expansion (M, headline of the
+  slate). Needs walker payload addition (`PyImport.payload['is_star']`)
+  plus a per-file expansion pass in the connector that pulls the
+  star-source module's exports (already computed by v1.9-#3's
+  `module_exports`). Respect `__all__` when present, else exclude
+  underscore-prefixed names.
+- v1.10-#4 `__init_subclass__` protocol hook (S, connector-only,
+  mirrors v1.9-#2). Independent of #3 — can ship in either order.
+
+---
+
 ## 2026-05-25 — v1.9-#4 — descriptor inheritance chasing
 **Branch / commit:** `kgweave/kuzu-port` @ `49b192e`
 
