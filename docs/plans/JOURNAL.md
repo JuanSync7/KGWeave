@@ -1944,3 +1944,31 @@ d8f0e11 docs(v1.8-#1 G5): JOURNAL retro -- alias-aware decorator promotion
   slate (own charter, deferred). The cross-file index here is a name
   index, not a type index — it only tells you "this name lives in
   that module", not "this name has this type".
+
+## 2026-05-26 — v1.10-#1: module-import capture kind
+**Branch / commit:** kgweave/kuzu-port @ 0f3c602
+
+### What we did
+- `PyScopeResolutionConnector` closed set widens 5→6: adds
+  `module-import` for captures whose local was bound by `import X`
+  (or `import X.Y`) when X is a corpus module. Out-of-corpus stays
+  `unresolved`. Distinct from v1.9-#3's `cross-file-import`, which is
+  reserved for `from X import name` shapes.
+- 2 commits (RED fixtures + connector test, GREEN connector impl).
+- Connectors dir, py builders dir, _meta dir all green.
+
+### Lessons learnt
+- Sub-agent stalled again after writing GREEN impl but before
+  committing — third slate in a row showing this pattern. Worth
+  switching to a "GREEN-or-die" instruction in the next dispatch:
+  the agent should treat its own `git status` clean as the exit
+  precondition.
+- Reversing v1.9-#3's `import x` skip was a clean closed-set
+  widening rather than a re-classification of an existing kind —
+  ordering things so each slate either widens or holds the closed set
+  pays off in retroactive reasoning.
+
+### Next moves
+- v1.10-#2 relative-import package resolution (S/M).
+- v1.10-#3 `from X import *` cross-file expansion (M, headline).
+- v1.10-#4 `__init_subclass__` hook (S).
