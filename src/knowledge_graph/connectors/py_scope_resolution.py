@@ -824,10 +824,80 @@ def _build_corpus_modules(conn) -> set[str]:
     return out
 
 
+def _resolve_relative_qualname(
+    consuming_module: str, relative_target: str
+) -> str | None:
+    """Resolve a leading-dot relative import canonical to an absolute qualname.
+
+    v1.8-#1 records relative imports' canonical name with leading dots
+    preserved (``from .sibling import foo`` → ``.sibling.foo``;
+    ``from ..pkg.thing import x`` → ``..pkg.thing.x``). v1.10-#2 turns
+    that into an absolute qualname using the consuming module's package
+    path:
+
+    1. Count ``k`` leading dots in ``relative_target``.
+    2. Strip ``k`` rightmost segments from ``consuming_module``. If the
+       qualname has fewer than ``k`` segments the relative escape goes
+       above the package root — return ``None``.
+    3. Append the dot-stripped body of ``relative_target`` (which may
+       itself be empty for bare ``from . import x`` shapes — but those
+       carry the leaf in the canonical so the body is the leaf).
+    4. Re-join with ``.`` and return.
+
+    Examples (consuming = ``pkg.sub.consumer``):
+
+    * ``.sibling.foo``   → ``pkg.sub.sibling.foo``
+    * ``..other.bar``    → ``pkg.other.bar``
+    * ``...too.far``     → ``None`` (3 dots, only 3 segments in
+      consumer; strip 3 leaves empty package — but ``...`` per PEP 328
+      means "parent's parent's parent", which IS above root for a
+      3-segment path. PEP 328: k dots strip k-1 segments AFTER also
+      stripping the consumer's own leaf segment. We follow the same
+      rule: strip ``k`` from a ``len(consuming_module.split('.'))``
+      length, since the consuming module's own leaf is the first dot's
+      worth.)
+
+    Note: by Python's relative-import semantics, ``k`` leading dots
+    refer to the package that is ``k`` levels up from the consuming
+    module — equivalently, you strip ``k`` segments from the consumer's
+    fully qualified name (the consumer's own leaf is the first segment
+    stripped, the package above is the second, etc.). If ``k`` exceeds
+    the number of segments the import escapes the top-level and is
+    unresolvable.
+    """
+    if not relative_target.startswith("."):
+        return None
+    # Count leading dots.
+    k = 0
+    for ch in relative_target:
+        if ch == ".":
+            k += 1
+        else:
+            break
+    body = relative_target[k:]
+    if not consuming_module:
+        return None
+    segments = consuming_module.split(".")
+    if k > len(segments):
+        # Escapes above package root.
+        return None
+    # Strip k rightmost segments from the consuming module.
+    remaining = segments[:-k]
+    if body:
+        if remaining:
+            return ".".join(remaining) + "." + body
+        return body
+    if remaining:
+        return ".".join(remaining)
+    # k stripped everything AND body is empty — meaningless.
+    return None
+
+
 def _lift_to_module_import(
     name: str,
     imports: dict[str, str],
     corpus_modules: set[str],
+    consuming_module: str = "",
 ) -> tuple[str, str | None]:
     """Try to lift ``name`` to ``module-import`` (v1.10-#1).
 
@@ -859,6 +929,16 @@ def _lift_to_module_import(
     canonical = imports.get(name)
     if not canonical:
         return KIND_UNRESOLVED, None
+    # v1.10-#2: relative-import canonicals start with one or more dots
+    # (``.sibling``, ``..pkg``). Resolve to an absolute qualname using
+    # the consuming module's package path before the corpus-modules
+    # lookup. If resolution fails (escape above package root) we fall
+    # through to ``unresolved``.
+    if canonical.startswith("."):
+        resolved = _resolve_relative_qualname(consuming_module, canonical)
+        if resolved is None:
+            return KIND_UNRESOLVED, None
+        canonical = resolved
     # An ``import X`` binding has the LOCAL name equal to the top-level
     # segment of canonical. For ``from X import leaf`` the LOCAL is
     # ``leaf`` and canonical is ``X.leaf`` — top-level segment is ``X``,
@@ -874,6 +954,7 @@ def _lift_to_cross_file(
     name: str,
     imports: dict[str, str],
     module_exports: dict[str, set[str]],
+    consuming_module: str = "",
 ) -> tuple[str, str | None]:
     """Try to lift ``name`` to ``cross-file-import``.
 
@@ -902,6 +983,15 @@ def _lift_to_cross_file(
     canonical = imports.get(name)
     if not canonical:
         return KIND_UNRESOLVED, None
+    # v1.10-#2: relative canonicals (``.sibling.foo``, ``..pkg.x``)
+    # need package-path resolution before the ``module.leaf`` split
+    # below. Resolve using the consuming module's qualname; on escape
+    # above the package root, fall through to ``unresolved``.
+    if canonical.startswith("."):
+        resolved = _resolve_relative_qualname(consuming_module, canonical)
+        if resolved is None:
+            return KIND_UNRESOLVED, None
+        canonical = resolved
     if "." not in canonical:
         # Plain ``import a`` — captured name is the module object.
         # Not a cross-file member reference; stay unresolved.
@@ -997,6 +1087,21 @@ class PyScopeResolutionConnector:
             # ``PyImport.aliases`` maps. The cross-file lift below only
             # fires for names that came from an import in THIS file.
             imports_here = _imports_for_origin(conn, origin_id)
+            # v1.10-#2: consuming module's qualname (PyModule.name —
+            # currently the file stem) drives relative-import
+            # resolution. Empty string when no PyModule row exists for
+            # this origin (defensive); resolver then returns None on
+            # any relative target.
+            mod_name_res = conn.execute(
+                "MATCH (m:Node) WHERE m.source='py' AND m.kind='PyModule' "
+                "  AND m.origin_id=$oid RETURN m.name",
+                {"oid": origin_id},
+            )
+            consuming_module = ""
+            if mod_name_res.has_next():
+                _mname = mod_name_res.get_next()[0]
+                if isinstance(_mname, str):
+                    consuming_module = _mname
             origin_res = conn.execute(
                 "MATCH (o:Origin {id: $oid}) RETURN o.content",
                 {"oid": origin_id},
@@ -1069,11 +1174,17 @@ class PyScopeResolutionConnector:
                             # (``import X`` shapes). Disjoint from the
                             # v1.9-#3 cross-file lift below.
                             new_kind, origin_mod = _lift_to_module_import(
-                                cname, imports_here, corpus_modules
+                                cname,
+                                imports_here,
+                                corpus_modules,
+                                consuming_module,
                             )
                             if new_kind != KIND_MODULE_IMPORT:
                                 new_kind, origin_mod = _lift_to_cross_file(
-                                    cname, imports_here, module_exports
+                                    cname,
+                                    imports_here,
+                                    module_exports,
+                                    consuming_module,
                                 )
                             entry["kind"] = new_kind
                             if (
