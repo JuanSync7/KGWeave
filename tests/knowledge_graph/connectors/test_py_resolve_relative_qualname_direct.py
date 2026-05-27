@@ -142,3 +142,80 @@ def test_non_relative_target_returns_none() -> None:
 def test_empty_consuming_module_returns_none() -> None:
     """Defensive: no consumer qualname → None."""
     assert _resolve_relative_qualname("", ".x") is None
+
+
+# ---------------------------------------------------------------------------
+# v1.13-#1: ``is_init_module=True`` path.
+#
+# When the consuming module's URI is literally ``pkg/__init__.py`` the
+# consumer's qualname IS the package qualname (no synthetic leaf
+# segment to strip). Under that interpretation the effective dot count
+# is ``K - 1`` — i.e. ``from . import x`` inside ``pkg/__init__.py``
+# resolves to ``pkg.x`` (NOT ``x``), and the escape-above-root
+# threshold shifts by one.
+# ---------------------------------------------------------------------------
+
+
+def test_init_consumer_n2_k1_resolves_to_pkg_sub_x() -> None:
+    """``pkg/sub/__init__.py`` (N=2), ``from . import x`` → ``pkg.sub.x``."""
+    assert (
+        _resolve_relative_qualname("pkg.sub", ".x", is_init_module=True)
+        == "pkg.sub.x"
+    )
+
+
+def test_init_consumer_n2_k2_resolves_to_pkg_x() -> None:
+    """``pkg/sub/__init__.py`` (N=2), ``from .. import x`` → ``pkg.x``."""
+    assert (
+        _resolve_relative_qualname("pkg.sub", "..x", is_init_module=True)
+        == "pkg.x"
+    )
+
+
+def test_init_consumer_n2_k3_resolves_to_top_level_x() -> None:
+    """``pkg/sub/__init__.py`` (N=2), K=3 → effective K'=2 → top-level ``x``."""
+    assert (
+        _resolve_relative_qualname("pkg.sub", "...x", is_init_module=True)
+        == "x"
+    )
+
+
+def test_init_consumer_n2_k4_escapes_above_root() -> None:
+    """``pkg/sub/__init__.py`` (N=2), K=4 → effective K'=3 > N → None."""
+    assert (
+        _resolve_relative_qualname("pkg.sub", "....x", is_init_module=True)
+        is None
+    )
+
+
+def test_init_consumer_n1_k1_resolves_to_pkg_x() -> None:
+    """``pkg/__init__.py`` (N=1), ``from . import x`` → ``pkg.x``."""
+    assert (
+        _resolve_relative_qualname("pkg", ".x", is_init_module=True)
+        == "pkg.x"
+    )
+
+
+def test_init_consumer_n1_k2_resolves_to_top_level_x() -> None:
+    """``pkg/__init__.py`` (N=1), ``from .. import x`` → ``x``."""
+    assert (
+        _resolve_relative_qualname("pkg", "..x", is_init_module=True)
+        == "x"
+    )
+
+
+def test_init_consumer_n1_k3_escapes_above_root() -> None:
+    """``pkg/__init__.py`` (N=1), K=3 → effective K'=2 > N → None."""
+    assert (
+        _resolve_relative_qualname("pkg", "...x", is_init_module=True)
+        is None
+    )
+
+
+def test_init_flag_false_matches_pre_v1_13_behaviour() -> None:
+    """``is_init_module=False`` (default) must keep v1.12-#1 contract."""
+    # Same call as test_n1_top_level_consumer_k1 — must still be ``x``.
+    assert (
+        _resolve_relative_qualname("foo", ".x", is_init_module=False)
+        == "x"
+    )
