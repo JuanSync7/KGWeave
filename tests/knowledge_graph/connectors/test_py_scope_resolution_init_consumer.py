@@ -4,20 +4,17 @@ edge (v1.13-#1).
 A relative import inside ``pkg/__init__.py`` has the consuming module's
 qualname literally equal to the package qualname (``pkg``), NOT a leaf
 inside it. v1.12-#1's resolver applied the ``N - K`` formula uniformly
-which gave the wrong answer for this shape: ``from . import sibling``
-inside ``pkg/__init__.py`` (N=1, K=1, body=``sibling``) collapsed to
-``sibling`` (top-level) instead of ``pkg.sibling``.
+which gave the wrong answer for this shape: ``from .sibling import
+foo`` inside ``pkg/__init__.py`` (consumer qualname ``pkg``, N=1,
+canonical ``.sibling.foo``, K=1) retained ``N - K = 0`` segments and
+resolved to top-level ``sibling.foo`` — which misses the corpus
+module ``pkg.sibling``.
 
-v1.13-#1 threads ``is_init_module`` through the resolver. When True the
-effective dot count is ``K - 1``, so ``from . import sibling`` inside
-``init_consumer_pkg/__init__.py`` resolves to
-``init_consumer_pkg.sibling`` — a corpus-resident module qualname —
-which the v1.10-#1 ``module-import`` lift then promotes.
-
-The lambda in ``__init__.py`` captures the sibling module object, so
-the closed-set kind is ``module-import`` (per the v1.10-#1 disjoint
-lifts: ``from . import sibling`` binds the *module*; ``from .sibling
-import foo`` would bind the *member* and be ``cross-file-import``).
+v1.13-#1 threads ``is_init_module`` through the resolver. When True
+the effective dot count is ``K - 1``, so ``from .sibling import foo``
+inside ``init_consumer_pkg/__init__.py`` resolves to
+``init_consumer_pkg.sibling.foo``, the v1.10-#2 dotted split picks off
+the leaf, and the v1.9-#3 cross-file lift promotes the capture.
 """
 
 from __future__ import annotations
@@ -72,13 +69,13 @@ def _lambda_resolutions_for_origin(store, module_name: str) -> list[list[dict]]:
     return out
 
 
-def test_init_consumer_module_import_capture_resolves_to_pkg_sibling(
+def test_init_consumer_cross_file_capture_resolves_to_pkg_sibling(
     tmp_path: Path,
 ) -> None:
-    """``from . import sibling`` inside ``init_consumer_pkg/__init__.py``
-    must resolve the captured ``sibling`` module name to the corpus
-    qualname ``init_consumer_pkg.sibling`` and lift to ``module-import``.
-    Pre-v1.13-#1 the resolver collapsed it to ``sibling`` (top-level)
+    """``from .sibling import foo`` inside ``init_consumer_pkg/__init__.py``
+    must resolve the captured ``foo`` to the corpus member
+    ``init_consumer_pkg.sibling.foo`` and lift to ``cross-file-import``.
+    Pre-v1.13-#1 the resolver collapsed it to top-level ``sibling.foo``
     and the lift missed, leaving the capture ``unresolved``.
     """
     store = open_store(tmp_path / "kg.kuzu")
@@ -96,9 +93,9 @@ def test_init_consumer_module_import_capture_resolves_to_pkg_sibling(
         caps = _lambda_resolutions_for_origin(store, "init_consumer_pkg")
         assert len(caps) == 1, caps
         by_name = {e["name"]: e for e in caps[0]}
-        assert "sibling" in by_name, by_name
-        entry = by_name["sibling"]
-        assert entry["kind"] == "module-import", entry
+        assert "foo" in by_name, by_name
+        entry = by_name["foo"]
+        assert entry["kind"] == "cross-file-import", entry
         assert (
             entry.get("origin_module") == "init_consumer_pkg.sibling"
         ), entry

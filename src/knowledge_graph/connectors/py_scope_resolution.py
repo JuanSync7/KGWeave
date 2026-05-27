@@ -957,7 +957,10 @@ def _build_corpus_modules(conn) -> set[str]:
 
 
 def _resolve_relative_qualname(
-    consuming_module: str, relative_target: str
+    consuming_module: str,
+    relative_target: str,
+    *,
+    is_init_module: bool = False,
 ) -> str | None:
     """Resolve a leading-dot relative import canonical to an absolute qualname.
 
@@ -993,13 +996,27 @@ def _resolve_relative_qualname(
     Defensive: a non-dotted ``relative_target`` or an empty
     ``consuming_module`` both return ``None``.
 
-    Note on ``__init__.py`` consumers: since v1.11-#1 the
+    ``__init__.py`` consumers (v1.13-#1): since v1.11-#1 the
     ``PyModule.name`` of ``pkg/__init__.py`` is ``pkg`` (the package
-    qualname). Under the ``N - K`` rule, ``from .x import y`` inside
-    ``pkg/__init__.py`` (N=1, K=1, body='x.y') resolves to ``x.y``
-    (top-level) — not to ``pkg.x.y``. Practical impact in the current
-    corpus is nil (no fixture exercises this shape), but consumers
-    that care should special-case the convention upstream.
+    qualname). The bare ``N - K`` rule mis-handles this: ``from . import
+    x`` inside ``pkg/__init__.py`` (N=1, K=1) collapses to ``x``
+    (top-level) instead of ``pkg.x``. Callers that know the consuming
+    URI is literally an ``__init__.py`` MUST pass ``is_init_module=True``;
+    in that mode the effective dot count is ``K - 1`` — the consumer
+    qualname already represents the package, so K=1 retains every
+    segment. Rule table for ``is_init_module=True`` with consumer
+    ``pkg.sub`` (N=2):
+
+    * K=1 → ``pkg.sub.x``
+    * K=2 → ``pkg.x``
+    * K=3 → ``x`` (legitimate top-level)
+    * K=4 → ``None`` (escape above package root)
+
+    And for consumer ``pkg`` (N=1): K=1 → ``pkg.x``; K=2 → ``x``;
+    K=3 → ``None``.
+
+    The default ``is_init_module=False`` preserves the v1.12-#1
+    contract exactly.
     """
     if not relative_target.startswith("."):
         return None
@@ -1015,10 +1032,15 @@ def _resolve_relative_qualname(
     body = relative_target[k:]
     segments = consuming_module.split(".")
     n = len(segments)
-    if k > n:
+    # v1.13-#1: when the consumer is itself a package ``__init__.py``,
+    # its qualname IS the package — there is no synthetic leaf segment
+    # to strip for K=1. Apply an effective dot count of K-1 in that
+    # mode. K=0 (non-relative) is rejected above so the floor is K=1.
+    effective_k = k - 1 if is_init_module else k
+    if effective_k > n:
         # Legitimate escape above package root.
         return None
-    retained = segments[: n - k]  # N-K segments; [] when K == N.
+    retained = segments[: n - effective_k]  # retained segment count.
     if retained and body:
         return ".".join(retained) + "." + body
     if retained:
@@ -1034,6 +1056,8 @@ def _lift_to_module_import(
     imports: dict[str, str],
     corpus_modules: set[str],
     consuming_module: str = "",
+    *,
+    is_init_module: bool = False,
 ) -> tuple[str, str | None]:
     """Try to lift ``name`` to ``module-import`` (v1.10-#1).
 
@@ -1071,7 +1095,9 @@ def _lift_to_module_import(
     # lookup. If resolution fails (escape above package root) we fall
     # through to ``unresolved``.
     if canonical.startswith("."):
-        resolved = _resolve_relative_qualname(consuming_module, canonical)
+        resolved = _resolve_relative_qualname(
+            consuming_module, canonical, is_init_module=is_init_module
+        )
         if resolved is None:
             return KIND_UNRESOLVED, None
         canonical = resolved
@@ -1091,6 +1117,8 @@ def _lift_to_cross_file(
     imports: dict[str, str],
     module_exports: dict[str, set[str]],
     consuming_module: str = "",
+    *,
+    is_init_module: bool = False,
 ) -> tuple[str, str | None]:
     """Try to lift ``name`` to ``cross-file-import``.
 
@@ -1124,7 +1152,9 @@ def _lift_to_cross_file(
     # below. Resolve using the consuming module's qualname; on escape
     # above the package root, fall through to ``unresolved``.
     if canonical.startswith("."):
-        resolved = _resolve_relative_qualname(consuming_module, canonical)
+        resolved = _resolve_relative_qualname(
+            consuming_module, canonical, is_init_module=is_init_module
+        )
         if resolved is None:
             return KIND_UNRESOLVED, None
         canonical = resolved
@@ -1259,14 +1289,26 @@ class PyScopeResolutionConnector:
                 if isinstance(_mname, str):
                     consuming_module = _mname
             origin_res = conn.execute(
-                "MATCH (o:Origin {id: $oid}) RETURN o.content",
+                "MATCH (o:Origin {id: $oid}) RETURN o.content, o.uri",
                 {"oid": origin_id},
             )
             if not origin_res.has_next():
                 continue
-            content_str = origin_res.get_next()[0]
+            origin_row = origin_res.get_next()
+            content_str = origin_row[0]
+            origin_uri = origin_row[1] if len(origin_row) > 1 else None
             if content_str is None:
                 continue
+            # v1.13-#1: a consuming file whose URI's basename is
+            # ``__init__.py`` resolves relative imports against its own
+            # package qualname (the consumer qualname IS the package),
+            # not against a synthetic leaf. Accept both POSIX and
+            # Windows path separators; an absent / non-string URI falls
+            # back to False (preserves pre-v1.13 behaviour).
+            is_init_module = False
+            if isinstance(origin_uri, str) and origin_uri:
+                _basename = origin_uri.replace("\\", "/").rsplit("/", 1)[-1]
+                is_init_module = _basename == "__init__.py"
             raw = content_str.encode(BYTES_CODEC)
             try:
                 wrapper = MetadataWrapper(cst.parse_module(raw.decode("utf-8")))
@@ -1344,6 +1386,7 @@ class PyScopeResolutionConnector:
                                 imports_here,
                                 corpus_modules,
                                 consuming_module,
+                                is_init_module=is_init_module,
                             )
                             if new_kind != KIND_MODULE_IMPORT:
                                 new_kind, origin_mod = _lift_to_cross_file(
@@ -1351,6 +1394,7 @@ class PyScopeResolutionConnector:
                                     imports_here,
                                     module_exports,
                                     consuming_module,
+                                    is_init_module=is_init_module,
                                 )
                             entry["kind"] = new_kind
                             if (
