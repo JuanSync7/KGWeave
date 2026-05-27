@@ -9,12 +9,17 @@ every time a new subclass is created. Any class declaring
 This connector tags every qualifying ``PyClass`` with
 ``payload['semantic_role'] = "init-subclass-hook"``.
 
-Detection rule (closed)
------------------------
-A ``PyClass`` qualifies iff at least one of its direct ``PyFunction``
-children (via ``PARENT_OF``) is named exactly ``__init_subclass__``.
-Inheritance is NOT chased — mirrors v1.9-#2's closed rule. The
-``chase_bases`` extension is reserved for v1.11-#4.
+Detection rule
+--------------
+A ``PyClass`` qualifies when either of:
+
+1. At least one of its direct ``PyFunction`` children (via
+   ``PARENT_OF``) is named exactly ``__init_subclass__``, OR
+2. (v1.11-#4 inheritance chasing) any of its in-corpus ancestors
+   along the declared ``bases`` chain qualifies under rule 1.
+
+Mirrors v1.9-#4's descriptor inheritance-chasing rule. Out-of-corpus
+bases (e.g. ``object``, stdlib) are silently skipped.
 
 Precedence
 ----------
@@ -59,7 +64,9 @@ class PyInitSubclassSemanticsConnector:
     requires: list[str] = ["py"]
 
     def synthesize(self, store) -> int:
-        return tag_pyclass_by_method(store, _INIT_SUBCLASS_METHOD, _ROLE)
+        return tag_pyclass_by_method(
+            store, _INIT_SUBCLASS_METHOD, _ROLE, chase_bases=True
+        )
 
 
 __all__ = ["PyInitSubclassSemanticsConnector"]
