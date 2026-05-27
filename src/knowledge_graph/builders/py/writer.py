@@ -19,11 +19,19 @@ dispatcher routes ``source="py"`` uniformly.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import tempfile
 from pathlib import Path
 from typing import Any
+
+# v1.12-#2: hard cap on namespace-package walk depth. Prevents the
+# walk from escaping the corpus and iterating filesystem root on
+# arbitrary tmp-paths (which caused a suite-wide pytest timeout on
+# the first GREEN attempt). 8 levels comfortably covers realistic
+# package nesting (e.g. ``a.b.c.d.e.f.g.h``).
+_NS_WALK_MAX_DEPTH = 8
 
 from knowledge_graph.builders._writer_common import (
     BULK_COPY_MIN_ROWS,
@@ -154,38 +162,163 @@ def _node_params_for_py(
     }
 
 
+@functools.lru_cache(maxsize=512)
+def _is_namespace_container_cached(d_str: str) -> bool:
+    d = Path(d_str)
+    if (d / "__init__.py").is_file():
+        return False
+    try:
+        if not d.is_dir():
+            return False
+        for child in d.iterdir():
+            if child.is_file() and child.suffix == ".py":
+                return False
+    except OSError:
+        return False
+    return True
+
+
+def _is_namespace_container(d: Path) -> bool:
+    """v1.12-#2 helper: ``d`` is a PEP 420 namespace-package CONTAINER iff
+    it lacks ``__init__.py`` AND has zero direct ``.py`` files at this
+    level (i.e. it is a purely-organisational directory whose only
+    code lives in nested subpackages).
+
+    Memoised on the resolved path string to avoid repeated ``iterdir``
+    calls during suite runs.
+    """
+    try:
+        key = str(d.resolve())
+    except OSError:
+        key = str(d)
+    return _is_namespace_container_cached(key)
+
+
+@functools.lru_cache(maxsize=512)
+def _is_namespace_leaf_cached(d_str: str) -> bool:
+    d = Path(d_str)
+    if (d / "__init__.py").is_file():
+        return False
+    try:
+        if not d.is_dir():
+            return False
+        for child in d.iterdir():
+            if child.is_dir():
+                return False
+    except OSError:
+        return False
+    return True
+
+
+def _is_namespace_leaf(d: Path) -> bool:
+    """v1.12-#2 helper: ``d`` is a PEP 420 namespace-package LEAF iff it
+    lacks ``__init__.py`` AND contains NO subdirectories (it is purely
+    a flat bag of module ``.py`` files for a namespace-package leaf).
+
+    Memoised on the resolved path string.
+    """
+    try:
+        key = str(d.resolve())
+    except OSError:
+        key = str(d)
+    return _is_namespace_leaf_cached(key)
+
+
 def _module_qualname(uri: str) -> str:
     """Compute the package-qualified module name for a Python source file
-    at ``uri`` (v1.11-#1).
+    at ``uri`` (v1.11-#1 + v1.12-#2).
 
-    Walks up parent directories while EACH consecutive ancestor contains
-    an ``__init__.py``. The qualname is the dot-joined chain from the
-    outermost-package-with-init down to the file's stem (inclusive).
-    For an ``__init__.py`` leaf, the stem segment is dropped — the
-    module IS the package, so its qualname is the package chain itself.
+    v1.11-#1 rule (``__init__.py``-anchored regular packages):
+      Walks up parent directories while EACH consecutive ancestor
+      contains an ``__init__.py``. The qualname is the dot-joined
+      chain from the outermost-package-with-init down to the file's
+      stem (inclusive). For an ``__init__.py`` leaf, the stem segment
+      is dropped.
 
-    If the file's immediate parent has no ``__init__.py``, fall back to
-    ``Path(uri).stem`` — preserves pre-v1.11 behaviour for top-level
-    fixtures and namespace-package (PEP 420) layouts (explicitly OUT
-    of scope for v1.11-#1).
+    v1.12-#2 rule (PEP 420 namespace packages):
+      If the file's immediate parent has NO ``__init__.py``, namespace-
+      walk is allowed ONLY when the parent is a "namespace leaf":
+      no ``__init__.py`` AND no subdirectories (just a flat bag of
+      ``.py`` modules). Then include the parent in the chain and
+      continue walking up through "namespace container" ancestors
+      (each: no ``__init__.py`` AND no direct ``.py`` files — just
+      subdirectories). Stop at the first ancestor that fails the
+      container predicate.
+
+      This distinguishes ``ns_pkg/sub/mod.py`` (parent ``ns_pkg/sub``
+      is a leaf — no init, no subdirs; grandparent ``ns_pkg`` is a
+      namespace container — no init, no direct ``.py``; great-grandparent
+      ``fixtures/py`` has direct ``.py``, STOPs the walk) → qualname
+      ``ns_pkg.sub.mod`` — from ``fixtures/py/star_target.py`` (parent
+      ``fixtures/py`` has subdirs, so fails the namespace-leaf gate
+      and falls through to the stem-only fallback) → qualname stays
+      ``star_target``.
+
+      Known limitation: a namespace leaf that itself contains nested
+      subpackages (e.g. ``mynamespace/utils/sub/`` where ``utils/``
+      has both ``.py`` files AND a ``sub/`` subdir) will fail the
+      leaf predicate and fall back to stem. This is rare in practice
+      and documented as the v1.12-#2 heuristic boundary; if it
+      surfaces in production corpora we revisit with an explicit
+      corpus-root configuration knob.
+
+    Else fall back to ``Path(uri).stem``.
     """
     p = Path(uri)
     stem = p.stem
     parent = p.parent
-    # No init in the immediate parent -> stem-only fallback.
-    if not (parent / "__init__.py").is_file():
+    # v1.12-#2 safety: relative ``uri`` whose parent is "." (or any
+    # path that doesn't resolve to a real directory) gets stem-only.
+    # Resolves the "lesson learned" suite-timeout incident where a
+    # relative path led to an unbounded filesystem-root walk.
+    parent_str = str(parent)
+    if parent_str in ("", ".", "..") or not parent.exists():
         return stem
-    # Walk up while each ancestor still has __init__.py.
-    pkg_chain: list[str] = [parent.name]
+    if (parent / "__init__.py").is_file():
+        # v1.11-#1 classic walk. Depth + root guards (v1.12-#2 lesson).
+        pkg_chain: list[str] = [parent.name]
+        cur = parent.parent
+        depth = 0
+        while (
+            depth < _NS_WALK_MAX_DEPTH
+            and cur != cur.parent
+            and (cur / "__init__.py").is_file()
+        ):
+            pkg_chain.append(cur.name)
+            cur = cur.parent
+            depth += 1
+        pkg_chain.reverse()
+        if stem == "__init__":
+            return ".".join(pkg_chain)
+        return ".".join(pkg_chain + [stem])
+    # v1.12-#2 namespace-package walk. Gate: parent must be a
+    # "namespace leaf" — no __init__.py AND no subdirectories. A
+    # fixtures-flat bucket fails this gate because it hosts subdirs
+    # (independent subpackages or fixture buckets), so its files
+    # keep stem-only qualnames.
+    if not _is_namespace_leaf(parent):
+        return stem
+    chain: list[str] = [parent.name]
     cur = parent.parent
-    while (cur / "__init__.py").is_file():
-        pkg_chain.append(cur.name)
+    depth = 0
+    # v1.12-#2 guards: depth cap + filesystem-root check (``cur.parent
+    # == cur`` for ``/``). Without these, a tmp-path file like
+    # ``/tmp/xxx/foo.py`` walks up to ``/`` indefinitely because root
+    # trivially satisfies the namespace-container predicate (no
+    # ``__init__.py``, no direct ``.py``). That unbounded walk caused
+    # a suite-wide pytest timeout on the first GREEN attempt.
+    while (
+        depth < _NS_WALK_MAX_DEPTH
+        and cur != cur.parent
+        and _is_namespace_container(cur)
+    ):
+        chain.append(cur.name)
         cur = cur.parent
-    pkg_chain.reverse()
+        depth += 1
+    chain.reverse()
     if stem == "__init__":
-        # The package's own __init__.py represents the package itself.
-        return ".".join(pkg_chain)
-    return ".".join(pkg_chain + [stem])
+        return ".".join(chain)
+    return ".".join(chain + [stem])
 
 
 def _resolve_name(pn: PyNode, origin: OriginRef) -> str:
