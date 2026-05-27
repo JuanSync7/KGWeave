@@ -2258,3 +2258,91 @@ d8f0e11 docs(v1.8-#1 G5): JOURNAL retro -- alias-aware decorator promotion
 - **v1.11-#4 — `__init_subclass__` inheritance chasing** (S,
   one-line flip on `chase_bases=True` in
   `py_init_subclass_semantics.py` now that the helper supports it).
+
+
+## v1.11-#1 — Package-qualified `PyModule.name` (2026-05-27)
+
+### What we did
+- Added `_module_qualname(uri)` in `builders/py/writer.py` and rewired
+  `_resolve_name` to call it for `PyModule` rows. The function walks
+  up parent directories while EACH consecutive ancestor still contains
+  an `__init__.py`, dot-joins the chain from outermost-package-with-init
+  down to the file stem, drops the stem segment for `__init__.py`
+  leaves (so the package's own init carries the package name itself),
+  and falls back to `Path(uri).stem` when the immediate parent has no
+  `__init__.py` (preserves the pre-v1.11 behaviour for top-level
+  fixtures and the explicitly-out-of-scope PEP 420 namespace layout).
+- Added the `tests/knowledge_graph/fixtures/py/qual_pkg/{__init__.py,
+  sub/__init__.py, sub/mod.py}` fixture — three nesting levels, with
+  a top-level `foo` binding on the leaf that also doubles as the
+  v1.11-#3 multi-segment relative-import resolution target.
+- Added `tests/knowledge_graph/builders/py/test_module_qualname.py` —
+  positive case asserts `qual_pkg`, `qual_pkg.sub`, and
+  `qual_pkg.sub.mod` are all present as `PyModule.name`; negative
+  case (`star_target.py`) asserts the stem-only fallback still fires.
+- Updated `tests/knowledge_graph/connectors/test_py_scope_resolution_relimport.py`
+  — both tests now extract the package `__init__.py` alongside the
+  consumer/sibling, look up `relimport_pkg.consumer` /
+  `relimport_escape_pkg.escape_consumer` instead of bare stems, and
+  the positive test expects `origin_module == "relimport_pkg.sibling"`.
+  Docstrings re-pointed at the qualified semantics.
+- Touched the docstring of `_build_module_exports` and the inline
+  comment near `consuming_module` in `py_scope_resolution.py` so the
+  documentation no longer claims `PyModule.name` is the file stem.
+- All four dir-scoped suites green: `tests/knowledge_graph/builders/py/`
+  (60 passed, 139.5 s), `tests/knowledge_graph/connectors/` (61
+  passed — folded into the 121-pass aggregate above), `tests/_meta/`
+  + `tests/knowledge_graph/store/` (108 passed, 1 skipped, 126.4 s).
+  Perf still inside floors: quickstart 5.7 s (≤ 10 s), Py-writer
+  N=1000 inside `builders/py` totals (≤ 6 s), SV-writer N=1000 ≤ 3 s
+  (combined perf run 4.66 s for all three).
+
+### Lessons learnt
+- **The "highest blast radius" warning over-priced the risk** —
+  *charter §1 flagged "many existing tests likely assert against the
+  old stem-only name" and asked for 2-attempt-then-stop discipline.
+  Actual fallout: ONE test file (`test_py_scope_resolution_relimport.py`)
+  needed updating, because that fixture pair was the only one with
+  `__init__.py` siblings in the corpus. Every other fixture sits at
+  the top level of `tests/.../fixtures/py/` with no init siblings, so
+  the stem-fallback branch fires and the qualname is byte-identical
+  to before. The lesson: when a refactor is gated on a structural
+  pre-condition (here: presence of `__init__.py`), grep for that
+  pre-condition in the fixture tree FIRST before pricing blast
+  radius.*
+- **`__init__.py` files are first-class modules** — *the qualname for
+  `pkg/__init__.py` should be `pkg`, not `pkg.__init__`. The walker
+  emits a PyModule row for every file including init files, so the
+  qualname function has to special-case `stem == "__init__"` and drop
+  the stem segment. Caught at fixture-design time, not later — the
+  qualname positive test asserts all three names (`qual_pkg`,
+  `qual_pkg.sub`, `qual_pkg.sub.mod`) explicitly, which forced the
+  init-collapsing rule into the implementation.*
+- **The "escape above package root" test no longer escapes** — *with
+  `relimport_escape_pkg.escape_consumer` now a 2-segment qualname,
+  `from ..outside import foo` (k=2 dots) lands on an empty package
+  chain + body `outside.foo` — `k > len(segments)` is False (2 > 2),
+  so the resolver returns `outside.foo` rather than `None`. The lift
+  then misses because `outside` is not corpus-resident, and the
+  capture still stays `unresolved`. The TEST still passes (same
+  assertion: kind == unresolved, no origin_module), but the failure
+  mode shifted from "escape returns None" to "post-resolve module
+  miss". Docstring updated to reflect this — true escape-above-root
+  detection now needs k > package-chain-depth (i.e. drop the leaf
+  segment from the consuming qualname BEFORE comparing). Not in
+  v1.11-#1 scope; flag for a future relative-import correctness pass.*
+
+### Next moves
+- **v1.11-#3 — Multi-segment relative-import resolution** (S, the
+  `qual_pkg/sub/mod.py` fixture is already in place; the work is a
+  consumer.py that does `from .mod import foo` from inside
+  `qual_pkg.sub` and asserts the lift lands `cross-file-import`
+  with `origin_module == "qual_pkg.sub.mod"`).
+- **v1.11-#4 — `__init_subclass__` inheritance chasing** (S, one-line
+  flip on `chase_bases=True` in `py_init_subclass_semantics.py`).
+- **Future: escape-above-root resolver correctness** — strip the
+  consuming qualname's own leaf segment before counting depth, so
+  `from ..outside import foo` from a 2-segment qualname genuinely
+  returns `None` rather than relying on the corpus-modules miss
+  downstream. Out of scope for v1.11-#1 (no observable behaviour
+  change in current tests) but worth a slate item.
