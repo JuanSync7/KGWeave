@@ -154,13 +154,47 @@ def _node_params_for_py(
     }
 
 
+def _module_qualname(uri: str) -> str:
+    """Compute the package-qualified module name for a Python source file
+    at ``uri`` (v1.11-#1).
+
+    Walks up parent directories while EACH consecutive ancestor contains
+    an ``__init__.py``. The qualname is the dot-joined chain from the
+    outermost-package-with-init down to the file's stem (inclusive).
+    For an ``__init__.py`` leaf, the stem segment is dropped — the
+    module IS the package, so its qualname is the package chain itself.
+
+    If the file's immediate parent has no ``__init__.py``, fall back to
+    ``Path(uri).stem`` — preserves pre-v1.11 behaviour for top-level
+    fixtures and namespace-package (PEP 420) layouts (explicitly OUT
+    of scope for v1.11-#1).
+    """
+    p = Path(uri)
+    stem = p.stem
+    parent = p.parent
+    # No init in the immediate parent -> stem-only fallback.
+    if not (parent / "__init__.py").is_file():
+        return stem
+    # Walk up while each ancestor still has __init__.py.
+    pkg_chain: list[str] = [parent.name]
+    cur = parent.parent
+    while (cur / "__init__.py").is_file():
+        pkg_chain.append(cur.name)
+        cur = cur.parent
+    pkg_chain.reverse()
+    if stem == "__init__":
+        # The package's own __init__.py represents the package itself.
+        return ".".join(pkg_chain)
+    return ".".join(pkg_chain + [stem])
+
+
 def _resolve_name(pn: PyNode, origin: OriginRef) -> str:
-    """For the module node use the file stem; everything else uses the
-    walker-provided name. Kept as a free function so both code paths
-    agree (otherwise a divergence would silently shift the file's
-    PyModule name in one branch but not the other)."""
+    """For the module node use the package-qualified module name (v1.11-#1);
+    everything else uses the walker-provided name. Kept as a free function
+    so both code paths agree (otherwise a divergence would silently shift
+    the file's PyModule name in one branch but not the other)."""
     if pn.kind == "PyModule":
-        return Path(origin.uri).stem
+        return _module_qualname(origin.uri)
     return pn.name
 
 

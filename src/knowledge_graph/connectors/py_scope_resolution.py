@@ -694,7 +694,10 @@ def _build_module_exports(conn) -> dict[str, set[str]]:
     """Corpus-wide ``{module_qualname: set[exported_name]}`` index.
 
     A *module qualname* is ``PyModule.name`` (the writer sets this to
-    the file stem — see ``builders/py/writer.py::_resolve_name``). An
+    the package-qualified module name when an ancestor ``__init__.py``
+    is present, falling back to the file stem otherwise — see
+    ``builders/py/writer.py::_module_qualname`` and
+    ``_resolve_name``). An
     *exported name* is any top-level (parent is the ``PyModule``)
     ``PyFunction`` / ``PyClass`` declaration, plus the locally-bound
     names of any ``PyImport`` re-export (``from x import foo`` makes
@@ -1225,7 +1228,8 @@ class PyScopeResolutionConnector:
             else:
                 imports_here = named_imports
             # v1.10-#2: consuming module's qualname (PyModule.name —
-            # currently the file stem) drives relative-import
+            # package-qualified since v1.11-#1, file stem fallback for
+            # top-level files) drives relative-import
             # resolution. Empty string when no PyModule row exists for
             # this origin (defensive); resolver then returns None on
             # any relative target.
