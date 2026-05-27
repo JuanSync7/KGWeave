@@ -813,6 +813,13 @@ def _star_imports_for_origin(conn, origin_id: str) -> list[str]:
     leading-dot module form; downstream lookup against
     ``module_exports`` naturally misses them, matching the v1.10-#2
     "no relative-package resolution yet" stance.
+
+    v1.12-#3 decision rule: a star-import whose payload ``import_guard``
+    is not ``None`` (i.e. wrapped in ``if TYPE_CHECKING:``,
+    ``try / except ImportError``, ``if sys.version_info ...``, or any
+    other conditional) is SKIPPED. Guarded star-imports do not
+    contribute to runtime cross-file resolution; their captures fall
+    through to ``unresolved``.
     """
     out: list[str] = []
     res = conn.execute(
@@ -836,6 +843,10 @@ def _star_imports_for_origin(conn, origin_id: str) -> list[str]:
         if not isinstance(inner, dict):
             continue
         if not bool(inner.get("is_star", False)):
+            continue
+        # v1.12-#3: skip guarded star-imports — they don't contribute
+        # to runtime cross-file resolution.
+        if inner.get("import_guard") is not None:
             continue
         module_name = inner.get("module")
         if isinstance(module_name, str) and module_name:
