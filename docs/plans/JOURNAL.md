@@ -24,6 +24,66 @@ Entry skeleton:
 
 ---
 
+## 2026-05-27 — v1.12-#3 — conditional star-imports preserve `import_guard`
+**Branch / commit:** `kgweave/kuzu-port` @ `5943747`
+
+### What we did
+- Added two fixtures (`star_type_checking.py`, `star_try_import.py`)
+  doing `from star_target import *` under `if TYPE_CHECKING:` and
+  `try / except ImportError` respectively, each with a lambda capturing
+  the unguarded-case-lifted name `foo`.
+- Walker test (`test_kind_star_import_guarded.py`) pins the combined
+  payload invariant on both fixtures: `is_star=True` AND the correct
+  `import_guard` value (`type-checking` / `try-import`). Walker needed
+  no change — v1.10-#3 (`is_star`) and v1.8-#2 (`import_guard`) are
+  independent payload writes inside the same `_emit_simple_stmt`
+  branch, so they combine naturally.
+- Connector RED test (`test_py_scope_resolution_star_guarded.py`)
+  asserted both fixtures' lambda captures must classify `unresolved`
+  (not `cross-file-import`). Failed today as expected: connector was
+  expanding guarded stars indiscriminately.
+- Connector GREEN: in `_star_imports_for_origin`, added a single guard
+  `if inner.get("import_guard") is not None: continue` after the
+  existing `is_star` check, plus docstring documenting the rule.
+  11-line change, no other call-site touched.
+- Regression: v1.10-#3 unguarded star tests (4) + v1.8-#2 guard tests
+  (5) + walker star tests (3) all green. Full dir-scoped sweep
+  (`tests/knowledge_graph/connectors/`,
+  `tests/knowledge_graph/builders/py/`, `tests/_meta/`):
+  **167 passed, 1 skipped in 125 s**.
+- Perf: `quickstart` and `py N=1000` both PASS under their respective
+  10 s / 6 s budgets.
+
+### Lessons learnt
+- **Independent walker payload writes compose for free** — *v1.10-#3
+  and v1.8-#2 each added a single key to a shared payload dict
+  inside `_emit_simple_stmt`. No coordination needed for them to
+  combine; the walker test only had to PIN the combination. When
+  future per-import payload fields land, the same shape applies —
+  no need for cross-field merge logic.*
+- **Connector-side runtime/static distinction belongs at the
+  expansion gate, not the row filter** — *guarded star-imports are
+  still legitimate PyImport rows (a tooling consumer might care
+  about TYPE_CHECKING-only types). Filtering them out of the row
+  set entirely would lose that signal. Gating just the expansion
+  step keeps the row visible while denying it runtime-resolution
+  contribution.*
+- **Reuse fixtures across walker + connector test surfaces** — *one
+  fixture file pinned by a walker payload test AND consumed by a
+  connector classification test exercises both layers without
+  duplication. The connector test uses the same `star_target.py`
+  as v1.10-#3's positive case, so the only varying axis IS the
+  guard — keeping the regression contrast crisp.*
+
+### Next moves
+- v1.12-#2 PEP 420 namespace packages (S/M) — last v1.12 item; lands
+  on a stable surface now that #1, #3, #4 are in.
+- Consider whether `module_capture` / out-of-corpus star-import
+  semantics deserve their own slate; deferred per v1.12 charter
+  out-of-scope list.
+
+---
+
 ## 2026-05-27 — v1.12-#4 — direct `tag_pyclass_by_method` unit tests
 **Branch / commit:** `kgweave/kuzu-port` @ `e7d800f`
 
