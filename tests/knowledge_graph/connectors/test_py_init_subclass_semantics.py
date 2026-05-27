@@ -127,3 +127,74 @@ def test_class_without_init_subclass_method_not_tagged(
         assert _semantic_role(store, "SetOnly") is None
     finally:
         store.close()
+
+
+def test_init_subclass_inheritance_single_hop_tags_subclass(
+    tmp_path: Path,
+) -> None:
+    """v1.11-#4 inheritance chasing: ``A`` declares ``__init_subclass__``;
+    ``B(A)`` inherits it. Both must be tagged
+    ``semantic_role='init-subclass-hook'`` once the helper's
+    ``chase_bases`` flag is True for this connector.
+    """
+    store = open_store(tmp_path / "kg.kuzu")
+    try:
+        _run(
+            store,
+            "init_subclass_inherited.py",
+            only=["py-init-subclass-semantics"],
+        )
+        assert _semantic_role(store, "A") == "init-subclass-hook"
+        assert _semantic_role(store, "B") == "init-subclass-hook"
+    finally:
+        store.close()
+
+
+def test_init_subclass_inheritance_multi_hop_tags_full_chain(
+    tmp_path: Path,
+) -> None:
+    """v1.11-#4 inheritance chasing — transitive: ``A`` declares
+    ``__init_subclass__``; ``B(A)`` and ``C(B)`` inherit transitively.
+    All three must be tagged ``semantic_role='init-subclass-hook'``.
+    """
+    store = open_store(tmp_path / "kg.kuzu")
+    try:
+        _run(
+            store,
+            "init_subclass_inherited_multi_hop.py",
+            only=["py-init-subclass-semantics"],
+        )
+        assert _semantic_role(store, "A") == "init-subclass-hook"
+        assert _semantic_role(store, "B") == "init-subclass-hook"
+        assert _semantic_role(store, "C") == "init-subclass-hook"
+    finally:
+        store.close()
+
+
+def test_descriptor_wins_over_inherited_init_subclass_hook(
+    tmp_path: Path,
+) -> None:
+    """v1.11-#4 precedence with inheritance: ``DescriptorChild`` directly
+    declares ``__get__`` AND inherits ``__init_subclass__`` from
+    ``HookBase``. Descriptor (v1.8-#4) is the more specific structural
+    role and runs first; ``DescriptorChild`` MUST keep
+    ``semantic_role='descriptor'`` (the v1.11-#4 inheritance-chasing
+    init-subclass connector must not overwrite it).
+
+    ``HookBase`` itself directly declares ``__init_subclass__`` and must
+    still be tagged ``'init-subclass-hook'``.
+    """
+    store = open_store(tmp_path / "kg.kuzu")
+    try:
+        _run(
+            store,
+            "init_subclass_inherited_with_get.py",
+            only=[
+                "py-descriptor-semantics",
+                "py-init-subclass-semantics",
+            ],
+        )
+        assert _semantic_role(store, "DescriptorChild") == "descriptor"
+        assert _semantic_role(store, "HookBase") == "init-subclass-hook"
+    finally:
+        store.close()
