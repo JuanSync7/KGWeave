@@ -2200,3 +2200,61 @@ d8f0e11 docs(v1.8-#1 G5): JOURNAL retro -- alias-aware decorator promotion
   termination" gate; this slate landed clean. Worth promoting that
   gate into the standard sub-agent dispatch template for v1.11.*
 
+
+## v1.11-#2 — Tag-by-method-name-on-PyClass helper refactor (2026-05-27)
+
+### What we did
+- Extracted the duplicated PyClass→PyFunction method-name tagging
+  shape from three sibling connectors into a single helper
+  `tag_pyclass_by_method(store, method_name, role, *, chase_bases=False)`
+  at `src/knowledge_graph/connectors/_py_class_tag.py`.
+- Refactored to thin wrappers:
+  - `py_descriptor_semantics.py` → calls helper with
+    `("__get__", "descriptor", chase_bases=True)` (v1.9-#4 inheritance
+    flag preserved).
+  - `py_set_name_semantics.py` → `("__set_name__", "set-name-hook")`.
+  - `py_init_subclass_semantics.py` →
+    `("__init_subclass__", "init-subclass-hook")`.
+- Precedence rule (skip when `semantic_role` already populated) now
+  lives once inside the helper instead of N=3 copies.
+- LOC delta on the three refactored connectors: −371 / +120 (net −251
+  for those three files), helper adds +198 — net −53 across the four
+  files vs. the pre-refactor baseline.
+- Added `tests/knowledge_graph/connectors/test_py_class_tag.py` with
+  three cases:
+  1. Precedence preserved under both `chase_bases` flags.
+  2. `chase_bases=False` does not tag a subclass that only inherits
+     the method.
+  3. `chase_bases=True` tags multi-hop inheritance chain
+     (A → B → C).
+- All v1.8-#4 + v1.9-#2 + v1.9-#4 + v1.10-#4 existing tests stayed
+  green untouched.
+
+### Lessons learnt
+- **Helper-extraction earns its keep at N=3 once a fork already
+  exists** — *original prediction (slate-surfaced gap, v1.10 retro)
+  said "wait for N=4 same-shape hook connector". Reality: with the
+  `chase_bases` fork already on descriptor and a fourth use case
+  (v1.11-#4) pre-committed in the charter, the extraction was already
+  cheap. The fork itself is the trigger, not the count.*
+- **Thin-wrapper connectors keep the registration contract intact**
+  — *connector discovery is by class with `name` / `requires`
+  attributes. Collapsing internals to one helper call means the
+  public connector list, ordering, and idempotence guarantees are
+  byte-identical from the registry's point of view; no test asserting
+  connector name had to change.*
+- **Inheritance-chasing fields are zero-cost on the cheap path** —
+  *the helper only populates `name_to_id` / `bases_index` /
+  `corpus_of` when `chase_bases=True`. Set-name-hook and
+  init-subclass-hook connectors pay no overhead vs. the pre-refactor
+  bespoke code path; v1.6 SV writer N=1000 still 1.06 s (≤ 6 s floor)
+  and quickstart still 3.08 s (≤ 10 s floor).*
+
+### Next moves
+- **v1.11-#1 — Package-qualified `PyModule.name`** (M, highest blast
+  radius; lands next on the helper-refactor stability surface).
+- **v1.11-#3 — Multi-segment relative-import resolution** (S,
+  naturally unblocked by #1).
+- **v1.11-#4 — `__init_subclass__` inheritance chasing** (S,
+  one-line flip on `chase_bases=True` in
+  `py_init_subclass_semantics.py` now that the helper supports it).
