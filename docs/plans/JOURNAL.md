@@ -2560,3 +2560,141 @@ d8f0e11 docs(v1.8-#1 G5): JOURNAL retro -- alias-aware decorator promotion
 - v1.12-#3 (conditional star-imports preserve `import_guard`) is the next charter item in order; #2 (PEP 420 namespace packages) lands last because its blast radius is largest.
 - Future: special-case `__init__.py` consumers in `_resolve_relative_qualname` (don't strip a leaf segment when the consumer qualname IS the package qualname). Cheap to add once a fixture exercises a relative import from an `__init__.py`.
 - Future: direct unit tests for the two lift helpers (`_lift_to_module_import`, `_lift_to_cross_file`) along the same pattern as v1.12-#1's resolver tests.
+
+---
+
+## 2026-05-27 — v1.12-#2 — PEP 420 namespace-package qualnames
+**Branch / commit:** `kgweave/kuzu-port` @ `1572724`
+
+### What we did
+- Added fixture `ns_pkg/sub/{mod,consumer}.py` (no `__init__.py`
+  anywhere in the chain). RED tests pinned:
+  - walker: `PyModule.name == "ns_pkg.sub.mod"` and
+    `"ns_pkg.sub.consumer"`.
+  - connector: `from .mod import foo` in `ns_pkg.sub.consumer`
+    resolves to `origin_module == "ns_pkg.sub.mod"`.
+- Extended `_module_qualname` with a namespace-walk that fires when
+  the immediate parent has no `__init__.py`:
+  - parent must be a *namespace leaf* — no `__init__.py` AND no
+    subdirectories (distinguishes `ns_pkg/sub/` from
+    `fixtures/py/`, which holds independent subpackages).
+  - walk continues up through *namespace container* ancestors —
+    no `__init__.py` AND no direct `.py` files (distinguishes
+    `ns_pkg/` from `fixtures/py/`, which holds direct `.py`
+    fixtures).
+- **Suite-timeout incident on first GREEN attempt:** the initial
+  walk had no termination guards. On a tmp-path file like
+  `/tmp/xxx/foo.py`, the namespace-container predicate is
+  trivially true at every ancestor up to filesystem root,
+  including `/` itself. The walk never terminated. `iterdir()` on
+  `/` then iterated thousands of entries per file, and pytest's
+  per-test 60 s timeout fired suite-wide.
+- **Termination guards added (GREEN):**
+  - depth cap (`_NS_WALK_MAX_DEPTH = 8`) on both the classic
+    `__init__.py` walk AND the namespace walk.
+  - filesystem-root check: `while cur != cur.parent and ...` —
+    `Path('/').parent == Path('/')` is the fixed-point sentinel.
+  - relative-`uri` short-circuit: if `parent` is `""`, `"."`,
+    `".."`, or doesn't exist, fall back to stem immediately
+    (skips the walk entirely).
+  - `functools.lru_cache(maxsize=512)` memoisation of the leaf /
+    container predicates, keyed on the resolved path string.
+    Cuts repeated `iterdir()` calls for sibling files in a
+    namespace leaf to one per directory.
+- Validation:
+  - v1.12-#2 RED tests (qualname + connector): GREEN.
+  - v1.11-#1 `qual_pkg` fixture: GREEN (init-walk unchanged
+    semantics, only depth/root guards added).
+  - v1.10-#3 `star_target.py`: still resolves to `star_target`
+    (parent `fixtures/py` has subdirs → fails leaf predicate →
+    stem fallback).
+  - Full dir-scoped suite
+    (`tests/knowledge_graph/connectors/`,
+    `tests/knowledge_graph/builders/py/`, `tests/_meta/`):
+    **169 passed, 1 skipped in 130.91 s** (gate ≤ 200 s).
+  - quickstart wall-clock + py N=1000: PASS (6.12 s combined,
+    each well under its 10 s / 6 s budget).
+
+### Lessons learnt
+- **Filesystem-walking predicates need three independent
+  termination guards: root, depth, validity.** *A "natural"
+  predicate that holds at the corpus level may also hold
+  vacuously at filesystem root — `/` has no `__init__.py` and no
+  direct `.py`, so the namespace-container predicate is
+  trivially true. Without an explicit `cur != cur.parent` check
+  AND a depth cap AND an `exists()` / `is_dir()` validity check,
+  an unbounded walk is one bad input away. The depth cap alone
+  is a defense-in-depth — root check catches `/`, depth catches
+  pathological deep nesting, validity catches relative paths.*
+- **Per-test timeouts mask runaway loops as "the suite is slow".**
+  *The first GREEN attempt didn't crash — it timed out one test
+  at a time, until the whole suite exceeded the parent agent's
+  bash timeout. Symptom (suite timeout) was three layers
+  removed from cause (unbounded `iterdir` on `/`). Lesson:
+  when a suite that was passing in <2 min suddenly hangs after
+  a one-function change, suspect an unbounded loop in the
+  changed function before suspecting test-data growth.*
+- **Memoise filesystem predicates from day one when called per
+  source file.** *Without `lru_cache`, each file in a namespace
+  leaf triggers an `iterdir()` on every ancestor — N files in
+  one directory = N × depth `iterdir()` calls for identical
+  results. `lru_cache(maxsize=512)` keyed on the resolved path
+  string makes the second-and-onwards lookup O(1).*
+
+### Next moves
+- v1.12 slate close (see next entry).
+- Future: namespace leaf with nested subpackages
+  (`mynamespace/utils/sub/` where `utils/` has both `.py` files
+  AND a `sub/` subdir) falls back to stem under the current
+  leaf predicate. Documented as the v1.12-#2 heuristic
+  boundary; revisit only if surfaced in a real corpus.
+
+---
+
+## 2026-05-27 — v1.12 slate close
+**Branch / commit:** `kgweave/kuzu-port` @ `1572724`
+
+### What we did
+- Shipped four items in the v1.12 slate:
+  - **#4** — direct unit tests for `_lift_to_module_import` /
+    `_lift_to_cross_file` helpers (5 cases). No helper bugs
+    surfaced; net result was a per-helper safety net so future
+    refactors can move with confidence.
+  - **#1** — `_resolve_relative_qualname` resolver tightened
+    plus 12 unit tests; ruled out edge cases where the consumer
+    qualname could over- or under-strip leaf segments.
+  - **#3** — connector now skips star-import expansion when
+    `import_guard is not None` (`TYPE_CHECKING`, `try-import`).
+    Single-line gate inside `_star_imports_for_origin` plus two
+    walker payload combine tests.
+  - **#2** — PEP 420 namespace-package qualname walk with
+    termination guards (depth cap, root check, relative-uri
+    short-circuit, `lru_cache` memoisation). Lesson: see
+    v1.12-#2 entry above for the suite-timeout incident.
+- **Perf snapshot at slate close:**
+  - dir-scoped suite (connectors + builders/py + _meta):
+    169 passed, 1 skipped in 130.91 s (gate ≤ 200 s).
+  - quickstart wall-clock + py N=1000: PASS, 6.12 s combined.
+  - Headroom on both perf gates remains comfortable.
+
+### Lessons learnt
+- **Order matters when a slate has both a tightening change
+  (#1) and a widening change (#2).** *Tightening landed first,
+  so #2's namespace walk didn't have to also resolve resolver
+  edge cases. Each landed independently testable.*
+
+### Next moves — v1.13 candidate queue
+- Builder #4 in a new language (L, own charter — **NEEDS
+  LANGUAGE CHOICE**).
+- CI disk-budget guard (S, still blocked on first full-suite
+  green).
+- Type inference / annotation-driven resolution (M/L).
+- `__init__.py` consumer edge case in
+  `_resolve_relative_qualname` (S — surfaced v1.12-#1).
+- Direct unit tests for `_lift_to_module_import` /
+  `_lift_to_cross_file` (XS — surfaced v1.12-#1; partially
+  addressed by v1.12-#4, expand if gaps surface).
+- Out-of-corpus star-imports record-only (S).
+- Cross-corpus qualname uniqueness (M).
+- Namespace leaf with nested subpackages (M — v1.12-#2
+  heuristic boundary).
