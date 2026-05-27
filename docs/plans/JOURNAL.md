@@ -2346,3 +2346,95 @@ d8f0e11 docs(v1.8-#1 G5): JOURNAL retro -- alias-aware decorator promotion
   returns `None` rather than relying on the corpus-modules miss
   downstream. Out of scope for v1.11-#1 (no observable behaviour
   change in current tests) but worth a slate item.
+
+## 2026-05-27 — v1.11-#3: multi-segment relative-import resolution
+**Branch / commit:** kgweave/kuzu-port @ bd91752
+
+### What we did
+- Added `qual_pkg/sub/consumer.py` doing `from .mod import foo` +
+  lambda capturing `foo`. Asserts capture classifies as
+  `cross-file-import` with `origin_module == "qual_pkg.sub.mod"` —
+  end-to-end proof that v1.11-#1's qualified `PyModule.name` lets
+  v1.10-#2's relative resolver hit the (now-qualified)
+  `module_exports` keys.
+- v1.10-#2's single-segment relimport fixture still green.
+
+### Lessons learnt
+- The smallest validation slate-item ("just write a test") is still
+  worth a TDD commit pair — if the green path were already there,
+  the RED would have passed and the bug would have been the
+  RED-as-GREEN test artefact, not silent.
+
+### Next moves
+- v1.11-#4 inheritance chasing (one-line flip).
+
+## 2026-05-27 — v1.11-#4: `__init_subclass__` inheritance chasing
+**Branch / commit:** kgweave/kuzu-port @ HEAD
+
+### What we did
+- One-line flip on `py_init_subclass_semantics.py`:
+  `tag_pyclass_by_method(store, "__init_subclass__",
+  "init-subclass-hook", chase_bases=True)`. v1.11-#2's helper does
+  the rest.
+- Mirrors v1.9-#4's descriptor inheritance pattern. Direct-declaration
+  v1.10-#4 tests stay green; multi-hop inheritance tests pass.
+
+### Lessons learnt
+- Refactor-first ordering (v1.11-#2 before #1, #3, #4) paid off
+  exactly as the charter predicted: #4 reduced to a 1-line change
+  + fixture work, and #3 was 0-line resolver change + fixture work.
+
+### Next moves
+- v1.11 slate close (this commit).
+
+## 2026-05-27 — v1.11 slate close
+**Branch / commit:** kgweave/kuzu-port @ HEAD
+
+### What we did
+- Four items shipped:
+  - #2 (LANDED FIRST): tag-by-method-name helper dedup. -53 LOC net
+    across four files. Helper now centralises precedence + chase_bases.
+  - #1: package-qualified `PyModule.name`. Walker walks
+    `__init__.py`-anchored package paths. Blast radius smaller than
+    feared — only one connector test needed string updates.
+  - #3: multi-segment relative-import resolution. Cross-file capture
+    of `from .mod import foo` inside `qual_pkg.sub.consumer`
+    resolves to full qualified `qual_pkg.sub.mod`.
+  - #4: `__init_subclass__` inheritance chasing. One-line
+    `chase_bases=True` flip on the helper.
+- Closed sets unchanged this slate (capture-resolution still at 6
+  values from v1.10-#1).
+- Perf snapshot: quickstart=5.73s (≤10s), py-N1000=well within ≤6s,
+  sv-N1000=within ≤3s.
+- Dir-scoped suites: connectors+builders/py+_meta = 146 passed, 1
+  skipped.
+
+### Lessons learnt
+- Helper extraction at N=4 was exactly the right call — three
+  follow-up slate items (#3, #4, future inheritance-chasing variants)
+  all became trivial.
+- Stall pattern reappeared on #3+#4 dispatch (GREEN connector flip
+  uncommitted on exit). Parent verification of `git status` after
+  every sub-agent return remains the actual safety net; explicit
+  EXIT PRECONDITION wording in the dispatch helps but doesn't
+  prevent.
+- `_resolve_relative_qualname` has a corrects-by-accident behaviour
+  on escape-above-root (returns a qualname that just doesn't match
+  any corpus module, rather than returning None). Documented for v1.12.
+
+### Next moves
+- v1.12 candidate queue:
+  - Builder #4 in a new language (L, own charter — NEEDS LANGUAGE
+    CHOICE on its own ticket; deferred since v1.6).
+  - CI disk-budget guard (S, still blocked on first full-suite green).
+  - Type inference / annotation-driven resolution (M/L, own slate).
+  - PEP 420 namespace packages (S/M).
+  - Conditional star-imports (`if cond: from X import *`) (S).
+  - Out-of-corpus star-imports — record-only? (S).
+  - Tighten `_resolve_relative_qualname` to strip consumer's own
+    leaf segment before depth-counting; current behaviour
+    correct-by-accident (S).
+  - Cross-corpus qualname uniqueness (M).
+  - Promote helper test surface — direct tests for
+    `tag_pyclass_by_method` chase_bases semantics beyond current
+    fixture coverage (XS).
