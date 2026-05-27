@@ -954,39 +954,45 @@ def _resolve_relative_qualname(
     preserved (``from .sibling import foo`` → ``.sibling.foo``;
     ``from ..pkg.thing import x`` → ``..pkg.thing.x``). v1.10-#2 turns
     that into an absolute qualname using the consuming module's package
-    path:
+    path. v1.12-#1 pins the contract:
 
-    1. Count ``k`` leading dots in ``relative_target``.
-    2. Strip ``k`` rightmost segments from ``consuming_module``. If the
-       qualname has fewer than ``k`` segments the relative escape goes
-       above the package root — return ``None``.
-    3. Append the dot-stripped body of ``relative_target`` (which may
-       itself be empty for bare ``from . import x`` shapes — but those
-       carry the leaf in the canonical so the body is the leaf).
-    4. Re-join with ``.`` and return.
+    Let ``N = len(consuming_module.split('.'))`` and ``K`` the count of
+    leading dots in ``relative_target``, with the remainder being the
+    optional ``body``:
 
-    Examples (consuming = ``pkg.sub.consumer``):
+    * **K > N** — the relative escapes above the top-level package
+      root: return ``None``. This is the v1.12-#1 invariant — directly
+      enforced here rather than hidden behind a downstream corpus
+      lookup miss.
+    * **K ≤ N** — retain the first ``N - K`` segments of
+      ``consuming_module`` and append ``body``. Edge cases:
+        - ``N - K > 0`` and ``body`` non-empty → join + dot + body.
+        - ``N - K == 0`` and ``body`` non-empty → ``body`` (top-level).
+        - ``N - K > 0`` and ``body`` empty → joined retained segments
+          (the package qualname itself).
+        - ``N - K == 0`` and ``body`` empty → ``None`` (no target).
 
-    * ``.sibling.foo``   → ``pkg.sub.sibling.foo``
-    * ``..other.bar``    → ``pkg.other.bar``
-    * ``...too.far``     → ``None`` (3 dots, only 3 segments in
-      consumer; strip 3 leaves empty package — but ``...`` per PEP 328
-      means "parent's parent's parent", which IS above root for a
-      3-segment path. PEP 328: k dots strip k-1 segments AFTER also
-      stripping the consumer's own leaf segment. We follow the same
-      rule: strip ``k`` from a ``len(consuming_module.split('.'))``
-      length, since the consuming module's own leaf is the first dot's
-      worth.)
+    Worked examples (consuming = ``pkg.sub.consumer``, N=3):
 
-    Note: by Python's relative-import semantics, ``k`` leading dots
-    refer to the package that is ``k`` levels up from the consuming
-    module — equivalently, you strip ``k`` segments from the consumer's
-    fully qualified name (the consumer's own leaf is the first segment
-    stripped, the package above is the second, etc.). If ``k`` exceeds
-    the number of segments the import escapes the top-level and is
-    unresolvable.
+    * ``.sibling.foo``   (K=1) → ``pkg.sub.sibling.foo``
+    * ``..other.bar``    (K=2) → ``pkg.other.bar``
+    * ``...x``           (K=3) → ``x`` (legitimate top-level)
+    * ``....x``          (K=4) → ``None`` (escape above root)
+
+    Defensive: a non-dotted ``relative_target`` or an empty
+    ``consuming_module`` both return ``None``.
+
+    Note on ``__init__.py`` consumers: since v1.11-#1 the
+    ``PyModule.name`` of ``pkg/__init__.py`` is ``pkg`` (the package
+    qualname). Under the ``N - K`` rule, ``from .x import y`` inside
+    ``pkg/__init__.py`` (N=1, K=1, body='x.y') resolves to ``x.y``
+    (top-level) — not to ``pkg.x.y``. Practical impact in the current
+    corpus is nil (no fixture exercises this shape), but consumers
+    that care should special-case the convention upstream.
     """
     if not relative_target.startswith("."):
+        return None
+    if not consuming_module:
         return None
     # Count leading dots.
     k = 0
@@ -996,21 +1002,19 @@ def _resolve_relative_qualname(
         else:
             break
     body = relative_target[k:]
-    if not consuming_module:
-        return None
     segments = consuming_module.split(".")
-    if k > len(segments):
-        # Escapes above package root.
+    n = len(segments)
+    if k > n:
+        # Legitimate escape above package root.
         return None
-    # Strip k rightmost segments from the consuming module.
-    remaining = segments[:-k]
+    retained = segments[: n - k]  # N-K segments; [] when K == N.
+    if retained and body:
+        return ".".join(retained) + "." + body
+    if retained:
+        return ".".join(retained)
     if body:
-        if remaining:
-            return ".".join(remaining) + "." + body
         return body
-    if remaining:
-        return ".".join(remaining)
-    # k stripped everything AND body is empty — meaningless.
+    # K == N and body empty — nothing to point at.
     return None
 
 
