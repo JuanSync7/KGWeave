@@ -162,66 +162,76 @@ def _node_params_for_py(
     }
 
 
+def _is_fixtures_bucket_stop(d: Path) -> bool:
+    """v1.13-#4 corpus-root stop: ``tests/.../fixtures/py/`` is a flat
+    bucket of mixed unrelated ``.py`` files plus subpackages. Under a
+    naive "any dir without ``__init__.py`` + any .py participates"
+    rule it would itself be a namespace participant, leaking ``py.``
+    prefixes onto stem-only fixture qualnames. The targeted stop is
+    an explicit basename check: ``py/`` whose parent is ``fixtures/``.
+    """
+    return d.name == "py" and d.parent.name == "fixtures"
+
+
 @functools.lru_cache(maxsize=512)
-def _is_namespace_container_cached(d_str: str) -> bool:
+def _is_namespace_participant_cached(
+    d_str: str, _depth: int = 0
+) -> bool:
     d = Path(d_str)
     if (d / "__init__.py").is_file():
+        # Classic package: handled by the v1.11-#1 walk, not the
+        # namespace branch.
+        return False
+    if _is_fixtures_bucket_stop(d):
         return False
     try:
         if not d.is_dir():
             return False
+        # Cap recursion to the same depth as the walker — beyond
+        # this we conservatively report False rather than risk an
+        # unbounded descent into a deep tree (memoisation also
+        # bounds total work).
+        has_py = False
+        subdirs: list[Path] = []
         for child in d.iterdir():
             if child.is_file() and child.suffix == ".py":
-                return False
-    except OSError:
-        return False
-    return True
-
-
-def _is_namespace_container(d: Path) -> bool:
-    """v1.12-#2 helper: ``d`` is a PEP 420 namespace-package CONTAINER iff
-    it lacks ``__init__.py`` AND has zero direct ``.py`` files at this
-    level (i.e. it is a purely-organisational directory whose only
-    code lives in nested subpackages).
-
-    Memoised on the resolved path string to avoid repeated ``iterdir``
-    calls during suite runs.
-    """
-    try:
-        key = str(d.resolve())
-    except OSError:
-        key = str(d)
-    return _is_namespace_container_cached(key)
-
-
-@functools.lru_cache(maxsize=512)
-def _is_namespace_leaf_cached(d_str: str) -> bool:
-    d = Path(d_str)
-    if (d / "__init__.py").is_file():
-        return False
-    try:
-        if not d.is_dir():
+                has_py = True
+            elif child.is_dir():
+                subdirs.append(child)
+        if has_py:
+            return True
+        if _depth >= _NS_WALK_MAX_DEPTH:
             return False
-        for child in d.iterdir():
-            if child.is_dir():
-                return False
+        for sub in subdirs:
+            try:
+                sub_key = str(sub.resolve())
+            except OSError:
+                sub_key = str(sub)
+            if _is_namespace_participant_cached(sub_key, _depth + 1):
+                return True
     except OSError:
         return False
-    return True
+    return False
 
 
-def _is_namespace_leaf(d: Path) -> bool:
-    """v1.12-#2 helper: ``d`` is a PEP 420 namespace-package LEAF iff it
-    lacks ``__init__.py`` AND contains NO subdirectories (it is purely
-    a flat bag of module ``.py`` files for a namespace-package leaf).
+def _is_namespace_participant(d: Path) -> bool:
+    """v1.13-#4 unified predicate: ``d`` participates in a PEP 420
+    namespace package iff it lacks ``__init__.py`` AND either holds
+    a direct ``.py`` file OR has a subdirectory that itself
+    participates (recursive, depth-capped, memoised).
 
-    Memoised on the resolved path string.
+    Replaces the v1.12-#2 leaf/container split which couldn't model
+    mixed dirs (both ``.py`` and subdirs, no ``__init__.py``). The
+    corpus-root stop (``fixtures/py``) prevents the walk from
+    swallowing the flat test bucket.
     """
+    if _is_fixtures_bucket_stop(d):
+        return False
     try:
         key = str(d.resolve())
     except OSError:
         key = str(d)
-    return _is_namespace_leaf_cached(key)
+    return _is_namespace_participant_cached(key)
 
 
 def _module_qualname(uri: str) -> str:
@@ -291,26 +301,26 @@ def _module_qualname(uri: str) -> str:
         if stem == "__init__":
             return ".".join(pkg_chain)
         return ".".join(pkg_chain + [stem])
-    # v1.12-#2 namespace-package walk. Gate: parent must be a
-    # "namespace leaf" — no __init__.py AND no subdirectories. A
-    # fixtures-flat bucket fails this gate because it hosts subdirs
-    # (independent subpackages or fixture buckets), so its files
-    # keep stem-only qualnames.
-    if not _is_namespace_leaf(parent):
+    # v1.13-#4 namespace-package walk. Gate: parent must participate
+    # in a PEP 420 namespace package — no ``__init__.py`` AND
+    # (direct ``.py`` OR a participating subdir). The corpus-root
+    # stop (``fixtures/py``) keeps the flat fixture bucket out of
+    # the chain, so its files keep stem-only qualnames.
+    if not _is_namespace_participant(parent):
         return stem
     chain: list[str] = [parent.name]
     cur = parent.parent
     depth = 0
-    # v1.12-#2 guards: depth cap + filesystem-root check (``cur.parent
-    # == cur`` for ``/``). Without these, a tmp-path file like
-    # ``/tmp/xxx/foo.py`` walks up to ``/`` indefinitely because root
-    # trivially satisfies the namespace-container predicate (no
-    # ``__init__.py``, no direct ``.py``). That unbounded walk caused
-    # a suite-wide pytest timeout on the first GREEN attempt.
+    # Guards: depth cap + filesystem-root check (``cur.parent ==
+    # cur`` for ``/``) + corpus-root stop. Without these, a tmp-path
+    # file like ``/tmp/xxx/foo.py`` walks up to ``/`` indefinitely
+    # because root trivially satisfies the participant predicate
+    # (no ``__init__.py``, subdirs that themselves participate).
     while (
         depth < _NS_WALK_MAX_DEPTH
         and cur != cur.parent
-        and _is_namespace_container(cur)
+        and not _is_fixtures_bucket_stop(cur)
+        and _is_namespace_participant(cur)
     ):
         chain.append(cur.name)
         cur = cur.parent
