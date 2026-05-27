@@ -2482,3 +2482,21 @@ d8f0e11 docs(v1.8-#1 G5): JOURNAL retro -- alias-aware decorator promotion
   - Promote helper test surface — direct tests for
     `tag_pyclass_by_method` chase_bases semantics beyond current
     fixture coverage (XS).
+
+## 2026-05-27 — v1.12-#1: tighten `_resolve_relative_qualname` escape-above-root
+**Branch / commit:** kgweave/kuzu-port @ f603320
+
+### What we did
+- Added `tests/knowledge_graph/connectors/test_py_resolve_relative_qualname_direct.py` — 12 direct unit tests pinning the K vs N contract: K=1, K=2, K=N legitimate top-level, K=N+1 + K=N+2 returning `None`, multi-segment body, empty-body edge cases (with retained > 0 and with retained = 0), N=1 top-level consumer (K=1 valid, K=2 escape), non-relative target / empty consumer defensive returns.
+- Refactored `_resolve_relative_qualname` in `src/knowledge_graph/connectors/py_scope_resolution.py`: replaced `segments[:-k]` slicing with explicit `retained = segments[: n - k]`, lifted the `k > n` early-return to the top of the function as the documented invariant, and rewrote the docstring to enumerate the four `(retained, body)` outcome cases (joined+body / joined / body / `None`).
+- Behaviour is unchanged on every existing fixture: v1.10-#2 escape test (`relimport_escape_pkg.escape_consumer`, N=2, K=2) still returns `outside.foo` (NOT `None`, because K=N is the legitimate top-level case under the contract) and the capture still stays `unresolved` via the corpus-modules miss in `_lift_to_cross_file`. v1.11-#3 multi-segment relimport tests still resolve to the right qualnames.
+
+### Lessons learnt
+- The "correct-by-accident" framing in the v1.11-#1 JOURNAL turned out to be partly a misdiagnosis: the existing code's `segments[:-k]` plus the `k > len(segments)` guard already implemented the N-K retain rule. The cleanup is real (the new structure makes the invariant impossible to lose on a future refactor) but no behaviour delta was needed on existing fixtures — the resolver's contract and the downstream lookup miss aligned by construction.
+- `__init__.py` consumers remain a latent edge case. v1.11-#1 made `PyModule.name` for `pkg/__init__.py` be `pkg` (the package qualname itself, no leaf), but the resolver still uses the leaf-stripping convention. `from .x import y` inside `pkg/__init__.py` (N=1, K=1) resolves to `x.y` (top-level) rather than `pkg.x.y` (intra-package). No current fixture exercises this shape; flagged in the resolver docstring as the next correctness item.
+- Direct unit tests for resolvers are cheap and pin invariants that fixture-based end-to-end tests mask via downstream behaviour. Worth applying the same treatment to other pure helpers (`_lift_to_module_import`, `_lift_to_cross_file`, `_expand_star_imports`) on a future slate.
+
+### Next moves
+- v1.12-#3 (conditional star-imports preserve `import_guard`) is the next charter item in order; #2 (PEP 420 namespace packages) lands last because its blast radius is largest.
+- Future: special-case `__init__.py` consumers in `_resolve_relative_qualname` (don't strip a leaf segment when the consumer qualname IS the package qualname). Cheap to add once a fixture exercises a relative import from an `__init__.py`.
+- Future: direct unit tests for the two lift helpers (`_lift_to_module_import`, `_lift_to_cross_file`) along the same pattern as v1.12-#1's resolver tests.
