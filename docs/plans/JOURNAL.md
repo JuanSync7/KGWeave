@@ -2698,3 +2698,63 @@ d8f0e11 docs(v1.8-#1 G5): JOURNAL retro -- alias-aware decorator promotion
 - Cross-corpus qualname uniqueness (M).
 - Namespace leaf with nested subpackages (M — v1.12-#2
   heuristic boundary).
+
+## v1.13 slate close — cross-file polish + ns-package depth
+
+### What we did
+- **#1** (RED `d669bcc`, GREEN `dd74050`) — `_resolve_relative_qualname`
+  made `__init__.py`-aware so a consumer at `pkg/__init__.py`
+  resolves `.sibling` to `pkg.sibling` instead of dropping the
+  trailing segment. Fix (not pinning); subagent stalled mid-GREEN
+  on the first attempt and had to be restarted from a clean RED.
+- **#2** (`7b1804a`) — direct unit tests for
+  `_lift_to_module_import` / `_lift_to_cross_file`. Assertion-only
+  pinning — both helpers already behaved correctly; goal was a
+  regression net for future cross-file polish.
+- **#3** (`afd8408`) — pin out-of-corpus star-import record-only
+  behaviour. Assertion-only pinning of `_star_imports_for_origin`'s
+  silent skip when the upstream module is absent from the corpus.
+- **#4** (RED `fc50511`, GREEN `6942aa5`) — namespace leaf with
+  nested subpackages. Replaced the v1.12-#2 leaf/container split
+  with a single recursive memoised `_is_namespace_participant`
+  predicate plus an explicit `fixtures/py` corpus-root stop. Fix
+  (not pinning) — closed the mixed-dir gap where a directory with
+  both `.py` files and subdirs (no `__init__.py` anywhere) fell
+  through both predicates and lost its namespace prefix.
+- **Perf snapshot at slate close:**
+  - connectors + builders/py: 173 passed in 133.14 s.
+  - py writer perf + quickstart perf: 3 passed in 5.85 s
+    (Py N=1000 gate ≤ 6 s — within budget, narrow headroom).
+
+### Lessons learnt
+- **Subagent stalls happen.** v1.13-#1 GREEN required a restart
+  after the first agent didn't return; treat any stall past the
+  expected wall-clock as "abort and re-dispatch from the last
+  committed RED" rather than waiting indefinitely.
+- **Pinning items dominated this slate.** 3 of 4 items (#2, #3,
+  and arguably #4's non-regression test) were assertion-only or
+  assertion-shaped — the slate was mostly hardening the v1.11/
+  v1.12 walker rather than adding capability. That's healthy for
+  a polish slate but signals the v1.x walker is approaching a
+  capability ceiling; the next slate should bias toward genuinely
+  new behaviour (type inference, cross-corpus uniqueness) or a
+  new language builder.
+- **The namespace-participant predicate consolidates v1.12-#2.**
+  The leaf/container split was a heuristic boundary documented
+  with a "revisit if it surfaces in production corpora" note —
+  it surfaced one slate later, faster than expected. The unified
+  recursive predicate is the cleaner abstraction; we should reach
+  for it first next time rather than landing two narrow predicates.
+
+### Next moves — v1.14 candidate queue
+- Builder #4 in a new language — **STILL DEFERRED, NEEDS LANGUAGE
+  CHOICE.** Carried over from v1.13 untouched.
+- CI disk-budget guard (S, still blocked on first full-suite
+  green).
+- Type inference / annotation-driven resolution (M/L).
+- Cross-corpus qualname uniqueness (M).
+- Perf-budget tightening for `_is_namespace_participant`'s
+  recursive cache — the current implementation memoises per
+  (path, depth) implicitly via `_is_namespace_participant_cached`
+  but cousins share work; consider profiling on a real
+  multi-package corpus before assuming the cache is sufficient.
