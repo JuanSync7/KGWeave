@@ -24,6 +24,50 @@ Entry skeleton:
 
 ---
 
+## 2026-05-27 — v1.12-#4 — direct `tag_pyclass_by_method` unit tests
+**Branch / commit:** `kgweave/kuzu-port` @ `e7d800f`
+
+### What we did
+- Added `tests/knowledge_graph/connectors/test_py_class_tag_direct.py`
+  with five cases targeting contract surfaces v1.11-#2's three
+  fixture-based tests never exercised: (1) precedence under both
+  `chase_bases` flag values, (2) `chase_bases=False` isolation,
+  (3) 4-hop chain `A → B(A) → C(B) → D(C)`, (4) declared-bases cycle
+  `A → B → A` (with `@pytest.mark.timeout(5)` so a regression fails
+  fast instead of wedging the suite), (5) multiple inheritance
+  `B(A1, A2)` where only A2 declares the method.
+- **Helper passed all five cases as-is — no bugs surfaced.** The
+  `seen` set in `_has_inherited_method` already terminates the cycle
+  cleanly; the stack-based walk already visits every declared base
+  (not just the first), so MI works.
+- Dir-scoped suites (connectors / builders.py / _meta / store) all
+  green: 239 passed, 1 skipped in 206 s. Perf gates: quickstart wall
+  clock under budget, py-writer N=1000 under 6 s — both PASS.
+
+### Lessons learnt
+- **Cycle testing requires post-extraction payload mutation** — *the
+  static graph can hold shapes Python's runtime refuses to produce.
+  Direct `MATCH … SET n.payload = $payload` after `extract()` lets
+  us forge `A.bases=[B] / B.bases=[A]` in isolation, without
+  needing a fixture file that wouldn't import.*
+- **Helper was robust without bug-driven RED** — *v1.11-#2's
+  extraction was disciplined enough that the new edge-case tests
+  passed first try. The TDD value here was confirmatory rather than
+  corrective; the test history still distinguishes "tested" from
+  "untested" surface even when both RED and GREEN collapse to the
+  same commit.*
+- **`pytest-timeout` per-test guard is the right shape for
+  termination assertions** — *embedding a thread + timer manually
+  would have added 30 lines of plumbing; the marker is one line and
+  the runtime fails loudly with a clear traceback on regression.*
+
+### Next moves
+- v1.12-#1 tighten relative-import resolver (S, isolated function) — next per charter order.
+- v1.12-#3 conditional star-imports preserve `import_guard` (S).
+- v1.12-#2 PEP 420 namespace packages (S/M, highest blast radius — last).
+
+---
+
 ## 2026-05-26 — v1.10-#2 — relative-import package resolution
 **Branch / commit:** `kgweave/kuzu-port` @ `979d1c8`
 
