@@ -171,6 +171,42 @@ def test_init_subclass_inheritance_multi_hop_tags_full_chain(
         store.close()
 
 
+def test_metaclass_init_subclass_tags_class(tmp_path: Path) -> None:
+    """v1.14-#2: ``class Klass(metaclass=Meta)`` where ``Meta`` declares
+    ``__init_subclass__`` must tag ``Klass`` with
+    ``semantic_role='init-subclass-hook'``. ``Meta`` itself directly
+    declares the hook and is also tagged.
+    """
+    store = open_store(tmp_path / "kg.kuzu")
+    try:
+        _run(
+            store,
+            "init_subclass_metaclass.py",
+            only=["py-init-subclass-semantics"],
+        )
+        assert _semantic_role(store, "Meta") == "init-subclass-hook"
+        assert _semantic_role(store, "Klass") == "init-subclass-hook"
+    finally:
+        store.close()
+
+
+def test_external_metaclass_does_not_tag_class(tmp_path: Path) -> None:
+    """v1.14-#2 negative: when the declared metaclass is not in the
+    corpus, the class stays untagged — out-of-corpus metaclasses are
+    opaque.
+    """
+    store = open_store(tmp_path / "kg.kuzu")
+    try:
+        _run(
+            store,
+            "init_subclass_external_metaclass.py",
+            only=["py-init-subclass-semantics"],
+        )
+        assert _semantic_role(store, "Klass2") is None
+    finally:
+        store.close()
+
+
 def test_descriptor_wins_over_inherited_init_subclass_hook(
     tmp_path: Path,
 ) -> None:
