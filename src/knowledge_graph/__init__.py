@@ -54,6 +54,9 @@ from knowledge_graph.connectors.py_set_name_semantics import (
 from knowledge_graph.connectors.py_init_subclass_semantics import (
     PyInitSubclassSemanticsConnector,
 )
+from knowledge_graph.connectors.py_class_getitem_semantics import (
+    PyClassGetitemSemanticsConnector,
+)
 from knowledge_graph.connectors.py_md import PyMarkdownReferenceConnector
 from knowledge_graph.connectors.protocol import Connector
 from knowledge_graph.query import (
@@ -337,6 +340,7 @@ __all__ = [
     "PyDescriptorSemanticsConnector",
     "PySetNameSemanticsConnector",
     "PyInitSubclassSemanticsConnector",
+    "PyClassGetitemSemanticsConnector",
     # errors
     "ReadOnlyViolation",
     "AmbiguousAnchor",
