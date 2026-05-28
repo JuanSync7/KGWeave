@@ -497,7 +497,7 @@ function resetView() {
 function runLayout() {
   if (!state.cy) return;
   const sel = document.getElementById("layout-select");
-  const name = (sel && sel.value) || "cose";
+  const name = (sel && sel.value) || "concentric";
   const visible = state.cy.nodes().not(".dim");
   const opts = { name, animate: false, fit: true, padding: 30 };
   if (name === "cose") {
