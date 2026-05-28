@@ -2832,3 +2832,67 @@ d8f0e11 docs(v1.8-#1 G5): JOURNAL retro -- alias-aware decorator promotion
   multi-package corpus.
 - Bias next slate toward at least 50% genuinely-new-behaviour items;
   pinning-heavy slates have diminishing returns.
+
+## v1.15 — Python protocol-hook completeness + class kwargs (CLOSED)
+
+Range: `24b1a05..6413b7e` (8 commits incl. charter).
+
+### What we did
+- **#1 (XS, pinning-only)** Direct unit tests for `_tag_via_metaclass`
+  — 6 cases pinning v1.14-#2's helper: positive in-corpus + role
+  match, OOC negative, missing-role negative, precedence (pre-set
+  role wins), full-dotted + trailing-segment resolution. Tests built
+  on a real kuzu in-memory store (helper is conn-coupled). GREEN-on-RED.
+- **#3 (S, feature)** `__class_getitem__` protocol hook —
+  `py_class_getitem_semantics.py` calls
+  `tag_pyclass_by_method(..., "__class_getitem__", "class-getitem-hook",
+  chase_bases=True)`. Descriptor precedence preserved. Registered via
+  facade. 1 ralph attempt (passed on first GREEN).
+- **#2 (S, feature)** Class kwargs lift in walker — `PyClass.payload["class_kwargs"]:
+  dict[str, str]` now populated by iterating `node.keywords`
+  uniformly. `metaclass` slot preserved AND included in `class_kwargs`.
+  Non-name values skipped. Empty dict (not None) when no kwargs.
+- **#4 (M, feature — HEADLINE)** `@property` semantic role on PyFunction
+  — new `py_property_descriptor.py` tags methods decorated with
+  `@property` or `@functools.cached_property` (including aliased
+  imports). Reuses v1.8-#1 alias-aware decorator resolution. PyClass
+  tagging deliberately unchanged. Subagent stalled mid-GREEN
+  (recurring pattern); parent verified suite (203 passed) and
+  committed.
+
+### Suite + perf
+- connectors + builders/py: 203 passed in 158.32s.
+- Perf gates (quickstart + py-N1000): still within budget from
+  v1.14-#4 verification; no regression expected from connector
+  additions.
+
+### Lessons learnt
+- **Bias toward feature shifted.** v1.13 was 3-of-4 pinning, v1.14 was
+  3-of-4 pinning, v1.15 was 3-of-4 FEATURE. The "diminishing returns
+  on pinning" warning in v1.14's retro held — the slate's value came
+  from three new connector/walker capabilities (#2, #3, #4) plus one
+  pin (#1). Worth carrying this bias forward.
+- **Closed-set discipline on PyFunction roles started.** v1.15-#4 is
+  the first item to introduce a NEW closed-set role on PyFunction
+  (previously roles were PyClass-only). Document the PyFunction
+  role closed set in a future slate header — currently implicit.
+- **Subagent stall pattern persists.** v1.15-#4 stalled mid-GREEN
+  (RED committed; GREEN code written but not committed). Same
+  pattern as v1.10-#1, v1.10-#3, v1.11-#3, v1.13-#1. Parent
+  verification is the actual safety net. Strengthening EXIT
+  PRECONDITION wording further has not eliminated this.
+
+### Next moves — v1.16 candidate queue
+- **Builder #4 in a new language — STILL DEFERRED (9 slates running
+  since v1.6).** Carried over from v1.13 → v1.14 → v1.15. Needs
+  explicit language pick.
+- Type inference / annotation-driven resolution (M/L) — strongest
+  remaining capability candidate.
+- Cross-corpus qualname uniqueness (M) — still needs design pass.
+- `@staticmethod` / `@classmethod` semantic roles on PyFunction (S)
+  — natural follow-up to v1.15-#4's PyFunction role surface.
+- `@property.setter` / `@property.deleter` chaining (S) — also
+  follow-up to v1.15-#4.
+- CI disk-budget guard (S, still blocked).
+- Direct unit tests for the new `py_property_descriptor` connector's
+  alias-resolution surface (XS — surfaced v1.15-#4).
