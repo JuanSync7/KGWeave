@@ -33,6 +33,38 @@ Bases are matched by ``payload['bases']`` strings against PyClass rows
 in the **same corpus only**. Bases not present in the corpus
 (typically ``object`` or stdlib classes like ``typing.Generic``) are
 silently skipped — no external introspection.
+
+Out-of-corpus base contract (v1.14-#4)
+--------------------------------------
+The base-chase walk explicitly terminates at an out-of-corpus hop: a
+base name that does not resolve via ``name_to_id`` is dropped on the
+floor (``continue``), the walker does not synthesise a placeholder, and
+no role is propagated through the missed hop. Concretely:
+
+* ``class B(ExternalBase): pass`` — never tagged. Chase begins at
+  ``B``, finds ``ExternalBase`` unresolved, terminates with no match.
+* ``A -> B(A) -> C(External) -> D(C)`` where ``A`` declares the method:
+  ``A`` and ``B`` tag from the in-corpus prefix; ``C`` and ``D`` stay
+  untagged because the chain breaks at ``C``'s OOC base — the walker
+  cannot see anything beyond ``C`` in the corpus, and ``D``'s only
+  in-corpus base is ``C`` (itself never tagged).
+* ``chase_bases=False`` connectors (set-name-hook) trivially satisfy
+  the contract: they never recurse, so an OOC base is irrelevant.
+
+Cycle safety
+------------
+The walker keeps a ``seen`` set seeded with the starting node id and
+extended with every resolved ancestor id. Declared base cycles
+(``class A(B)`` / ``class B(A)`` after a refactor mishap) and diamond
+inheritance both terminate.
+
+Precedence rule (re-stated)
+---------------------------
+``payload['semantic_role']`` is single-valued. A row whose role is
+already non-None is silently skipped — descriptor (v1.8-#4 +
+v1.9-#4) wins over set-name-hook (v1.9-#2) wins over
+init-subclass-hook (v1.10-#4 + v1.11-#4) because the connectors run in
+that order and this helper never overwrites.
 """
 
 from __future__ import annotations
