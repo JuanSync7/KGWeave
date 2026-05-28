@@ -752,19 +752,26 @@ def lift_python(content: bytes) -> list[PyNode]:
             decs = _decorator_strings(node.decorators, module)
             if decs:
                 payload["decorators"] = decs
-            # v1.8-#4: capture ``metaclass=...`` kwarg from class header.
-            # ``class Foo(Base, metaclass=Meta)`` exposes the kwarg under
-            # ``node.keywords``. Value is lifted as a dotted name (e.g.
-            # ``Meta`` or ``abc.ABCMeta``); non-name expressions (rare —
-            # ``metaclass=type("X",(),{})``) flatten to "" via the existing
-            # _dotted_name helper, in which case we record None. Other
-            # kwargs (e.g. PEP 487 ``**kwargs``) are ignored.
+            # v1.8-#4 / v1.15-#3: capture class-definition keyword args from
+            # the class header. ``class Foo(Base, metaclass=Meta, name=X)``
+            # exposes kwargs under ``node.keywords``. Each value is lifted
+            # as a dotted name (e.g. ``Meta`` or ``abc.ABCMeta``); non-name
+            # expressions (literals, calls — rare) flatten to "" via the
+            # _dotted_name helper and are SKIPPED to keep class_kwargs' value
+            # set closed. ``metaclass`` is mirrored into its own slot for
+            # backwards-compatible access (v1.8-#4 contract).
+            class_kwargs: dict[str, str] = {}
             for kw in node.keywords:
-                if kw.keyword is not None and kw.keyword.value == "metaclass":
-                    dotted = _dotted_name(kw.value)
-                    if dotted:
-                        payload["metaclass"] = dotted
-                    break
+                if kw.keyword is None:
+                    continue
+                kw_name = kw.keyword.value
+                kw_val = _dotted_name(kw.value)
+                if not kw_val:
+                    continue
+                class_kwargs[kw_name] = kw_val
+                if kw_name == "metaclass":
+                    payload["metaclass"] = kw_val
+            payload["class_kwargs"] = class_kwargs
             # v1.9-#4: record declared base classes as dotted names so
             # PyDescriptorSemanticsConnector can chase inheritance for
             # ``__get__`` resolution. ``class B(A, mod.Mixin):`` -> ``["A",
