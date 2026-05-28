@@ -207,6 +207,25 @@ def test_external_metaclass_does_not_tag_class(tmp_path: Path) -> None:
         store.close()
 
 
+def test_external_init_subclass_base_does_not_tag_subclass(
+    tmp_path: Path,
+) -> None:
+    """v1.14-#4: ``class B(ExternalHook)`` where the base is not in the
+    corpus — chase terminates cleanly; ``B`` stays untagged even though
+    this connector has ``chase_bases=True`` (v1.11-#4).
+    """
+    store = open_store(tmp_path / "kg.kuzu")
+    try:
+        _run(
+            store,
+            "init_subclass_external_base.py",
+            only=["py-init-subclass-semantics"],
+        )
+        assert _semantic_role(store, "B") is None
+    finally:
+        store.close()
+
+
 def test_descriptor_wins_over_inherited_init_subclass_hook(
     tmp_path: Path,
 ) -> None:

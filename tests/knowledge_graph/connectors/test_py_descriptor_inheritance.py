@@ -105,6 +105,34 @@ def test_inheritance_skips_bases_outside_corpus(tmp_path: Path) -> None:
         store.close()
 
 
+def test_external_descriptor_base_does_not_tag_subclass(tmp_path: Path) -> None:
+    """v1.14-#4: ``class B(ExternalDescriptor)`` where the base is not in
+    the corpus — chase terminates cleanly; ``B`` stays untagged.
+    """
+    store = open_store(tmp_path / "kg.kuzu")
+    try:
+        _run(store, "descriptor_external_base.py")
+        assert _semantic_role(store, "B") is None
+    finally:
+        store.close()
+
+
+def test_descriptor_chain_breaks_at_ooc_mid_hop(tmp_path: Path) -> None:
+    """v1.14-#4: 4-hop chain A -> B(A) -> C(ExternalC) -> D(C) where A
+    declares ``__get__``. In-corpus prefix (A, B) tagged; chain breaks at
+    OOC ``C`` so neither ``C`` nor ``D`` is tagged.
+    """
+    store = open_store(tmp_path / "kg.kuzu")
+    try:
+        _run(store, "descriptor_chain_ooc_mid.py")
+        assert _semantic_role(store, "A") == "descriptor"
+        assert _semantic_role(store, "B") == "descriptor"
+        assert _semantic_role(store, "C") is None
+        assert _semantic_role(store, "D") is None
+    finally:
+        store.close()
+
+
 def test_inherited_descriptor_precedence_with_set_name(tmp_path: Path) -> None:
     """If both descriptor (via inheritance) and set-name-hook connectors
     would apply, descriptor wins because it runs to the precedence rule

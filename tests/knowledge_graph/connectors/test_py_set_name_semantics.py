@@ -99,6 +99,24 @@ def test_descriptor_wins_over_set_name_hook(tmp_path: Path) -> None:
         store.close()
 
 
+def test_external_set_name_base_does_not_tag_subclass(tmp_path: Path) -> None:
+    """v1.14-#4: ``class B(ExternalSetName)`` where the base is not in
+    the corpus. ``set-name-hook`` runs with ``chase_bases=False`` so
+    this would not tag even if the base were in-corpus and declared
+    ``__set_name__`` — pinning the negative on the no-chase connector.
+    """
+    store = open_store(tmp_path / "kg.kuzu")
+    try:
+        _run(
+            store,
+            "set_name_external_base.py",
+            only=["py-set-name-semantics"],
+        )
+        assert _semantic_role(store, "B") is None
+    finally:
+        store.close()
+
+
 def test_class_without_set_name_method_not_tagged(tmp_path: Path) -> None:
     store = open_store(tmp_path / "kg.kuzu")
     try:
