@@ -62,15 +62,21 @@
           </fieldset>
           <fieldset id="freeform-fieldset">
             <legend>Free-form query</legend>
-            <input
-              id="query-freeform"
-              type="text"
-              placeholder='role=module | from=&lt;id&gt; via=of_module direction=rev depth=2'
-              aria-label="Free-form query"
-            />
-            <div class="freeform-buttons">
-              <button id="query-run" type="button" title="Run freeform query">Run</button>
-              <button id="query-clear" type="button" title="Clear results">Clear</button>
+            <details id="freeform-details">
+              <summary>advanced query (DSL)</summary>
+              <input
+                id="query-freeform"
+                type="text"
+                placeholder='role=module | from=&lt;id&gt; via=of_module direction=rev depth=2'
+                aria-label="Free-form query"
+              />
+              <div class="freeform-buttons">
+                <button id="query-run" type="button" title="Run freeform query">Run</button>
+                <button id="query-from-selected" type="button" title="Fill from=&lt;selected node id&gt;" disabled>Use selected node</button>
+              </div>
+            </details>
+            <div class="freeform-buttons" style="margin-top: 0.4rem;">
+              <button id="query-clear" type="button" title="Clear results">Clear results</button>
             </div>
           </fieldset>
           <fieldset id="legend-fieldset">

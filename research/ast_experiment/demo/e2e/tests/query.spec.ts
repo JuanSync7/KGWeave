@@ -31,6 +31,9 @@ test("canned query q5 returns a path and animates edges", async ({ page }) => {
 });
 
 test("freeform 'role=port file=fifo' returns ports in fifo", async ({ page }) => {
+  // Advanced query DSL lives inside a collapsed <details> — open it first.
+  const details = page.locator("#freeform-details");
+  await details.evaluate((el: HTMLDetailsElement) => { el.open = true; });
   const ff = page.locator("#query-freeform");
   await ff.fill("role=port file=fifo");
   await ff.press("Enter");

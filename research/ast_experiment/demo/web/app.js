@@ -831,6 +831,37 @@ function wireQueryPanel() {
     }
   });
   clearBtn.addEventListener("click", () => clearQuery());
+
+  const fromBtn = document.getElementById("query-from-selected");
+  if (fromBtn) {
+    fromBtn.addEventListener("click", () => {
+      if (!state.cy) return;
+      const sel = state.cy.$("node:selected");
+      if (!sel || !sel.length) return;
+      const id = sel[0].id();
+      const cur = (ff.value || "").trim();
+      // Replace any existing from=<x> term; otherwise prepend.
+      const terms = cur ? cur.split(/\s+/) : [];
+      const kept = terms.filter((t) => !t.startsWith("from="));
+      kept.unshift(`from=${id}`);
+      // Provide a sensible default traversal if user has none yet.
+      if (!kept.some((t) => t.startsWith("via="))) kept.push("via=of_module");
+      if (!kept.some((t) => t.startsWith("depth="))) kept.push("depth=2");
+      ff.value = kept.join(" ");
+      const details = document.getElementById("freeform-details");
+      if (details) details.open = true;
+      ff.focus();
+    });
+  }
+  // Enable/disable the button based on graph selection.
+  if (state.cy && fromBtn) {
+    const sync = () => {
+      const has = state.cy.$("node:selected").length > 0;
+      fromBtn.disabled = !has;
+    };
+    state.cy.on("select unselect", "node", sync);
+    sync();
+  }
 }
 
 async function runQuery({ canned, freeform }) {

@@ -177,6 +177,14 @@ html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: 
   font-family: inherit;
 }
 .freeform-buttons button:hover { background: var(--accent); border-color: var(--accent); }
+.freeform-buttons button:disabled {
+  opacity: 0.45; cursor: not-allowed; background: var(--panel-2); border-color: #2a2f3a;
+}
+#freeform-details > summary {
+  cursor: pointer; font-size: 0.78rem; color: var(--muted);
+  padding: 0.15rem 0; margin-bottom: 0.3rem; user-select: none;
+}
+#freeform-details[open] > summary { color: var(--fg); }
 
 #results {
   overflow: auto;
