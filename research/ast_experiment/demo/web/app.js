@@ -226,7 +226,7 @@ function wireToolbar() {
   const restartBtn = document.getElementById("tour-restart");
   if (restartBtn) restartBtn.addEventListener("click", () => restartTour());
   const cookBtn = document.getElementById("cookbook-open");
-  if (cookBtn) cookBtn.addEventListener("click", () => openCookbook(state.queries));
+  if (cookBtn) cookBtn.addEventListener("click", () => openCookbook(state.queries, host));
   const galBtn = document.getElementById("gallery-open");
   if (galBtn) galBtn.addEventListener("click", () => openGallery(host));
 }
