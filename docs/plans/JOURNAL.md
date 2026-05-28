@@ -2758,3 +2758,77 @@ d8f0e11 docs(v1.8-#1 G5): JOURNAL retro -- alias-aware decorator promotion
   (path, depth) implicitly via `_is_namespace_participant_cached`
   but cousins share work; consider profiling on a real
   multi-package corpus before assuming the cache is sufficient.
+
+## v1.14 slate close — Python protocol-hook depth + namespace edge cases
+
+### What we did
+- **#1** (`69d0a27`) — direct unit tests for
+  `_is_namespace_participant`. Assertion-only pinning of the
+  recursive + memoised + fixtures-bucket-stop predicate landed in
+  v1.13-#4; goal was a regression net before further changes touch
+  it.
+- **#2** (RED `8f203bb`, GREEN `de8b08a`) — tag init-subclass-hook
+  via metaclass. The connector now also fires on `class K(metaclass=Meta)`
+  when `Meta` declares (or inherits) `__init_subclass__`. Fix (not
+  pinning) — added the metaclass-as-hook-source edge. Saved a walker
+  change because the metaclass keyword was already present in the
+  PyClass payload from a much earlier slate; the connector just had
+  to read it.
+- **#3** (`db4d1ce`) — pin namespace-mid-chain `__init__.py` boundary.
+  Assertion-only pinning of the reverse transition (namespace ancestor
+  → classic `__init__.py` ancestor above it): qualname stops at the
+  `__init__.py` boundary and does NOT include the outer namespace
+  segment. Existing behaviour was correct; needed the regression test.
+- **#4** (`068c756` + `3ca311a`) — pin out-of-corpus base class
+  behaviour. Three new fixtures (`descriptor_external_base`,
+  `init_subclass_external_base`, `set_name_external_base`) pinning
+  that chase terminates cleanly at OOC bases without tagging across
+  all three connector boundaries; plus a 4-hop chain fixture
+  (`descriptor_chain_ooc_mid`: A → B(A) → C(ExternalC) → D(C)) pinning
+  the in-corpus prefix tags while the chain breaks at the OOC mid-hop.
+  Doc commit added the out-of-corpus contract + cycle-safety +
+  precedence rules to the `_py_class_tag.py` module header.
+  Assertion-only pinning + docs — all four assertions passed on
+  first run.
+- **Perf snapshot at slate close:**
+  - connectors + builders/py: 186 passed in 156.92 s.
+  - py writer perf + quickstart perf: 3 passed in 6.15 s
+    (Py N=1000 + quickstart both within budget).
+
+### Lessons learnt
+- **Metaclass payload was already present.** v1.14-#2 looked like it
+  would need a walker change to surface the `metaclass=` keyword onto
+  the PyClass payload, but pyslang-equivalent extraction had already
+  captured it slates ago. The fix collapsed to a connector-side read.
+  Lesson: when adding a new edge, check the existing payload shape
+  before assuming the builder needs touching — the corpus often
+  already carries the data.
+- **3 of 4 items were pinning-only (again).** v1.13's slate had the
+  same shape (3-of-4 pinning); v1.14 repeats it. The v1.x walker
+  + Python connector stack is hardening into a capability ceiling
+  where new items mostly tighten existing assertions rather than
+  adding behaviour. Time to bias the v1.15+ queue toward genuinely
+  new capability (type inference, cross-corpus uniqueness) or a new
+  language builder — pinning slates have diminishing returns once
+  the assertion net is dense.
+- **OOC contract was already correct everywhere.** v1.14-#4 was the
+  slate headline and required zero code change at any of the four
+  boundaries — the `seen` set + same-corpus `name_to_id` lookup that
+  landed v1.11-#2 / v1.12-#4 had already implemented the contract
+  correctly. Doc commit was the load-bearing artifact: the contract
+  is now stated in the module header instead of being implicit.
+
+### Next moves — v1.15 candidate queue
+- **Builder #4 in a new language — STILL DEFERRED (8 slates running
+  since v1.6).** Needs language choice. Carried over untouched from
+  v1.13 and v1.14.
+- Type inference / annotation-driven resolution (M/L) — strongest
+  capability candidate.
+- Cross-corpus qualname uniqueness (M) — still needs design pass on
+  multi-corpus extract semantics.
+- CI disk-budget guard (S, still blocked on first full-suite green).
+- Perf-budget tightening for `_is_namespace_participant`'s recursive
+  cache — carried over from v1.13; still unprofiled on a real
+  multi-package corpus.
+- Bias next slate toward at least 50% genuinely-new-behaviour items;
+  pinning-heavy slates have diminishing returns.
