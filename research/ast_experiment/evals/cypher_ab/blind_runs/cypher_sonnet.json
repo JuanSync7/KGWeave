@@ -1,0 +1,8 @@
+[
+  {"id": "Q1", "answer": "MATCH (c:N {path:'cls_pkg.data_xact'})-[:has_method]->(m:N) RETURN m.name"},
+  {"id": "Q2", "answer": "MATCH (i:N {name:'fifo_if'})-[:has_port|has_net]->(s:N) RETURN s.name"},
+  {"id": "Q3", "answer": "MATCH (sig:N {path:'fifo.count'})<-[:drives|connects*1..20]-(n:N) RETURN DISTINCT n.path"},
+  {"id": "Q4", "answer": "MATCH (t:N {name:'top'})-[:instantiates]->(i:N)-[:of_module]->(m:N) RETURN i.path, m.name"},
+  {"id": "Q5", "answer": "MATCH (f:N {name:'fifo'})-[:has_port]->(p:N) RETURN count(p)"},
+  {"id": "Q6", "answer": "MATCH (f:N {path:'fifo.full'})<-[:drives]-(d:N)-[:reads]->(s:N) RETURN DISTINCT s.name"}
+]
