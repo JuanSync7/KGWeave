@@ -1,0 +1,8 @@
+[
+  {"id": "Q1", "answer": {"pattern": {"match": {"role": "class", "path": "cls_pkg.data_xact"}, "follow": [{"edge": "has_method", "direction": "out"}], "return": "path"}}},
+  {"id": "Q2", "answer": {"pattern": {"match": {"role": "interface", "name": "fifo_if"}, "follow": [{"edge": "has_port", "direction": "out"}], "return": "path"}}},
+  {"id": "Q3", "answer": {"tool": "cone_of_influence", "args": ["fifo.count"]}},
+  {"id": "Q4", "answer": {"pattern": {"match": {"role": "module", "name": "top"}, "follow": [{"edge": "instantiates", "direction": "out"}, {"edge": "of_module", "direction": "out"}], "return": "path"}}},
+  {"id": "Q5", "answer": null},
+  {"id": "Q6", "answer": {"tool": "find_drivers", "args": ["fifo.full"]}}
+]

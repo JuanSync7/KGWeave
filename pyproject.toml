@@ -16,6 +16,7 @@ dependencies = [
   "tree-sitter-python>=0.23.0",
   "temporalio>=1.5",
   "pyslang>=10.0.0",
+  "kuzu>=0.11",
   "leidenalg>=0.10",
   "python-igraph>=0.11",
   "mistune>=3.2.1",

@@ -1,0 +1,8 @@
+[
+  {"id": "Q1", "answer": {"pattern": {"match": {"role": "class", "path": "cls_pkg.data_xact"}, "follow": [{"edge": "has_method", "direction": "out"}], "return": "name"}}},
+  {"id": "Q2", "answer": null},
+  {"id": "Q3", "answer": {"tool": "cone_of_influence", "args": ["fifo.count"]}},
+  {"id": "Q4", "answer": null},
+  {"id": "Q5", "answer": null},
+  {"id": "Q6", "answer": {"pattern": {"match": {"role": "port", "path": "fifo.full"}, "follow": [{"edge": "drives", "direction": "in"}, {"edge": "reads", "direction": "out"}], "return": "path"}}}
+]
