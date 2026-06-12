@@ -14,6 +14,15 @@ CLASSIFICATION — kuzu exception message inspection only:
     Simple string operations (split on quotes/spaces) extract the offending
     identifier.  difflib.get_close_matches provides near-miss suggestions.
 
+    VERSION PIN: the substrings below ("Binder exception", "Cannot find
+    property", "Table ... does not exist", "Connection exception: Query is
+    empty", etc.) are matched against kuzu's message text as emitted by
+    **kuzu>=0.11** (the pinned core dep). They are inherently version-brittle;
+    if a kuzu bump changes the wording, classification degrades gracefully to
+    kind="engine" (the catch-all never swallows an error) rather than
+    mis-routing — but the kind taxonomy below would need re-pinning. When
+    bumping kuzu, re-run tests/queries/test_cypher_fail_loud.py first.
+
 KIND TAXONOMY:
     syntax           — kuzu parser exception / syntax error in the query text
     unknown_label    — referenced node label does not exist (only "N" is valid)
