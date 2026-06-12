@@ -2419,9 +2419,13 @@ def promote(
                         # walking structural tokens. The keyword lives inside
                         # the header child (VariablePortHeader / NetPortHeader);
                         # these TokenKinds appear nowhere else under a port, so
-                        # a bounded descendant scan is unambiguous. Ports that
-                        # inherit direction from a prior list entry carry no
-                        # keyword and are left without the attribute.
+                        # a bounded descendant scan is unambiguous. A port
+                        # subtree cannot nest another port, so the FIRST match
+                        # is always this port's own header keyword — break-on-
+                        # first is correct (no second direction keyword can
+                        # appear below). Ports that inherit direction from a
+                        # prior list entry carry no keyword and are left
+                        # without the attribute.
                         pdir = ""
                         for sub in _descendants(node):
                             if _is_token(sub) and _token_kind_name(sub) in {
