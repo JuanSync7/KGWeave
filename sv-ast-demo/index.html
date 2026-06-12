@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>KGWeave AST Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header id="topbar">
+      <h1>KGWeave AST Demo</h1>
+      <span id="stats" class="muted">loading…</span>
+      <div id="toolbar">
+        <button id="tour-start" type="button" title="Take the guided tour">Take the tour</button>
+        <button id="tour-restart" type="button" title="Restart tour from step 1">Restart tour</button>
+        <button id="cookbook-open" type="button" title="Query cookbook">Query Cookbook</button>
+        <button id="gallery-open" type="button" title="Use-case gallery">Use-case Gallery</button>
+      </div>
+      <select id="query-select" aria-label="Canned query" hidden>
+        <option value="">— canned query —</option>
+      </select>
+    </header>
+
+    <main id="layout">
+      <aside id="file-rail" aria-label="Corpus files"></aside>
+
+      <section id="code-pane" aria-label="Source code">
+        <div id="code-hint" class="code-hint">Tip: click anywhere in code to find its node in the graph.</div>
+      </section>
+
+      <nav id="canned-chips" aria-label="Canned queries">
+        <span class="chips-label">Try a query</span>
+      </nav>
+
+      <section id="graph-pane" aria-label="Knowledge graph">
+        <div id="filters">
+          <fieldset>
+            <legend>Categories</legend>
+            <label><input type="checkbox" data-category="semantic" checked /> <span class="swatch" data-cat-swatch="semantic"></span> semantic <span class="cat-count" data-cat-count="semantic">(0)</span></label>
+            <label><input type="checkbox" data-category="structural" /> <span class="swatch" data-cat-swatch="structural"></span> structural <span class="cat-count" data-cat-count="structural">(0)</span></label>
+            <label><input type="checkbox" data-category="blob" /> <span class="swatch" data-cat-swatch="blob"></span> blob <span class="cat-count" data-cat-count="blob">(0)</span></label>
+            <label><input type="checkbox" data-category="token" /> <span class="swatch" data-cat-swatch="token"></span> tokens <span class="cat-count" data-cat-count="token">(0)</span></label>
+            <label><input type="checkbox" data-category="unresolved" checked /> <span class="swatch" data-cat-swatch="unresolved"></span> unresolved <span class="cat-count" data-cat-count="unresolved">(0)</span></label>
+            <label><input type="checkbox" id="hide-isolated" checked /> hide isolated (no edges)</label>
+          </fieldset>
+          <fieldset>
+            <legend>Edges</legend>
+            <label><input type="checkbox" data-edge="child" /> <span class="swatch swatch-edge" data-edge-swatch="child"></span> child (hidden)</label>
+            <label><input type="checkbox" data-edge="semantic" checked /> <span class="swatch swatch-edge" data-edge-swatch="semantic"></span> semantic (drives/reads/contains…)</label>
+          </fieldset>
+          <fieldset>
+            <legend>Layout</legend>
+            <button id="relayout" type="button">re-layout</button>
+            <button id="reset-view" type="button" title="Clear selection, re-fit, restore defaults">reset view</button>
+          </fieldset>
+          <fieldset id="freeform-fieldset">
+            <legend>Free-form query</legend>
+            <details id="freeform-details">
+              <summary>advanced query (DSL)</summary>
+              <input
+                id="query-freeform"
+                type="text"
+                placeholder='role=module | from=&lt;id&gt; via=of_module direction=rev depth=2'
+                aria-label="Free-form query"
+              />
+              <div class="freeform-buttons">
+                <button id="query-run" type="button" title="Run freeform query">Run</button>
+                <button id="query-from-selected" type="button" title="Fill from=&lt;selected node id&gt;" disabled>Use selected node</button>
+              </div>
+            </details>
+            <div class="freeform-buttons" style="margin-top: 0.4rem;">
+              <button id="query-clear" type="button" title="Clear results">Clear results</button>
+            </div>
+          </fieldset>
+          <fieldset id="legend-fieldset">
+            <legend>Legend — edge types</legend>
+            <div class="legend-grid">
+              <span><span class="swatch swatch-edge" data-edge-swatch="drives"></span> drives</span>
+              <span><span class="swatch swatch-edge" data-edge-swatch="reads"></span> reads</span>
+              <span><span class="swatch swatch-edge" data-edge-swatch="sensitive_to"></span> sensitive_to</span>
+              <span><span class="swatch swatch-edge" data-edge-swatch="instantiates"></span> instantiates / of_module</span>
+              <span><span class="swatch swatch-edge" data-edge-swatch="connects"></span> connects</span>
+              <span><span class="swatch swatch-edge" data-edge-swatch="has_"></span> has_port / has_net / has_param</span>
+            </div>
+          </fieldset>
+        </div>
+        <div id="cy"></div>
+      </section>
+
+      <aside id="results" aria-label="Query results">
+        <header>
+          <strong>Results</strong>
+          <span id="results-summary" class="muted">no query yet</span>
+        </header>
+        <ol id="results-list"></ol>
+        <div id="query-error" class="muted" hidden></div>
+      </aside>
+    </main>
+
+    <footer id="inspector" aria-label="Inspector">
+      <em class="muted">Click a chip above to run a query · click a node/edge in the graph or any location in the code to inspect.</em>
+    </footer>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

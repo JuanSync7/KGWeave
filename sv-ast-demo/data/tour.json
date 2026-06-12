@@ -1,0 +1,115 @@
+{
+  "version": "1",
+  "title": "KGWeave AST — guided tour",
+  "steps": [
+    {
+      "id": "intro_layout",
+      "title": "Welcome to the KGWeave AST demo",
+      "body": "This page shows the same SystemVerilog corpus from three angles at once: the file rail on the left, the source code in the centre, and the semantic+BLOB knowledge graph on the right. Clicking a node in the graph jumps the code pane to the source span it came from — and clicking inside the code reverse-looks-up every node whose span covers that offset. Click Next to start the tour.",
+      "anchor": "#layout",
+      "family": null
+    },
+    {
+      "id": "intro_query_panel",
+      "title": "The query bar drives the graph",
+      "body": "The top bar runs canned queries (dropdown) or a one-line free-form DSL (text box). Each tour step runs one canned query against the live graph and animates the result — matched nodes glow yellow, traversed edges flash sequentially, and the results panel on the right lists what was found.",
+      "anchor": "#query-bar",
+      "family": null
+    },
+    {
+      "id": "family_module_structure",
+      "title": "1. Module structure — modules, ports, params, nets",
+      "body": "Rule family S1/S2/S14–S16 promotes every module/interface/package/program declaration into a semantic node, then attaches has_port / has_param / has_net edges to the children. Running this query lights up all 25 module nodes in the corpus — every top-level scope across 11 .sv files.",
+      "anchor": "#cy",
+      "family": "module_structure",
+      "run": { "canned": "q1_all_modules", "file": "fifo" }
+    },
+    {
+      "id": "family_continuous_assign_dataflow",
+      "title": "2. Continuous assign & dataflow — drives / reads / net-decl",
+      "body": "Rule family S5/S6/S84 walks every `assign ... = ...;` and emits `drives` (LHS) and `reads` (RHS) edges back to the net/port symbols. Tracing them in reverse from a port answers the question 'what drives this signal?'. Watch the multi-hop animation as each driver-of-a-driver lights up.",
+      "anchor": "#cy",
+      "family": "continuous_assign_dataflow",
+      "run": { "canned": "q3_drives_full", "file": "fifo" }
+    },
+    {
+      "id": "family_procedural_blocks",
+      "title": "3. Procedural blocks — always_ff and the sensitivity chain",
+      "body": "Rule family S7/S8/S9/S74–S76 promotes `always_*` blocks and walks their event-control list, emitting `sensitive_to` edges to each clock/reset/signal. This query fans out from the corpus's single always_ff to every signal it samples — the result is the canonical clock-domain trace for a flop.",
+      "anchor": "#cy",
+      "family": "procedural_blocks",
+      "run": { "canned": "q4_sensitivity_chain_always_ff", "file": "fifo" }
+    },
+    {
+      "id": "family_instances_connectivity",
+      "title": "4. Instances & connectivity — instantiates / of_module / connects",
+      "body": "Rule family S3/S4/S69 promotes hierarchical instances and connects them back to their module-of definition via `of_module`, plus a `connects` edge per port-binding. Run this and the demo finds a 2-hop path: module `top` -instantiates-> instance -of_module-> module `fifo`. The animation steps through each hop.",
+      "anchor": "#cy",
+      "family": "instances_connectivity",
+      "run": { "canned": "q5_top_to_fifo_path", "file": "top" }
+    },
+    {
+      "id": "family_assertions_sva",
+      "title": "5. Assertions & SVA — assert / property / sequence",
+      "body": "Rule family S17–S20 / S70–S72 / S77–S78 promotes every concurrent and immediate assertion plus the named properties and sequences they invoke. Running this query lights up all 17 assertion-bearing nodes — concurrent asserts inside `fifo_asserts`, plus the property/sequence library that backs them.",
+      "anchor": "#cy",
+      "family": "assertions_sva",
+      "run": { "canned": "q6_all_assertions", "file": "fifo_asserts" }
+    },
+    {
+      "id": "family_covergroups",
+      "title": "6. Covergroups — coverpoint, cross, bins",
+      "body": "Rule family S22/S23 promotes every covergroup and walks its coverpoints + crosses + bins as semantic children. Run this and 10 nodes light up: 2 covergroups, 4 coverpoints, 1 cross, 3 coverage-bin rows. Look at the inspector — the bins payload carries the actual range/transition spec verbatim.",
+      "anchor": "#cy",
+      "family": "covergroups",
+      "run": { "canned": "q9_all_covergroups", "file": "fifo_asserts" }
+    },
+    {
+      "id": "family_classes_oop",
+      "title": "7. Classes & OOP — extends / implements / methods",
+      "body": "Rule family S24–S27 / S82 promotes every class declaration, then walks `extends` / `implements` clauses into edges (not nodes — these are pure connectors). Animation: the 2 `extends` edges fire derived → base, building the inheritance chain across the cls_corpus.",
+      "anchor": "#cy",
+      "family": "classes_oop",
+      "run": { "canned": "q7_class_extends_chain", "file": "cls_corpus" }
+    },
+    {
+      "id": "family_packages_programs",
+      "title": "8. Packages, programs, types, interfaces",
+      "body": "Rule family S30/S31/S32/S60/S62/S63/S85/S86 promotes packages, typedefs, interfaces, clocking blocks, modports — the reuse units. Running this fans out 27 nodes: the package containers in fifo_pkg, every typedef row, plus the interface_port/clocking/modport scaffolding from iface_port_corpus.",
+      "anchor": "#cy",
+      "family": "packages_programs",
+      "run": { "canned": "q11_packages_types_interfaces", "file": "fifo_pkg" }
+    },
+    {
+      "id": "family_checkers_externs",
+      "title": "9. Checkers & extern declarations",
+      "body": "Rule family S28/S29/S79–S81 promotes checker blocks (treated module-shaped — they hold properties/assertions/clocking), checker instances, and `extern` module/UDP declarations from header-only files. 8 nodes light up across checker_corpus + extern_corpus + prim_corpus.",
+      "anchor": "#cy",
+      "family": "checkers_externs",
+      "run": { "canned": "q10_checkers_externs", "file": "checker_corpus" }
+    },
+    {
+      "id": "family_types_clocking_interfaces",
+      "title": "10. Nets, vars, and net-types",
+      "body": "Rule family S4 plus the user-defined-nettype rules walk every wire/logic/var declaration and any `nettype` declarations. 67 nodes light up — most are individual nets (one per port + every internal signal), with a handful of net_decl containers grouping them and 3 user-defined nettypes from the package.",
+      "anchor": "#cy",
+      "family": "types_clocking_interfaces",
+      "run": { "canned": "q12_nets_vars", "file": "fifo_pkg" }
+    },
+    {
+      "id": "blob_explainer",
+      "title": "What is a BLOB?",
+      "body": "Nodes come in four flavours: SEMANTIC (133 promoted rule outputs — modules, ports, asserts), STRUCTURAL (87 container kinds the lift keeps as scaffolding, like generate-blocks), BLOB (213 detail kinds where the operator/literal/type text is the only payload that matters — expressions, literals, type refs), and TOKEN (raw lexer output). Click a class node now and look at the inspector — `payload.semantic` is the promoted rule data, while a BLOB child (an expression sub-tree) would carry op/literalKind/typeName instead. Try toggling the 'blob' category filter to see the 960 BLOB nodes in the corpus.",
+      "anchor": "#filters",
+      "family": null,
+      "run": { "canned": "q7_class_extends_chain", "file": "cls_corpus" }
+    },
+    {
+      "id": "cookbook",
+      "title": "Query cookbook — pin it for later",
+      "body": "You've now seen every rule family in action. Beyond the dropdown, the free-form box accepts a one-line DSL: `role=<value>` filters, `from=<id> via=<type> direction=fwd|rev depth=<n>` traverses. Examples: `role=class` lists every class node; `from=top:n0062.ModuleDeclarationSyntax via=instantiates,of_module direction=fwd depth=3` walks the hierarchy from top. Click 'Use-case Gallery' anytime to revisit the family showcases without re-running the tour.",
+      "anchor": "#query-bar",
+      "family": null
+    }
+  ]
+}
