@@ -216,51 +216,58 @@ def test_tool_forward_cone(multi_bundle):
     assert "fifo.dout" in paths
 
 
-def test_graph_query_always_ff_clocked_by_port_clk(multi_bundle):
-    """gq: every always_ff sensitive to a port named 'clk' (2-hop typed walk)."""
+def test_cypher_always_ff_clocked_by_port_clk(multi_bundle):
+    """Cypher: every always_ff sensitive to a port named 'clk' (2-hop typed walk).
+
+    Migrated from the retired graph_query DSL (S7) — same node set, via Cypher.
+    Pattern: match always_ff, follow sensitive_to out to a port named clk.
+    """
     _tree, _comp, graph = multi_bundle
-    from research.ast_experiment.src.semantic import graph_query
+    from research.ast_experiment.src.semantic import cypher_query
 
-    out = graph_query(graph, {
-        "match": {"role": "always_ff"},
-        "follow": [{"edge": "sensitive_to", "direction": "out",
-                    "filter": {"role": "port", "name": "clk"}}],
-        "return": "path",
-    })
-    assert out == ["fifo.clk"]
+    res = cypher_query(graph, (
+        "MATCH (a:N)-[:sensitive_to]->(b:N) "
+        "WHERE a.role='always_ff' AND b.role='port' AND b.name='clk' "
+        "RETURN DISTINCT b.path"
+    ))
+    assert set(res.scalars()) == {"fifo.clk"}
 
 
-def test_graph_query_output_port_driven_by_assign_reading_param(multi_bundle):
-    """gq: every output port driven by a continuous_assign that reads a parameter."""
+def test_cypher_output_port_driven_by_assign_reading_param(multi_bundle):
+    """Cypher: every output port driven by a continuous_assign that reads a param.
+
+    Migrated from the retired graph_query DSL (S7). The `direction:"in"` reads
+    hop flips the arrow: param <-[:reads]- continuous_assign -[:drives]-> port.
+    """
     _tree, _comp, graph = multi_bundle
-    from research.ast_experiment.src.semantic import graph_query
+    from research.ast_experiment.src.semantic import cypher_query
 
-    out = graph_query(graph, {
-        "match": {"role": "param"},
-        "follow": [
-            {"edge": "reads", "direction": "in",
-             "filter": {"role": "continuous_assign"}},
-            {"edge": "drives", "direction": "out",
-             "filter": {"role": "port"}},
-        ],
-        "return": "path",
-    })
-    assert set(out) == {"fifo.dout", "fifo.full"}
+    res = cypher_query(graph, (
+        "MATCH (a:N)<-[:reads]-(b:N)-[:drives]->(c:N) "
+        "WHERE a.role='param' AND b.role='continuous_assign' AND c.role='port' "
+        "RETURN DISTINCT c.path"
+    ))
+    assert set(res.scalars()) == {"fifo.dout", "fifo.full"}
 
 
-def test_graph_query_connects_edge_payload_filter(multi_bundle):
-    """gq: parent-net side of a specific (instance, port) connection via edge-payload filter."""
+def test_cypher_connects_edge_parent_net_of_child_port(multi_bundle):
+    """Cypher: parent-net side of the connection into the child port fifo.clk.
+
+    Migrated from the retired graph_query DSL (S7). The DSL filtered the
+    `connects` edge payload (instance=top.u_fifo, port=clk); the kuzu
+    projection drops edge payloads, so we anchor on the child port `fifo.clk`
+    instead — every connects edge into it resolves to the same parent net,
+    yielding the SAME node set the DSL test asserted.
+    """
     _tree, _comp, graph = multi_bundle
-    from research.ast_experiment.src.semantic import graph_query
+    from research.ast_experiment.src.semantic import cypher_query
 
-    out = graph_query(graph, {
-        "match": {"queryable": True},
-        "follow": [{"edge": "connects", "direction": "in",
-                    "filter": {"payload_edge": {"instance": "top.u_fifo",
-                                                "port": "clk"}}}],
-        "return": "path",
-    })
-    assert out == ["top.clk"]
+    res = cypher_query(graph, (
+        "MATCH (a:N)-[:connects]->(b:N) "
+        "WHERE b.path='fifo.clk' "
+        "RETURN DISTINCT a.path"
+    ))
+    assert set(res.scalars()) == {"top.clk"}
 
 
 def test_s12_generate_for_elaborated_instances(multi_bundle):

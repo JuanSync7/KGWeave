@@ -21,6 +21,7 @@ from typing import Any
 
 from .common.graph import _add_edge, _has_edge, _mark
 from .common.resolve import _all_module_scopes
+from .common.walk import _descendants
 from .common.tokens import (
     _CLASS_METHOD_QUALIFIER_KEYWORDS,
     _CLASS_PROPERTY_QUALIFIER_KEYWORDS,
@@ -2412,8 +2413,30 @@ def promote(
                               role="interface_port",
                               name=pname, path=ppath, attributes=attrs)
                     else:
+                        # Lift the direction keyword (input/output/inout/ref)
+                        # from the port header onto the semantic node so the
+                        # query surface can filter ports by direction without
+                        # walking structural tokens. The keyword lives inside
+                        # the header child (VariablePortHeader / NetPortHeader);
+                        # these TokenKinds appear nowhere else under a port, so
+                        # a bounded descendant scan is unambiguous. A port
+                        # subtree cannot nest another port, so the FIRST match
+                        # is always this port's own header keyword — break-on-
+                        # first is correct (no second direction keyword can
+                        # appear below). Ports that inherit direction from a
+                        # prior list entry carry no keyword and are left
+                        # without the attribute.
+                        pdir = ""
+                        for sub in _descendants(node):
+                            if _is_token(sub) and _token_kind_name(sub) in {
+                                    "InputKeyword", "OutputKeyword",
+                                    "InOutKeyword", "RefKeyword"}:
+                                pdir = sub.valueText
+                                break
+                        pattrs = {"direction": pdir} if pdir else {}
                         _mark(nodes_list[node_offset + idx],
-                              role="port", name=pname, path=ppath)
+                              role="port", name=pname, path=ppath,
+                              attributes=pattrs)
                     _add_edge(graph, mod_gid, gid, "has_port")
                     name_index[ppath] = gid
                     port_names_by_module.setdefault(mname, set()).add(pname)

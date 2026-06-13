@@ -20,6 +20,7 @@ import pyslang
 
 from .lift import lift
 from .semantic import promote
+from .semantic.postpass import resolve_of_type, resolve_assertion_checks
 
 
 def build_kg(sv_paths: list[Path]) -> tuple[dict[str, Any], list[Any], Any]:
@@ -72,5 +73,11 @@ def build_kg(sv_paths: list[Path]) -> tuple[dict[str, Any], list[Any], Any]:
     # cross-file ``of_module`` targets because pass1 already promoted them.
     for tree, off in zip(trees, offsets):
         promote(graph, tree, compilation, node_offset=off, phase="pass2")
+
+    # Phase 4: global post-passes that need the fully populated name_index
+    # (all files, all passes done) — e.g. signal → type (`of_type`) resolution
+    # and assertion → checked-signal (`checks`) lifting.
+    resolve_of_type(graph)
+    resolve_assertion_checks(graph)
 
     return graph, trees, compilation

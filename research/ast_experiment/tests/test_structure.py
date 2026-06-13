@@ -37,11 +37,16 @@ _PUBLIC_API = [
     "width_of",
     "default_value_of",
     "forward_cone",
-    "graph_query",
     "find_by_name",
     "neighbors",
     "modports_of",
     "package_of",
+    "saved_query",
+    "SavedQueryError",
+    "cypher_query",
+    "CypherResult",
+    "CypherError",
+    "SemanticNode",
 ]
 
 
@@ -355,6 +360,7 @@ def test_scripts_directory_only_has_entry_points():
         "__init__.py",
         "score.py",
         "build_bucket1_checklist.py",
+        "gen_cypher_card.py",
         "render_graph.py",
         "render_kgweave.py",
         "inventory.py",

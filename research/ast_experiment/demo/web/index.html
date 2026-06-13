@@ -52,40 +52,36 @@
             <legend>Layout</legend>
             <button id="relayout" type="button">re-layout</button>
             <button id="reset-view" type="button" title="Clear selection, re-fit, restore defaults">reset view</button>
-            <select id="layout-select">
-              <option value="cose" selected>cose (force-directed)</option>
-              <option value="concentric">concentric</option>
-              <option value="grid">grid</option>
-              <option value="breadthfirst">breadthfirst</option>
-              <option value="circle">circle</option>
-            </select>
           </fieldset>
           <fieldset id="freeform-fieldset">
             <legend>Free-form query</legend>
-            <input
-              id="query-freeform"
-              type="text"
-              placeholder='role=module | from=&lt;id&gt; via=of_module direction=rev depth=2'
-              aria-label="Free-form query"
-            />
-            <div class="freeform-buttons">
-              <button id="query-run" type="button" title="Run freeform query">Run</button>
-              <button id="query-clear" type="button" title="Clear results">Clear</button>
+            <details id="freeform-details">
+              <summary>advanced query (DSL)</summary>
+              <input
+                id="query-freeform"
+                type="text"
+                placeholder='role=module | from=&lt;id&gt; via=of_module direction=rev depth=2'
+                aria-label="Free-form query"
+              />
+              <div class="freeform-buttons">
+                <button id="query-run" type="button" title="Run freeform query">Run</button>
+                <button id="query-from-selected" type="button" title="Fill from=&lt;selected node id&gt;" disabled>Use selected node</button>
+              </div>
+            </details>
+            <div class="freeform-buttons" style="margin-top: 0.4rem;">
+              <button id="query-clear" type="button" title="Clear results">Clear results</button>
             </div>
           </fieldset>
           <fieldset id="legend-fieldset">
-            <legend>Legend</legend>
-            <details>
-              <summary>edge types</summary>
-              <div class="legend-grid">
-                <span><span class="swatch swatch-edge" data-edge-swatch="drives"></span> drives</span>
-                <span><span class="swatch swatch-edge" data-edge-swatch="reads"></span> reads</span>
-                <span><span class="swatch swatch-edge" data-edge-swatch="sensitive_to"></span> sensitive_to</span>
-                <span><span class="swatch swatch-edge" data-edge-swatch="instantiates"></span> instantiates / of_module</span>
-                <span><span class="swatch swatch-edge" data-edge-swatch="connects"></span> connects</span>
-                <span><span class="swatch swatch-edge" data-edge-swatch="has_"></span> has_port / has_net / has_param</span>
-              </div>
-            </details>
+            <legend>Legend — edge types</legend>
+            <div class="legend-grid">
+              <span><span class="swatch swatch-edge" data-edge-swatch="drives"></span> drives</span>
+              <span><span class="swatch swatch-edge" data-edge-swatch="reads"></span> reads</span>
+              <span><span class="swatch swatch-edge" data-edge-swatch="sensitive_to"></span> sensitive_to</span>
+              <span><span class="swatch swatch-edge" data-edge-swatch="instantiates"></span> instantiates / of_module</span>
+              <span><span class="swatch swatch-edge" data-edge-swatch="connects"></span> connects</span>
+              <span><span class="swatch swatch-edge" data-edge-swatch="has_"></span> has_port / has_net / has_param</span>
+            </div>
           </fieldset>
         </div>
         <div id="cy"></div>

@@ -87,8 +87,11 @@ function ensureCard() {
   const overlay = document.createElement("div");
   overlay.className = "tour-overlay";
   overlay.id = "tour-overlay";
+  // Only dismiss on backdrop click when the backdrop is actually present
+  // (cookbook mode). Tour mode is click-transparent, so this listener
+  // never fires from the user clicking through to the graph.
   overlay.addEventListener("click", (ev) => {
-    if (ev.target === overlay) endTour();
+    if (ev.target === overlay && overlay.classList.contains("cookbook-mode")) endTour();
   });
 
   const card = document.createElement("div");
@@ -233,6 +236,7 @@ export function prevStep() {
 export function endTour() {
   if (!tourState.overlayEl) return;
   tourState.overlayEl.classList.remove("visible");
+  tourState.overlayEl.classList.remove("cookbook-mode");
   tourState.active = false;
 }
 
@@ -252,20 +256,25 @@ export function currentStep() {
 // the same overlay machinery.
 // -------------------------------------------------------------------------
 
-export function openCookbook(queries) {
+export function openCookbook(queries, host) {
   ensureCard();
+  if (host) tourState.host = host;
   const card = tourState.rootEl;
   card.querySelector(".tour-title").textContent = "Query cookbook";
   const body = card.querySelector(".tour-body");
   body.textContent = "";
   const intro = document.createElement("p");
   intro.textContent =
-    "Run any of these from the canned-query dropdown, or paste the DSL into the free-form box.";
+    "Click any query below to run it. These are the same canned queries available as chips in the top toolbar.";
   body.appendChild(intro);
   const list = document.createElement("ul");
   list.className = "tour-cookbook";
   for (const q of (queries && queries.queries) || []) {
     const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cookbook-run";
+    btn.title = `Run ${q.id}`;
     const code = document.createElement("code");
     code.textContent = q.id;
     const label = document.createElement("strong");
@@ -273,23 +282,30 @@ export function openCookbook(queries) {
     const blurb = document.createElement("span");
     blurb.textContent = q.blurb || "";
     blurb.className = "muted";
-    li.append(code, document.createTextNode(" — "), label, document.createElement("br"), blurb);
+    btn.append(code, document.createTextNode(" — "), label,
+               document.createElement("br"), blurb);
+    btn.addEventListener("click", () => {
+      endTour();
+      const h = tourState.host;
+      if (h && h.runCannedQuery) {
+        try { h.runCannedQuery(q.id); } catch (_) { /* */ }
+      }
+    });
+    li.appendChild(btn);
     list.appendChild(li);
   }
   body.appendChild(list);
-  const dsl = document.createElement("p");
-  dsl.innerHTML =
-    "<strong>Free-form DSL</strong>: <code>role=&lt;value&gt;</code>, " +
-    "<code>kind=&lt;SyntaxKind&gt;</code>, <code>name=&lt;ident&gt;</code>, " +
-    "<code>file=&lt;id&gt;</code>, <code>from=&lt;nodeId&gt; via=&lt;type&gt; " +
-    "direction=fwd|rev depth=&lt;n&gt;</code>. Terms are AND-combined and " +
-    "whitespace-separated.";
-  body.appendChild(dsl);
+  const note = document.createElement("p");
+  note.className = "muted";
+  note.innerHTML =
+    "To write your own query, expand <em>advanced query (DSL)</em> in the right-hand panel.";
+  body.appendChild(note);
   card.querySelector(".tour-meta").textContent = "Cookbook — close to return.";
   card.querySelector(".tour-prev").disabled = true;
   const nextBtn = card.querySelector(".tour-next");
   nextBtn.textContent = "Close";
   nextBtn.onclick = () => { endTour(); nextBtn.onclick = null; };
   tourState.overlayEl.classList.add("visible");
+  tourState.overlayEl.classList.add("cookbook-mode");
   tourState.active = false; // not a "real" tour step
 }

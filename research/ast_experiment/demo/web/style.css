@@ -177,6 +177,14 @@ html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: 
   font-family: inherit;
 }
 .freeform-buttons button:hover { background: var(--accent); border-color: var(--accent); }
+.freeform-buttons button:disabled {
+  opacity: 0.45; cursor: not-allowed; background: var(--panel-2); border-color: #2a2f3a;
+}
+#freeform-details > summary {
+  cursor: pointer; font-size: 0.78rem; color: var(--muted);
+  padding: 0.15rem 0; margin-bottom: 0.3rem; user-select: none;
+}
+#freeform-details[open] > summary { color: var(--fg); }
 
 #results {
   overflow: auto;
@@ -219,13 +227,17 @@ html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: 
   50%      { box-shadow: 0 0 0 8px rgba(44, 108, 242, 0); }
 }
 
-/* Tour overlay + card */
+/* Tour overlay + card.
+   The overlay backdrop is click-transparent (pointer-events:none) so the
+   user can interact with the graph/code while the tour card stays visible.
+   The card itself re-enables pointer events. */
 .tour-overlay {
-  position: fixed; inset: 0; background: rgba(8, 10, 14, 0.55);
+  position: fixed; inset: 0; background: transparent;
   display: none; align-items: flex-end; justify-content: center;
-  z-index: 100; padding: 1rem;
+  z-index: 100; padding: 1rem; pointer-events: none;
 }
 .tour-overlay.visible { display: flex; }
+.tour-overlay.cookbook-mode { background: rgba(8, 10, 14, 0.55); pointer-events: auto; }
 .tour-card {
   position: relative;
   width: min(640px, 92vw);
@@ -234,6 +246,7 @@ html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: 
   padding: 1rem 1.2rem 0.8rem;
   box-shadow: 0 8px 24px rgba(0,0,0,0.6);
   margin-bottom: 6vh;
+  pointer-events: auto;
 }
 .tour-card .tour-close {
   position: absolute; top: 6px; right: 8px;
@@ -257,6 +270,12 @@ html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: 
 .tour-cookbook { list-style: none; padding-left: 0; max-height: 50vh; overflow: auto; margin: 0.4rem 0; }
 .tour-cookbook li { padding: 4px 0; border-bottom: 1px dashed #2a2f3a; font-size: 0.82rem; }
 .tour-cookbook code { color: var(--cat-blob); font-size: 0.78rem; }
+.cookbook-run {
+  display: block; width: 100%; text-align: left;
+  background: transparent; color: inherit; border: none;
+  padding: 4px 6px; font: inherit; cursor: pointer; border-radius: 3px;
+}
+.cookbook-run:hover { background: var(--panel-2); }
 
 /* Gallery overlay + grid */
 .gallery-overlay {
