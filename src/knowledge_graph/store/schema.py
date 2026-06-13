@@ -265,6 +265,14 @@ REL_TABLES: tuple[tuple[str, str], ...] = (
     ("HAS_GENVAR",         "CREATE REL TABLE IF NOT EXISTS HAS_GENVAR (FROM Node TO Node)"),
     ("HAS_TIMEUNITS",      "CREATE REL TABLE IF NOT EXISTS HAS_TIMEUNITS (FROM Node TO Node)"),
 
+    # ---- partials wave: global post-pass edges (build phase-4) -------------
+    # ``of_type`` — typed signal (port/net/param) → its user-defined-type node;
+    # ``unresolved`` flags an ``_unresolved.<name>`` sentinel target.
+    # ``checks`` — assertion → a signal it constrains (``name`` is the
+    # resolved identifier).
+    ("OF_TYPE",            "CREATE REL TABLE IF NOT EXISTS OF_TYPE (FROM Node TO Node, unresolved BOOLEAN)"),
+    ("CHECKS",             "CREATE REL TABLE IF NOT EXISTS CHECKS (FROM Node TO Node, name STRING)"),
+
     # ---- v1.2 cross-builder connector edge --------------------------------
     # Generic typed reference from one builder's node to another's. The
     # ``ref_text`` column carries the literal token that matched

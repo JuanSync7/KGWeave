@@ -23,6 +23,7 @@ from typing import Any
 import pyslang
 
 from .lift import _sha256_hex, lift_file_cached
+from .semantic.postpass import resolve_assertion_checks, resolve_of_type
 from .semantic.promote_cache import (
     compute_corpus_fp,
     compute_ruleset_fp,
@@ -126,5 +127,14 @@ def build_kg(sv_paths: list[Path]) -> tuple[dict[str, Any], list[Any], Any]:
             corpus_fp=corpus_fp, ruleset_fp=ruleset_fp,
             tree_node_count=count,
         )
+
+    # Phase 4: global post-promotion sweeps that need the FULLY populated
+    # graph (all files, all passes done). They operate purely on the lifted
+    # graph dict — no pyslang — so cross-file / pass ordering is irrelevant.
+    # ``resolve_of_type`` emits ``of_type`` (signal → user-defined-type node);
+    # ``resolve_assertion_checks`` emits ``checks`` (assertion → checked
+    # signal). See :mod:`.semantic.postpass`.
+    resolve_of_type(graph)
+    resolve_assertion_checks(graph)
 
     return graph, trees, compilation

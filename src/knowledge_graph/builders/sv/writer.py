@@ -108,6 +108,11 @@ def _payload_name_only(e: dict[str, Any]) -> dict[str, Any]:
     return {"name": str(p.get("name", "") or "")}
 
 
+def _payload_of_type(e: dict[str, Any]) -> dict[str, Any]:
+    p = e.get("payload", {}) or {}
+    return {"unresolved": bool(p.get("unresolved", False))}
+
+
 def _payload_references_interface(e: dict[str, Any]) -> dict[str, Any]:
     p = e.get("payload", {}) or {}
     return {"modport": str(p.get("modport", "") or "")}
@@ -251,6 +256,10 @@ EDGE_TABLE_MAP: dict[str, tuple[str, Any]] = {
     "triggers":                 ("TRIGGERS",            None),
     "has_genvar":               ("HAS_GENVAR",          None),
     "has_timeunits":            ("HAS_TIMEUNITS",       None),
+
+    # ---- partials wave: global post-pass edges (build phase-4) -------------
+    "of_type":                  ("OF_TYPE",             _payload_of_type),
+    "checks":                   ("CHECKS",              _payload_name_only),
 }
 
 
