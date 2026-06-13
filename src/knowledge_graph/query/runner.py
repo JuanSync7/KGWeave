@@ -15,6 +15,7 @@ import json
 from typing import Any
 
 from knowledge_graph.query.compiler import NODE_RETURN_FIELDS, compile_intent
+from knowledge_graph.query.errors import classify_cypher_error
 from knowledge_graph.query.intents import (
     AnchorRef,
     FilterIntent,
@@ -194,9 +195,28 @@ def _run_neighborhood(conn, intent: NeighborhoodIntent) -> QueryResult:
     return QueryResult(intent_kind="neighborhood", paths=_drain_paths(res))
 
 
+def _is_node_cell(value: Any) -> bool:
+    """A Kuzu node value comes back as a dict carrying ``_id``/``_label``."""
+    return (
+        isinstance(value, dict)
+        and "_id" in value
+        and value.get("_label") == "Node"
+    )
+
+
+def _hydrate_cell(value: Any) -> Any:
+    """Hydrate a node-valued cell to a :class:`NodeView`; scalars pass through."""
+    if _is_node_cell(value):
+        return _node_dict_to_view(value)
+    return value
+
+
 def _run_raw(conn, intent: RawCypher) -> QueryResult:
     cypher, params = compile_intent(intent)
-    res = conn.execute(cypher, params)
+    try:
+        res = conn.execute(cypher, params)
+    except Exception as exc:  # noqa: BLE0001 — classify, never leak raw
+        raise classify_cypher_error(exc) from exc
     col_names: list[str] = []
     try:
         col_names = list(res.get_column_names())
@@ -204,7 +224,7 @@ def _run_raw(conn, intent: RawCypher) -> QueryResult:
         col_names = []
     rows: list[dict[str, Any]] = []
     while res.has_next():
-        row = res.get_next()
+        row = [_hydrate_cell(v) for v in res.get_next()]
         if col_names and len(col_names) == len(row):
             rows.append(dict(zip(col_names, row)))
         else:

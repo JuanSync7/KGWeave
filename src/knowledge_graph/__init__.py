@@ -65,6 +65,7 @@ from knowledge_graph.connectors.protocol import Connector
 from knowledge_graph.query import (
     AmbiguousAnchor,
     AnchorRef,
+    CypherError,
     EdgeType,
     FilterIntent,
     NeighborhoodIntent,
@@ -72,8 +73,10 @@ from knowledge_graph.query import (
     QueryResult,
     RawCypher,
     ReadOnlyViolation,
+    SavedQueryError,
     TraverseIntent,
     run_intent,
+    saved_query as _saved_query,
 )
 from knowledge_graph.query.results import EdgeView, NodeView, PathView
 from knowledge_graph.schemas import NodeRef, OriginRef, Span
@@ -226,6 +229,20 @@ def cypher(
     return run_intent(store, intent)
 
 
+def saved_query(
+    store: KGStore, name: str, **params: Any
+) -> QueryResult:
+    """Run a registered store-backed saved query.
+
+    Saved queries are named, parameterized analyses that execute natively
+    over the persisted store and return a :class:`QueryResult`. The first
+    entry is ``cone_of_influence`` (backward data-flow reachability).
+
+    An unknown ``name`` raises :class:`SavedQueryError`.
+    """
+    return _saved_query(store, name, **params)
+
+
 def source_at(
     store: KGStore, origin_id: str, start: int, end: int
 ) -> bytes:
@@ -313,6 +330,7 @@ __all__ = [
     "extract",
     "query",
     "cypher",
+    "saved_query",
     "source_at",
     "prune_orphaned_origins",
     "register_connector",
@@ -348,6 +366,8 @@ __all__ = [
     # errors
     "ReadOnlyViolation",
     "AmbiguousAnchor",
+    "CypherError",
+    "SavedQueryError",
     "UnknownBuilder",
     "BuilderConflict",
     "ConnectorRequirementError",

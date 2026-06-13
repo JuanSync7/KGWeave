@@ -8,6 +8,7 @@ below are the stable surface.
 from __future__ import annotations
 
 from knowledge_graph.query.compiler import compile_intent
+from knowledge_graph.query.errors import CypherError, classify_cypher_error
 from knowledge_graph.query.intents import (
     ALL_EDGE_TYPES,
     AnchorRef,
@@ -30,12 +31,18 @@ from knowledge_graph.query.results import (
     QueryResult,
 )
 from knowledge_graph.query.runner import AmbiguousAnchor, run_intent
+from knowledge_graph.query.saved import (
+    SAVED_QUERIES,
+    SavedQueryError,
+    saved_query,
+)
 
 __all__ = [
     "ALL_EDGE_TYPES",
     "AmbiguousAnchor",
     "AnchorRef",
     "BANNED_KEYWORDS",
+    "CypherError",
     "EdgeType",
     "EdgeView",
     "FilterIntent",
@@ -46,8 +53,12 @@ __all__ = [
     "QueryResult",
     "RawCypher",
     "ReadOnlyViolation",
+    "SAVED_QUERIES",
+    "SavedQueryError",
     "TraverseIntent",
     "assert_read_only",
+    "classify_cypher_error",
     "compile_intent",
     "run_intent",
+    "saved_query",
 ]
