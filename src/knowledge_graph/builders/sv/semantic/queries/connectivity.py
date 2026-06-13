@@ -3,7 +3,20 @@ traversals. Pure typed-edge projections over a promoted graph."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterator
+
+
+def queryable_nodes(graph: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """Yield every node flagged as queryable (``node["queryable"] is True``).
+
+    This is the successor home of the same-named helper that previously lived
+    in the now-deleted ``graph_query`` module. It is NOT the pattern-dict DSL
+    (that was retired in S7); it is a simple filter generator used by
+    higher-level query helpers.
+    """
+    for n in graph["nodes"]:
+        if n.get("queryable"):
+            yield n
 
 
 def neighbors(

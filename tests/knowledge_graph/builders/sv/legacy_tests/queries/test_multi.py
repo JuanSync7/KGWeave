@@ -216,53 +216,6 @@ def test_tool_forward_cone(multi_bundle):
     assert "fifo.dout" in paths
 
 
-def test_graph_query_always_ff_clocked_by_port_clk(multi_bundle):
-    """gq: every always_ff sensitive to a port named 'clk' (2-hop typed walk)."""
-    _tree, _comp, graph = multi_bundle
-    from knowledge_graph.builders.sv.semantic import graph_query
-
-    out = graph_query(graph, {
-        "match": {"role": "always_ff"},
-        "follow": [{"edge": "sensitive_to", "direction": "out",
-                    "filter": {"role": "port", "name": "clk"}}],
-        "return": "path",
-    })
-    assert out == ["fifo.clk"]
-
-
-def test_graph_query_output_port_driven_by_assign_reading_param(multi_bundle):
-    """gq: every output port driven by a continuous_assign that reads a parameter."""
-    _tree, _comp, graph = multi_bundle
-    from knowledge_graph.builders.sv.semantic import graph_query
-
-    out = graph_query(graph, {
-        "match": {"role": "param"},
-        "follow": [
-            {"edge": "reads", "direction": "in",
-             "filter": {"role": "continuous_assign"}},
-            {"edge": "drives", "direction": "out",
-             "filter": {"role": "port"}},
-        ],
-        "return": "path",
-    })
-    assert set(out) == {"fifo.dout", "fifo.full"}
-
-
-def test_graph_query_connects_edge_payload_filter(multi_bundle):
-    """gq: parent-net side of a specific (instance, port) connection via edge-payload filter."""
-    _tree, _comp, graph = multi_bundle
-    from knowledge_graph.builders.sv.semantic import graph_query
-
-    out = graph_query(graph, {
-        "match": {"queryable": True},
-        "follow": [{"edge": "connects", "direction": "in",
-                    "filter": {"payload_edge": {"instance": "top.u_fifo",
-                                                "port": "clk"}}}],
-        "return": "path",
-    })
-    assert out == ["top.clk"]
-
-
 def test_s12_generate_for_elaborated_instances(multi_bundle):
     """S12: LoopGenerateSyntax + elaborated GenerateBlockSyntax instances.
 

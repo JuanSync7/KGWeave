@@ -11,7 +11,9 @@ Re-exports (preserved from the old monolithic `scripts/semantic.py`)::
     find_drivers, cone_of_influence, forward_cone,
     port_connections, instances_of, param_overrides,
     sensitivity_of, width_of, default_value_of,
-    modports_of, package_of, graph_query
+    modports_of, package_of
+
+Note: ``graph_query`` (pattern-dict DSL) was retired in S7.
 """
 
 from __future__ import annotations
@@ -33,7 +35,6 @@ from .queries import (
     sensitivity_of,
     width_of,
     default_value_of,
-    graph_query,
     queryable_nodes,
 )
 
@@ -45,5 +46,5 @@ __all__ = [
     "modports_of", "package_of",
     "sensitivity_of",
     "width_of", "default_value_of",
-    "graph_query", "queryable_nodes",
+    "queryable_nodes",
 ]

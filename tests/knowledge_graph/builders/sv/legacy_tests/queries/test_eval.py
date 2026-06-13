@@ -64,9 +64,7 @@ class TestGroupA:
         _t, _c, g = gbundle
         from knowledge_graph.builders.sv.semantic import find_by_name, neighbors, width_of  # noqa: F401
         # Direction lives on VariablePortHeaderSyntax's first token.
-        # We can answer this with graph_query via type-walks; here we use the
-        # typed schema by inspecting the structural backbone of each port.
-        from knowledge_graph.builders.sv.semantic import graph_query  # noqa: F401
+        # We inspect the structural backbone of each port (graph_query DSL retired in S7).
         outputs: set[str] = set()
         by_id = {n["id"]: n for n in g["nodes"]}
         fifo = find_by_name(g, "fifo")
