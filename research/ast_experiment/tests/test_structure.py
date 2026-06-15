@@ -365,6 +365,8 @@ def test_scripts_directory_only_has_entry_points():
         "render_kgweave.py",
         "inventory.py",
         "export_demo_graph.py",
+        "export_demo_graph_kuzu.py",
+        "_demo_common.py",
         "validate_demo_html.py",
     }
     actual = {
